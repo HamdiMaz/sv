@@ -17,6 +17,13 @@ class AddSkillResult:
 
 
 @dataclass(frozen=True)
+class AddAllSkillsResult:
+    """Summary of adding every source skill to a Pi project."""
+
+    results: list[AddSkillResult]
+
+
+@dataclass(frozen=True)
 class SyncResult:
     """Summary of local project skills considered during sync."""
 
@@ -50,6 +57,17 @@ def add_project_skill(
 
     shutil.copytree(source_skill, target)
     return AddSkillResult(skill=skill_name, target=target, status="added")
+
+
+def add_all_project_skills(
+    source_repo: Path, project_skills_dir: Path
+) -> AddAllSkillsResult:
+    source_root = source_repo / "skills"
+    results = [
+        add_project_skill(skill_name, source_repo, project_skills_dir)
+        for skill_name in sorted(_source_skill_names(source_root))
+    ]
+    return AddAllSkillsResult(results=results)
 
 
 def sync_project_skills(source_repo: Path, project_skills_dir: Path) -> SyncResult:

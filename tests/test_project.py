@@ -5,7 +5,7 @@ import pytest
 
 from sv.agents import PiAdapter
 from sv.errors import SvError
-from sv.project import add_project_skill, sync_project_skills
+from sv.project import add_all_project_skills, add_project_skill, sync_project_skills
 
 
 def test_pi_adapter_uses_project_pi_skills_dir(tmp_path: Path):
@@ -64,6 +64,28 @@ def test_add_project_skill_missing_source_skill_raises_error(tmp_path: Path):
         add_project_skill(
             "missing", tmp_path / "source", tmp_path / "project" / ".pi" / "skills"
         )
+
+
+def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
+    source_repo = tmp_path / "source"
+    for skill in ["beta", "alpha"]:
+        skill_dir = source_repo / "skills" / skill
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "notes.md").write_text(f"{skill} skill\n")
+
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    existing = project_skills / "beta"
+    existing.mkdir(parents=True)
+    (existing / "notes.md").write_text("local beta\n")
+
+    result = add_all_project_skills(source_repo, project_skills)
+
+    assert [(item.skill, item.status) for item in result.results] == [
+        ("alpha", "added"),
+        ("beta", "exists"),
+    ]
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha skill\n"
+    assert (project_skills / "beta" / "notes.md").read_text() == "local beta\n"
 
 
 @pytest.mark.parametrize(

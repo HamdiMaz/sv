@@ -65,6 +65,52 @@ def test_list_and_add_from_local_git_source(tmp_path: Path, capsys):
     assert "already exists" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("add_args", [["add", "all"], ["add", "--all"]])
+def test_add_all_adds_every_source_skill(tmp_path: Path, capsys, add_args):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(add_args), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Added Pi skill 'alpha'" in output
+    assert "Added Pi skill 'beta'" in output
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v1\n"
+    assert (
+        project / ".pi" / "skills" / "beta" / "notes.md"
+    ).read_text() == "beta v1\n"
+
+
+def test_add_all_reports_existing_skills_without_overwrite(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert handle(parse(["add", "alpha"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "--all"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Pi skill 'alpha' already exists" in output
+    assert "Added Pi skill 'beta'" in output
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v1\n"
+    assert (
+        project / ".pi" / "skills" / "beta" / "notes.md"
+    ).read_text() == "beta v1\n"
+
+
 def test_add_missing_skill_reports_error(tmp_path: Path, capsys):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
@@ -77,6 +123,36 @@ def test_add_missing_skill_reports_error(tmp_path: Path, capsys):
 
     assert exit_code == 1
     assert "Skill 'missing' was not found" in capsys.readouterr().err
+
+
+def test_add_without_skill_reports_error(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = handle(parse(["add"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    assert "Specify a skill name or use --all" in capsys.readouterr().err
+
+
+def test_add_skill_and_all_reports_error_without_touching_source(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(
+        parse(["add", "alpha", "--all"]),
+        cwd=project,
+        home=home,
+        git_runner=git_runner,
+    )
+
+    assert exit_code == 1
+    assert "Use either a skill name or --all" in capsys.readouterr().err
 
 
 def test_sync_updates_matching_skills_and_leaves_unknown(tmp_path: Path, capsys):

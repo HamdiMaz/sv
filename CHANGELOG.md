@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `sv add all` and `sv add --all` to install every skill from the configured source repo.
+
 ## v0.1.0
 
 - Initial release of `sv`, a project-local AI agent skill manager for Pi.

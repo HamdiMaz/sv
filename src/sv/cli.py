@@ -9,7 +9,13 @@ import sys
 from sv.agents import PiAdapter
 from sv.config import SvPaths, load_config, save_repo
 from sv.errors import SvError
-from sv.project import add_project_skill, normalize_skill_name, sync_project_skills
+from sv.project import (
+    AddSkillResult,
+    add_all_project_skills,
+    add_project_skill,
+    normalize_skill_name,
+    sync_project_skills,
+)
 from sv.source import default_runner, ensure_source_repo, list_source_skills
 
 
@@ -24,9 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     add_parser = subparsers.add_parser(
-        "add", help="Add a source skill to this Pi project."
+        "add", help="Add source skills to this Pi project."
     )
-    add_parser.add_argument("skill")
+    add_parser.add_argument("skill", nargs="?")
+    add_parser.add_argument(
+        "--all", action="store_true", help="Add every skill from the source repo."
+    )
 
     subparsers.add_parser(
         "sync", help="Update local Pi skills that exist in the source repo."
@@ -76,6 +85,14 @@ def handle(
             )
 
         if args.command == "add":
+            if args.all and args.skill not in {None, "all"}:
+                raise SvError("Use either a skill name or --all, not both.")
+            if args.all or args.skill == "all":
+                _ensure_configured_source(paths, git_runner)
+                return _handle_add_all(cwd=cwd, paths=paths, adapter=adapter)
+            if args.skill is None:
+                raise SvError("Specify a skill name or use --all.")
+
             skill_name = normalize_skill_name(args.skill)
             _ensure_configured_source(paths, git_runner)
             return _handle_add(skill_name, cwd=cwd, paths=paths, adapter=adapter)
@@ -151,12 +168,27 @@ def _handle_list(paths: SvPaths) -> int:
 
 def _handle_add(skill: str, cwd: Path, paths: SvPaths, adapter: PiAdapter) -> int:
     result = add_project_skill(skill, paths.source_repo, adapter.project_skill_dir(cwd))
-    if result.status == "exists":
-        print(f"Pi skill '{result.skill}' already exists at {result.target}")
+    _print_add_result(result)
+    return 0
+
+
+def _handle_add_all(cwd: Path, paths: SvPaths, adapter: PiAdapter) -> int:
+    result = add_all_project_skills(paths.source_repo, adapter.project_skill_dir(cwd))
+    if not result.results:
+        print("No skills found in source repo.")
         return 0
 
-    print(f"Added Pi skill '{result.skill}' to {result.target}")
+    for skill_result in result.results:
+        _print_add_result(skill_result)
     return 0
+
+
+def _print_add_result(result: AddSkillResult) -> None:
+    if result.status == "exists":
+        print(f"Pi skill '{result.skill}' already exists at {result.target}")
+        return
+
+    print(f"Added Pi skill '{result.skill}' to {result.target}")
 
 
 def _handle_sync(cwd: Path, paths: SvPaths, adapter: PiAdapter) -> int:

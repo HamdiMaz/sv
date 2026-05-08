@@ -34,7 +34,14 @@ Add a skill to the current project:
 sv add github-release
 ```
 
-If the skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged.
+Add every skill from the configured source repo:
+
+```bash
+sv add all
+sv add --all
+```
+
+If a skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged.
 
 Update project skills whose names exist in the source repo:
 
