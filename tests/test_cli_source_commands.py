@@ -49,7 +49,7 @@ def test_list_and_add_from_local_git_source(tmp_path: Path, capsys):
     exit_code = handle(parse(["list"]), cwd=project, home=home)
 
     assert exit_code == 0
-    assert capsys.readouterr().out.splitlines() == ["alpha", "beta"]
+    assert capsys.readouterr().out.splitlines() == ["1- alpha", "2- beta"]
 
     exit_code = handle(parse(["add", "alpha"]), cwd=project, home=home)
 
@@ -83,9 +83,53 @@ def test_add_all_adds_every_source_skill(tmp_path: Path, capsys, add_args):
     assert (
         project / ".pi" / "skills" / "alpha" / "notes.md"
     ).read_text() == "alpha v1\n"
-    assert (
-        project / ".pi" / "skills" / "beta" / "notes.md"
-    ).read_text() == "beta v1\n"
+    assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
+
+
+def test_add_interactive_adds_selected_skills(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+    selector_calls = []
+
+    def skill_selector(skills):
+        selector_calls.append(skills)
+        return ["beta"]
+
+    exit_code = handle(
+        parse(["add", "-l"]),
+        cwd=project,
+        home=home,
+        skill_selector=skill_selector,
+    )
+
+    assert exit_code == 0
+    assert selector_calls == [["alpha", "beta"]]
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
+    assert "Added Pi skill 'beta'" in capsys.readouterr().out
+
+
+def test_add_interactive_reports_no_selection(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(
+        parse(["add", "-l"]),
+        cwd=project,
+        home=home,
+        skill_selector=lambda skills: [],
+    )
+
+    assert exit_code == 0
+    assert "No skills selected." in capsys.readouterr().out
 
 
 def test_add_all_reports_existing_skills_without_overwrite(tmp_path: Path, capsys):
@@ -106,9 +150,7 @@ def test_add_all_reports_existing_skills_without_overwrite(tmp_path: Path, capsy
     assert (
         project / ".pi" / "skills" / "alpha" / "notes.md"
     ).read_text() == "alpha v1\n"
-    assert (
-        project / ".pi" / "skills" / "beta" / "notes.md"
-    ).read_text() == "beta v1\n"
+    assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
 
 
 def test_add_missing_skill_reports_error(tmp_path: Path, capsys):
@@ -136,7 +178,9 @@ def test_add_without_skill_reports_error(tmp_path: Path, capsys):
     assert "Specify a skill name or use --all" in capsys.readouterr().err
 
 
-def test_add_skill_and_all_reports_error_without_touching_source(tmp_path: Path, capsys):
+def test_add_skill_and_all_reports_error_without_touching_source(
+    tmp_path: Path, capsys
+):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()

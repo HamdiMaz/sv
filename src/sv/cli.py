@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 import subprocess
 import sys
@@ -11,12 +11,18 @@ from sv.config import SvPaths, load_config, save_repo
 from sv.errors import SvError
 from sv.project import (
     AddSkillResult,
+    RemoveSkillResult,
     add_all_project_skills,
     add_project_skill,
+    list_project_skills,
     normalize_skill_name,
+    remove_project_skill,
     sync_project_skills,
 )
+from sv.selector import select_skills
 from sv.source import default_runner, ensure_source_repo, list_source_skills
+
+SkillSelector = Callable[[Sequence[str]], list[str]]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +41,25 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("skill", nargs="?")
     add_parser.add_argument(
         "--all", action="store_true", help="Add every skill from the source repo."
+    )
+    add_parser.add_argument(
+        "-l",
+        "--list",
+        dest="interactive",
+        action="store_true",
+        help="Choose skills from an interactive list.",
+    )
+
+    remove_parser = subparsers.add_parser(
+        "remove", help="Remove Pi skills from this project."
+    )
+    remove_parser.add_argument("skill", nargs="?")
+    remove_parser.add_argument(
+        "-l",
+        "--list",
+        dest="interactive",
+        action="store_true",
+        help="Choose project skills from an interactive list.",
     )
 
     subparsers.add_parser(
@@ -71,6 +96,7 @@ def handle(
     home: Path,
     git_runner=default_runner,
     process_runner=default_process_runner,
+    skill_selector: SkillSelector = select_skills,
 ) -> int:
     paths = SvPaths.from_home(home)
     adapter = PiAdapter()
@@ -85,6 +111,17 @@ def handle(
             )
 
         if args.command == "add":
+            if args.interactive:
+                if args.all or args.skill is not None:
+                    raise SvError("Use -l by itself, or provide a skill name/--all.")
+                _ensure_configured_source(paths, git_runner, update=False)
+                return _handle_add_interactive(
+                    cwd=cwd,
+                    paths=paths,
+                    adapter=adapter,
+                    skill_selector=skill_selector,
+                )
+
             if args.all and args.skill not in {None, "all"}:
                 raise SvError("Use either a skill name or --all, not both.")
             if args.all or args.skill == "all":
@@ -96,6 +133,20 @@ def handle(
             skill_name = normalize_skill_name(args.skill)
             _ensure_configured_source(paths, git_runner)
             return _handle_add(skill_name, cwd=cwd, paths=paths, adapter=adapter)
+
+        if args.command == "remove":
+            if args.interactive:
+                if args.skill is not None:
+                    raise SvError("Use -l by itself, or provide a skill name.")
+                return _handle_remove_interactive(
+                    cwd=cwd, adapter=adapter, skill_selector=skill_selector
+                )
+
+            if args.skill is None:
+                raise SvError("Specify a skill name or use -l.")
+
+            skill_name = normalize_skill_name(args.skill)
+            return _handle_remove(skill_name, cwd=cwd, adapter=adapter)
 
         _ensure_configured_source(paths, git_runner)
 
@@ -117,10 +168,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     return handle(args, cwd=Path.cwd(), home=Path.home())
 
 
-def _ensure_configured_source(paths: SvPaths, git_runner) -> None:
+def _ensure_configured_source(
+    paths: SvPaths, git_runner, *, update: bool = True
+) -> None:
     """Clone or update the configured skill source before source-backed commands."""
     config = load_config(paths)
-    ensure_source_repo(config.repo, paths.source_repo, runner=git_runner)
+    ensure_source_repo(config.repo, paths.source_repo, runner=git_runner, update=update)
 
 
 def _handle_config(
@@ -161,8 +214,8 @@ def _handle_list(paths: SvPaths) -> int:
         print("No skills found in source repo.")
         return 0
 
-    for skill in skills:
-        print(skill)
+    for index, skill in enumerate(skills, start=1):
+        print(f"{index}- {skill}")
     return 0
 
 
@@ -183,12 +236,63 @@ def _handle_add_all(cwd: Path, paths: SvPaths, adapter: PiAdapter) -> int:
     return 0
 
 
+def _handle_add_interactive(
+    cwd: Path, paths: SvPaths, adapter: PiAdapter, skill_selector: SkillSelector
+) -> int:
+    skills = list_source_skills(paths.source_repo)
+    if not skills:
+        print("No skills found in source repo.")
+        return 0
+
+    selected_skills = skill_selector(skills)
+    if not selected_skills:
+        print("No skills selected.")
+        return 0
+
+    for skill in selected_skills:
+        result = add_project_skill(
+            skill, paths.source_repo, adapter.project_skill_dir(cwd)
+        )
+        _print_add_result(result)
+    return 0
+
+
 def _print_add_result(result: AddSkillResult) -> None:
     if result.status == "exists":
         print(f"Pi skill '{result.skill}' already exists at {result.target}")
         return
 
     print(f"Added Pi skill '{result.skill}' to {result.target}")
+
+
+def _handle_remove(skill: str, cwd: Path, adapter: PiAdapter) -> int:
+    result = remove_project_skill(skill, adapter.project_skill_dir(cwd))
+    _print_remove_result(result)
+    return 0
+
+
+def _handle_remove_interactive(
+    cwd: Path, adapter: PiAdapter, skill_selector: SkillSelector
+) -> int:
+    project_skills_dir = adapter.project_skill_dir(cwd)
+    skills = list_project_skills(project_skills_dir)
+    if not skills:
+        print("No Pi skills found to remove.")
+        return 0
+
+    selected_skills = skill_selector(skills)
+    if not selected_skills:
+        print("No skills selected.")
+        return 0
+
+    for skill in selected_skills:
+        result = remove_project_skill(skill, project_skills_dir)
+        _print_remove_result(result)
+    return 0
+
+
+def _print_remove_result(result: RemoveSkillResult) -> None:
+    print(f"Removed Pi skill '{result.skill}' from {result.target}")
 
 
 def _handle_sync(cwd: Path, paths: SvPaths, adapter: PiAdapter) -> int:

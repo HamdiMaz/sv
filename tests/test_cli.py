@@ -90,6 +90,22 @@ def test_run_reports_missing_pi_binary(tmp_path: Path, capsys):
     assert "Unable to run 'pi'" in capsys.readouterr().err
 
 
+def test_add_interactive_with_skill_does_not_touch_source_repo(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(
+        parse(["add", "alpha", "-l"]), cwd=project, home=home, git_runner=git_runner
+    )
+
+    assert exit_code == 1
+    assert "Use -l by itself" in capsys.readouterr().err
+
+
 def test_add_invalid_skill_name_does_not_touch_source_repo(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -104,3 +120,87 @@ def test_add_invalid_skill_name_does_not_touch_source_repo(tmp_path: Path, capsy
 
     assert exit_code == 1
     assert "Invalid skill name" in capsys.readouterr().err
+
+
+def test_remove_interactive_removes_selected_project_skills_without_source_repo(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    (project_skills / "alpha").mkdir(parents=True)
+    (project_skills / "alpha" / "notes.md").write_text("alpha\n")
+    (project_skills / "beta").mkdir()
+    (project_skills / "beta" / "notes.md").write_text("beta\n")
+    selector_calls = []
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    def skill_selector(skills):
+        selector_calls.append(skills)
+        return ["beta"]
+
+    exit_code = handle(
+        parse(["remove", "-l"]),
+        cwd=project,
+        home=home,
+        git_runner=git_runner,
+        skill_selector=skill_selector,
+    )
+
+    assert exit_code == 0
+    assert selector_calls == [["alpha", "beta"]]
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha\n"
+    assert not (project_skills / "beta").exists()
+    assert "Removed Pi skill 'beta'" in capsys.readouterr().out
+
+
+def test_remove_interactive_reports_no_project_skills(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = handle(parse(["remove", "-l"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert "No Pi skills found to remove." in capsys.readouterr().out
+
+
+def test_remove_skill_removes_project_skill_without_source_repo(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    skill = project / ".pi" / "skills" / "alpha"
+    skill.mkdir(parents=True)
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(
+        parse(["remove", "alpha"]), cwd=project, home=home, git_runner=git_runner
+    )
+
+    assert exit_code == 0
+    assert not skill.exists()
+    assert "Removed Pi skill 'alpha'" in capsys.readouterr().out
+
+
+def test_remove_interactive_with_skill_does_not_touch_source_repo(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(
+        parse(["remove", "alpha", "-l"]),
+        cwd=project,
+        home=home,
+        git_runner=git_runner,
+    )
+
+    assert exit_code == 1
+    assert "Use -l by itself" in capsys.readouterr().err

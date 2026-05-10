@@ -5,7 +5,13 @@ import pytest
 
 from sv.agents import PiAdapter
 from sv.errors import SvError
-from sv.project import add_all_project_skills, add_project_skill, sync_project_skills
+from sv.project import (
+    add_all_project_skills,
+    add_project_skill,
+    list_project_skills,
+    remove_project_skill,
+    sync_project_skills,
+)
 
 
 def test_pi_adapter_uses_project_pi_skills_dir(tmp_path: Path):
@@ -96,6 +102,33 @@ def test_add_project_skill_rejects_path_like_skill_names(skill: str, tmp_path: P
         add_project_skill(
             skill, tmp_path / "source", tmp_path / "project" / ".pi" / "skills"
         )
+
+
+def test_list_project_skills_returns_sorted_skill_directories(tmp_path: Path):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    (project_skills / "beta").mkdir(parents=True)
+    (project_skills / "alpha").mkdir()
+    (project_skills / "README.md").write_text("not a skill directory\n")
+
+    assert list_project_skills(project_skills) == ["alpha", "beta"]
+
+
+def test_remove_project_skill_deletes_local_skill_directory(tmp_path: Path):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    skill = project_skills / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "notes.md").write_text("alpha skill\n")
+
+    result = remove_project_skill("alpha", project_skills)
+
+    assert result.skill == "alpha"
+    assert result.target == skill
+    assert not skill.exists()
+
+
+def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
+    with pytest.raises(SvError, match="Pi skill 'missing' was not found"):
+        remove_project_skill("missing", tmp_path / "project" / ".pi" / "skills")
 
 
 def test_sync_project_skills_updates_matching_and_leaves_unknown(tmp_path: Path):

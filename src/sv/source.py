@@ -21,7 +21,11 @@ def default_runner(
 
 
 def ensure_source_repo(
-    repo_url: str, repo_path: Path, runner: Runner = default_runner
+    repo_url: str,
+    repo_path: Path,
+    runner: Runner = default_runner,
+    *,
+    update: bool = True,
 ) -> None:
     _run_git(["--version"], cwd=None, runner=runner, action="Checking Git availability")
 
@@ -43,12 +47,13 @@ def ensure_source_repo(
                 f"Remove {repo_path} and rerun sv."
             )
 
-        _run_git(
-            ["pull", "--ff-only"],
-            cwd=repo_path,
-            runner=runner,
-            action="Updating source repo",
-        )
+        if update:
+            _run_git(
+                ["pull", "--ff-only"],
+                cwd=repo_path,
+                runner=runner,
+                action="Updating source repo",
+            )
         return
 
     repo_path.parent.mkdir(parents=True, exist_ok=True)

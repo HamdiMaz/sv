@@ -34,6 +34,16 @@ Add a skill to the current project:
 sv add github-release
 ```
 
+Choose one or more skills from an interactive list:
+
+```bash
+sv add -l
+```
+
+Use ↑/↓ to move, ←/→ to page through skills, Space to select, Enter to add,
+and `q` to cancel. The picker renders inline, shows 5 skills at a time, and
+scrolls as you move.
+
 Add every skill from the configured source repo:
 
 ```bash
@@ -42,6 +52,18 @@ sv add --all
 ```
 
 If a skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged.
+
+Remove a skill from the current project:
+
+```bash
+sv remove github-release
+```
+
+Choose one or more project skills from an interactive list and remove them:
+
+```bash
+sv remove -l
+```
 
 Update project skills whose names exist in the source repo:
 

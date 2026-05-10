@@ -24,6 +24,14 @@ class AddAllSkillsResult:
 
 
 @dataclass(frozen=True)
+class RemoveSkillResult:
+    """Outcome of removing a Pi skill from a project."""
+
+    skill: str
+    target: Path
+
+
+@dataclass(frozen=True)
 class SyncResult:
     """Summary of local project skills considered during sync."""
 
@@ -68,6 +76,27 @@ def add_all_project_skills(
         for skill_name in sorted(_source_skill_names(source_root))
     ]
     return AddAllSkillsResult(results=results)
+
+
+def list_project_skills(project_skills_dir: Path) -> list[str]:
+    """Return project-local Pi skill directory names in display order."""
+    if not project_skills_dir.is_dir():
+        return []
+    return sorted(path.name for path in project_skills_dir.iterdir() if path.is_dir())
+
+
+def remove_project_skill(skill: str, project_skills_dir: Path) -> RemoveSkillResult:
+    skill_name = normalize_skill_name(skill)
+    target = project_skills_dir / skill_name
+    if not target.is_dir():
+        raise SvError(f"Pi skill '{skill_name}' was not found in this project.")
+
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        raise SvError(f"Failed to remove Pi skill '{skill_name}': {exc}") from exc
+
+    return RemoveSkillResult(skill=skill_name, target=target)
 
 
 def sync_project_skills(source_repo: Path, project_skills_dir: Path) -> SyncResult:
