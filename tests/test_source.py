@@ -3,8 +3,9 @@ import subprocess
 
 import pytest
 
+from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
-from sv.source import ensure_source_repo, list_source_skills
+from sv.source import ensure_source_repo, ensure_source_repos, list_source_skills
 
 
 class FakeRunner:
@@ -143,3 +144,38 @@ def test_list_source_skills_lists_immediate_skill_folders_only(tmp_path: Path):
 
 def test_list_source_skills_returns_empty_when_skills_dir_missing(tmp_path: Path):
     assert list_source_skills(tmp_path / "repo") == []
+
+
+def test_ensure_source_repos_clones_each_configured_repo(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repos = [
+        RepoConfig(id="Org/A", url="https://github.com/Org/A.git"),
+        RepoConfig(id="Org/B", url="https://github.com/Org/B.git"),
+    ]
+    runner = FakeRunner(
+        [
+            completed(["git", "--version"], stdout="git version 2.0\n"),
+            completed(["git", "clone"]),
+            completed(["git", "--version"], stdout="git version 2.0\n"),
+            completed(["git", "clone"]),
+        ]
+    )
+
+    ensured = ensure_source_repos(repos, paths, runner=runner)
+
+    assert ensured == [
+        paths.source_repo_for("Org/A"),
+        paths.source_repo_for("Org/B"),
+    ]
+    assert runner.calls == [
+        (["git", "--version"], None),
+        (
+            ["git", "clone", "https://github.com/Org/A.git", str(paths.source_repo_for("Org/A"))],
+            None,
+        ),
+        (["git", "--version"], None),
+        (
+            ["git", "clone", "https://github.com/Org/B.git", str(paths.source_repo_for("Org/B"))],
+            None,
+        ),
+    ]

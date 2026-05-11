@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 import subprocess
 
+from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 
 Runner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]]
@@ -63,6 +64,21 @@ def ensure_source_repo(
         runner=runner,
         action="Cloning source repo",
     )
+
+
+def ensure_source_repos(
+    repos: Sequence[RepoConfig],
+    paths: SvPaths,
+    runner: Runner = default_runner,
+    *,
+    update: bool = True,
+) -> list[Path]:
+    repo_paths: list[Path] = []
+    for repo in repos:
+        repo_path = paths.source_repo_for(repo.id)
+        ensure_source_repo(repo.url, repo_path, runner=runner, update=update)
+        repo_paths.append(repo_path)
+    return repo_paths
 
 
 def list_source_skills(repo_path: Path) -> list[str]:
