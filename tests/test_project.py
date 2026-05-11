@@ -4,14 +4,36 @@ import shutil
 import pytest
 
 from sv.agents import PiAdapter
+from sv.catalog import SourceSkill
 from sv.errors import SvError
+from sv.manifest import load_manifest
 from sv.project import (
     add_all_project_skills,
     add_project_skill,
     list_project_skills,
+    normalize_skill_name,
     remove_project_skill,
     sync_project_skills,
 )
+
+
+def make_source_skill(
+    source_root: Path, name: str, repo_id: str = "Org/Skills"
+) -> SourceSkill:
+    skill_dir = source_root / "skills" / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {name.title()} skill.\n---\n"
+    )
+    (skill_dir / "notes.md").write_text(f"{name} remote\n")
+    return SourceSkill(
+        name=name,
+        description=f"{name.title()} skill.",
+        repo_id=repo_id,
+        repo_url=f"https://github.com/{repo_id}.git",
+        repo_path=source_root,
+        source_path=skill_dir,
+    )
 
 
 def test_pi_adapter_uses_project_pi_skills_dir(tmp_path: Path):
@@ -34,74 +56,73 @@ def test_pi_adapter_builds_isolated_run_command():
     ]
 
 
-def test_add_project_skill_creates_pi_skills_and_copies_folder(tmp_path: Path):
-    source_repo = tmp_path / "source"
-    source_skill = source_repo / "skills" / "alpha"
-    source_skill.mkdir(parents=True)
-    (source_skill / "notes.md").write_text("alpha skill\n")
+def test_add_project_skill_from_catalog_writes_manifest(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
     project_skills = tmp_path / "project" / ".pi" / "skills"
 
-    result = add_project_skill("alpha", source_repo, project_skills)
+    result = add_project_skill(entry, project_skills)
 
     assert result.status == "added"
     assert result.skill == "alpha"
-    assert result.target == project_skills / "alpha"
-    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha skill\n"
+    assert result.repo_id == "Org/Skills"
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha remote\n"
+    manifest = load_manifest(project_skills)
+    assert manifest["alpha"].repo_id == "Org/Skills"
+    assert manifest["alpha"].source_path == "skills/alpha"
 
 
-def test_add_project_skill_existing_skill_is_success_without_overwrite(tmp_path: Path):
-    source_repo = tmp_path / "source"
-    source_skill = source_repo / "skills" / "alpha"
-    source_skill.mkdir(parents=True)
-    (source_skill / "notes.md").write_text("remote version\n")
+def test_add_project_skill_existing_skill_does_not_write_manifest(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
     project_skills = tmp_path / "project" / ".pi" / "skills"
     existing = project_skills / "alpha"
     existing.mkdir(parents=True)
-    (existing / "notes.md").write_text("local version\n")
+    (existing / "notes.md").write_text("local\n")
 
-    result = add_project_skill("alpha", source_repo, project_skills)
+    result = add_project_skill(entry, project_skills)
 
     assert result.status == "exists"
-    assert (existing / "notes.md").read_text() == "local version\n"
+    assert load_manifest(project_skills) == {}
+    assert (existing / "notes.md").read_text() == "local\n"
 
 
 def test_add_project_skill_missing_source_skill_raises_error(tmp_path: Path):
+    entry = SourceSkill(
+        name="missing",
+        description="Missing skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "skills" / "missing",
+    )
+
     with pytest.raises(SvError, match="Skill 'missing' was not found"):
-        add_project_skill(
-            "missing", tmp_path / "source", tmp_path / "project" / ".pi" / "skills"
-        )
+        add_project_skill(entry, tmp_path / "project" / ".pi" / "skills")
 
 
 def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
-    source_repo = tmp_path / "source"
-    for skill in ["beta", "alpha"]:
-        skill_dir = source_repo / "skills" / skill
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "notes.md").write_text(f"{skill} skill\n")
-
+    alpha = make_source_skill(tmp_path / "source", "alpha")
+    beta = make_source_skill(tmp_path / "source", "beta")
     project_skills = tmp_path / "project" / ".pi" / "skills"
     existing = project_skills / "beta"
     existing.mkdir(parents=True)
     (existing / "notes.md").write_text("local beta\n")
 
-    result = add_all_project_skills(source_repo, project_skills)
+    result = add_all_project_skills([alpha, beta], project_skills)
 
     assert [(item.skill, item.status) for item in result.results] == [
         ("alpha", "added"),
         ("beta", "exists"),
     ]
-    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha skill\n"
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha remote\n"
     assert (project_skills / "beta" / "notes.md").read_text() == "local beta\n"
 
 
 @pytest.mark.parametrize(
     "skill", ["", "   ", ".", "..", "../alpha", "alpha/beta", r"alpha\\beta"]
 )
-def test_add_project_skill_rejects_path_like_skill_names(skill: str, tmp_path: Path):
+def test_normalize_skill_name_rejects_path_like_skill_names(skill: str):
     with pytest.raises(SvError, match="Invalid skill name"):
-        add_project_skill(
-            skill, tmp_path / "source", tmp_path / "project" / ".pi" / "skills"
-        )
+        normalize_skill_name(skill)
 
 
 def test_list_project_skills_returns_sorted_skill_directories(tmp_path: Path):
@@ -131,37 +152,62 @@ def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
         remove_project_skill("missing", tmp_path / "project" / ".pi" / "skills")
 
 
-def test_sync_project_skills_updates_matching_and_leaves_unknown(tmp_path: Path):
-    source_repo = tmp_path / "source"
-    managed_source = source_repo / "skills" / "managed"
-    managed_source.mkdir(parents=True)
-    (managed_source / "notes.md").write_text("remote v2\n")
-
+def test_sync_project_skills_updates_manifest_tracked_origin(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "managed")
     project_skills = tmp_path / "project" / ".pi" / "skills"
-    managed_local = project_skills / "managed"
-    managed_local.mkdir(parents=True)
-    (managed_local / "notes.md").write_text("local v1\n")
-    unknown_local = project_skills / "local-only"
-    unknown_local.mkdir()
-    (unknown_local / "notes.md").write_text("keep me\n")
+    assert add_project_skill(entry, project_skills).status == "added"
+    (entry.source_path / "notes.md").write_text("managed remote v2\n")
 
-    result = sync_project_skills(source_repo, project_skills)
+    result = sync_project_skills([entry], project_skills)
 
     assert result.no_skills_dir is False
     assert result.updated == ["managed"]
-    assert result.skipped == ["local-only"]
-    assert (managed_local / "notes.md").read_text() == "remote v2\n"
-    assert (unknown_local / "notes.md").read_text() == "keep me\n"
+    assert result.backfilled == []
+    assert result.skipped == []
+    assert (project_skills / "managed" / "notes.md").read_text() == (
+        "managed remote v2\n"
+    )
+    assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
+
+
+def test_sync_project_skills_backfills_unique_untracked_skill(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "legacy")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    legacy = project_skills / "legacy"
+    legacy.mkdir(parents=True)
+    (legacy / "notes.md").write_text("legacy local\n")
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == ["legacy"]
+    assert result.backfilled == ["legacy"]
+    assert (legacy / "notes.md").read_text() == "legacy remote\n"
+    assert load_manifest(project_skills)["legacy"].repo_id == "Org/Skills"
+
+
+def test_sync_project_skills_skips_ambiguous_untracked_skill(tmp_path: Path):
+    first = make_source_skill(tmp_path / "source-a", "shared", repo_id="Org/A")
+    second = make_source_skill(tmp_path / "source-b", "shared", repo_id="Org/B")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    local = project_skills / "shared"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("keep local\n")
+
+    result = sync_project_skills([first, second], project_skills)
+
+    assert result.updated == []
+    assert result.backfilled == []
+    assert [(skip.skill, skip.reason, skip.repo_ids) for skip in result.skipped] == [
+        ("shared", "ambiguous", ("Org/A", "Org/B"))
+    ]
+    assert (local / "notes.md").read_text() == "keep local\n"
+    assert load_manifest(project_skills) == {}
 
 
 def test_sync_project_skills_preserves_local_skill_when_copy_fails(
     tmp_path: Path, monkeypatch
 ):
-    source_repo = tmp_path / "source"
-    managed_source = source_repo / "skills" / "managed"
-    managed_source.mkdir(parents=True)
-    (managed_source / "notes.md").write_text("remote v2\n")
-
+    entry = make_source_skill(tmp_path / "source", "managed")
     project_skills = tmp_path / "project" / ".pi" / "skills"
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
@@ -173,16 +219,15 @@ def test_sync_project_skills_preserves_local_skill_when_copy_fails(
     monkeypatch.setattr(shutil, "copytree", fail_copytree)
 
     with pytest.raises(SvError, match="Failed to sync skill 'managed'"):
-        sync_project_skills(source_repo, project_skills)
+        sync_project_skills([entry], project_skills)
 
     assert (managed_local / "notes.md").read_text() == "local v1\n"
 
 
 def test_sync_project_skills_reports_no_skills_dir(tmp_path: Path):
-    result = sync_project_skills(
-        tmp_path / "source", tmp_path / "project" / ".pi" / "skills"
-    )
+    result = sync_project_skills([], tmp_path / "project" / ".pi" / "skills")
 
     assert result.no_skills_dir is True
     assert result.updated == []
     assert result.skipped == []
+    assert result.backfilled == []

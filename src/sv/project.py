@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
+from typing import Protocol
 
 from sv.errors import SvError
+from sv.manifest import ManifestEntry, load_manifest, upsert_manifest_entry
+
+
+class ProjectSourceSkill(Protocol):
+    name: str
+    description: str
+    repo_id: str
+    repo_url: str
+    source_path: Path
+
+    @property
+    def source_relative_path(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -14,6 +28,7 @@ class AddSkillResult:
     skill: str
     target: Path
     status: str
+    repo_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -32,11 +47,19 @@ class RemoveSkillResult:
 
 
 @dataclass(frozen=True)
+class SyncSkip:
+    skill: str
+    reason: str
+    repo_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class SyncResult:
     """Summary of local project skills considered during sync."""
 
     updated: list[str]
-    skipped: list[str]
+    skipped: list[SyncSkip]
+    backfilled: list[str]
     no_skills_dir: bool = False
 
 
@@ -51,31 +74,38 @@ def normalize_skill_name(skill: str) -> str:
 
 
 def add_project_skill(
-    skill: str, source_repo: Path, project_skills_dir: Path
+    entry: ProjectSourceSkill, project_skills_dir: Path
 ) -> AddSkillResult:
-    skill_name = normalize_skill_name(skill)
-    source_skill = source_repo / "skills" / skill_name
-    if not source_skill.is_dir():
+    skill_name = normalize_skill_name(entry.name)
+    if not entry.source_path.is_dir():
         raise SvError(f"Skill '{skill_name}' was not found in source skills directory.")
 
     project_skills_dir.mkdir(parents=True, exist_ok=True)
     target = project_skills_dir / skill_name
     if target.exists():
-        return AddSkillResult(skill=skill_name, target=target, status="exists")
+        return AddSkillResult(
+            skill=skill_name,
+            target=target,
+            status="exists",
+            repo_id=entry.repo_id,
+        )
 
-    shutil.copytree(source_skill, target)
-    return AddSkillResult(skill=skill_name, target=target, status="added")
+    shutil.copytree(entry.source_path, target)
+    upsert_manifest_entry(project_skills_dir, _manifest_entry_for(entry))
+    return AddSkillResult(
+        skill=skill_name,
+        target=target,
+        status="added",
+        repo_id=entry.repo_id,
+    )
 
 
 def add_all_project_skills(
-    source_repo: Path, project_skills_dir: Path
+    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
 ) -> AddAllSkillsResult:
-    source_root = source_repo / "skills"
-    results = [
-        add_project_skill(skill_name, source_repo, project_skills_dir)
-        for skill_name in sorted(_source_skill_names(source_root))
-    ]
-    return AddAllSkillsResult(results=results)
+    return AddAllSkillsResult(
+        results=[add_project_skill(entry, project_skills_dir) for entry in catalog]
+    )
 
 
 def list_project_skills(project_skills_dir: Path) -> list[str]:
@@ -99,27 +129,67 @@ def remove_project_skill(skill: str, project_skills_dir: Path) -> RemoveSkillRes
     return RemoveSkillResult(skill=skill_name, target=target)
 
 
-def sync_project_skills(source_repo: Path, project_skills_dir: Path) -> SyncResult:
+def sync_project_skills(
+    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
+) -> SyncResult:
     if not project_skills_dir.is_dir():
-        return SyncResult(updated=[], skipped=[], no_skills_dir=True)
+        return SyncResult(updated=[], skipped=[], backfilled=[], no_skills_dir=True)
 
-    source_root = source_repo / "skills"
-    source_names = _source_skill_names(source_root)
+    by_key = {(entry.name, entry.repo_id): entry for entry in catalog}
+    by_name: dict[str, list[ProjectSourceSkill]] = {}
+    for entry in catalog:
+        by_name.setdefault(entry.name, []).append(entry)
+
+    manifest = load_manifest(project_skills_dir)
     updated: list[str] = []
-    skipped: list[str] = []
+    backfilled: list[str] = []
+    skipped: list[SyncSkip] = []
 
     for local_skill in sorted(project_skills_dir.iterdir(), key=lambda path: path.name):
-        if not local_skill.is_dir():
+        if not local_skill.is_dir() or local_skill.name.startswith("."):
             continue
 
-        if local_skill.name not in source_names:
-            skipped.append(local_skill.name)
+        manifest_entry = manifest.get(local_skill.name)
+        if manifest_entry is not None:
+            entry = by_key.get((manifest_entry.name, manifest_entry.repo_id))
+            if entry is None:
+                skipped.append(
+                    SyncSkip(
+                        skill=local_skill.name,
+                        reason="source-missing",
+                        repo_ids=(manifest_entry.repo_id,),
+                    )
+                )
+                continue
+            _replace_tree(entry.source_path, local_skill)
+            upsert_manifest_entry(project_skills_dir, _manifest_entry_for(entry))
+            updated.append(local_skill.name)
             continue
 
-        _replace_tree(source_root / local_skill.name, local_skill)
-        updated.append(local_skill.name)
+        matches = by_name.get(local_skill.name, [])
+        if len(matches) == 1:
+            entry = matches[0]
+            _replace_tree(entry.source_path, local_skill)
+            upsert_manifest_entry(project_skills_dir, _manifest_entry_for(entry))
+            updated.append(local_skill.name)
+            backfilled.append(local_skill.name)
+        elif len(matches) > 1:
+            skipped.append(
+                SyncSkip(
+                    skill=local_skill.name,
+                    reason="ambiguous",
+                    repo_ids=tuple(entry.repo_id for entry in matches),
+                )
+            )
+        else:
+            skipped.append(SyncSkip(skill=local_skill.name, reason="local-only"))
 
-    return SyncResult(updated=updated, skipped=skipped, no_skills_dir=False)
+    return SyncResult(
+        updated=updated,
+        skipped=skipped,
+        backfilled=backfilled,
+        no_skills_dir=False,
+    )
 
 
 def _replace_tree(source: Path, target: Path) -> None:
@@ -139,7 +209,11 @@ def _replace_tree(source: Path, target: Path) -> None:
         raise SvError(f"Failed to sync skill '{target.name}': {exc}") from exc
 
 
-def _source_skill_names(source_root: Path) -> set[str]:
-    if not source_root.is_dir():
-        return set()
-    return {path.name for path in source_root.iterdir() if path.is_dir()}
+def _manifest_entry_for(entry: ProjectSourceSkill) -> ManifestEntry:
+    return ManifestEntry(
+        name=entry.name,
+        repo_id=entry.repo_id,
+        repo_url=entry.repo_url,
+        source_path=entry.source_relative_path,
+        description=entry.description,
+    )
