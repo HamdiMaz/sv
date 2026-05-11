@@ -1,56 +1,12 @@
 from pathlib import Path
 
+import pytest
+
 from sv.cli import build_parser, handle
-from sv.config import SvPaths, load_config
 
 
 def parse(argv):
     return build_parser().parse_args(argv)
-
-
-def test_config_repo_writes_global_config(tmp_path: Path, capsys):
-    home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
-
-    exit_code = handle(
-        parse(["config", "repo", "HamdiMaz/Skills"]), cwd=project, home=home
-    )
-
-    assert exit_code == 0
-    assert (
-        load_config(SvPaths.from_home(home)).repo
-        == "https://github.com/HamdiMaz/Skills.git"
-    )
-    assert (
-        "Set source repo to https://github.com/HamdiMaz/Skills.git"
-        in capsys.readouterr().out
-    )
-
-
-def test_config_repo_reports_empty_repo_value(tmp_path: Path, capsys):
-    home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
-
-    exit_code = handle(parse(["config", "repo", "   "]), cwd=project, home=home)
-
-    assert exit_code == 1
-    assert "repo cannot be empty" in capsys.readouterr().err
-
-
-def test_config_show_prints_effective_config(tmp_path: Path, capsys):
-    home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
-
-    exit_code = handle(parse(["config", "show"]), cwd=project, home=home)
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert "repo = https://github.com/HamdiMaz/Skills.git" in output
-    assert f"source = {home / '.sv' / 'sources' / 'default' / 'repo'}" in output
-    assert f"pi_skills = {project / '.pi' / 'skills'}" in output
 
 
 def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path):
@@ -204,3 +160,58 @@ def test_remove_interactive_with_skill_does_not_touch_source_repo(
 
     assert exit_code == 1
     assert "Use -l by itself" in capsys.readouterr().err
+
+
+def test_repo_add_and_list_use_multi_repo_config(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    assert handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
+    assert handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+
+    exit_code = handle(parse(["repo", "list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Repo" in output
+    assert "URL" in output
+    assert "Cache" in output
+    assert "HamdiMaz/Skills" in output
+    assert "https://github.com/HamdiMaz/Skills.git" in output
+    assert "SomeOrg/TeamSkills" in output
+
+
+def test_repo_add_reports_existing_repo(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    assert handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+    exit_code = handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert "already configured" in capsys.readouterr().out
+
+
+def test_repo_remove_updates_config_without_deleting_project_skills(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    skill = project / ".pi" / "skills" / "alpha"
+    skill.mkdir(parents=True)
+
+    assert handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+
+    exit_code = handle(parse(["repo", "remove", "SomeOrg/TeamSkills"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert skill.is_dir()
+    assert "Removed repo SomeOrg/TeamSkills" in capsys.readouterr().out
+
+
+def test_config_command_is_removed_from_parser():
+    with pytest.raises(SystemExit):
+        parse(["config", "show"])

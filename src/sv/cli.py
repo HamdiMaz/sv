@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 from sv.agents import PiAdapter
-from sv.config import SvPaths, load_config, save_repo
+from sv.config import SvPaths, add_repo, load_config, remove_repo
 from sv.errors import SvError
 from sv.project import (
     AddSkillResult,
@@ -21,6 +21,7 @@ from sv.project import (
 )
 from sv.selector import select_skills
 from sv.source import default_runner, ensure_source_repo, list_source_skills
+from sv.table import format_table
 
 SkillSelector = Callable[[Sequence[str]], list[str]]
 
@@ -71,17 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("pi_args", nargs=argparse.REMAINDER)
 
-    config_parser = subparsers.add_parser(
-        "config", help="Show or change sv configuration."
+    repo_parser = subparsers.add_parser("repo", help="Manage global skill source repos.")
+    repo_subparsers = repo_parser.add_subparsers(dest="repo_command", required=True)
+    repo_add_parser = repo_subparsers.add_parser("add", help="Add a skill source repo.")
+    repo_add_parser.add_argument("repo")
+    repo_remove_parser = repo_subparsers.add_parser(
+        "remove", help="Remove a skill source repo."
     )
-    config_subparsers = config_parser.add_subparsers(
-        dest="config_command", required=True
-    )
-    repo_parser = config_subparsers.add_parser(
-        "repo", help="Set the default skill source repo."
-    )
-    repo_parser.add_argument("repo")
-    config_subparsers.add_parser("show", help="Show effective sv configuration.")
+    repo_remove_parser.add_argument("repo_id")
+    repo_subparsers.add_parser("list", help="List configured skill source repos.")
 
     return parser
 
@@ -102,8 +101,8 @@ def handle(
     adapter = PiAdapter()
 
     try:
-        if args.command == "config":
-            return _handle_config(args, cwd=cwd, paths=paths, adapter=adapter)
+        if args.command == "repo":
+            return _handle_repo(args, paths=paths)
 
         if args.command == "run":
             return _handle_run(
@@ -176,25 +175,36 @@ def _ensure_configured_source(
     ensure_source_repo(config.repo, paths.source_repo, runner=git_runner, update=update)
 
 
-def _handle_config(
-    args: argparse.Namespace, cwd: Path, paths: SvPaths, adapter: PiAdapter
-) -> int:
-    if args.config_command == "repo":
+def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:
+    if args.repo_command == "add":
         try:
-            repo = save_repo(paths, args.repo)
+            result = add_repo(paths, args.repo)
         except ValueError as exc:
             raise SvError(str(exc)) from exc
-        print(f"Set source repo to {repo}")
+        if result.status == "exists":
+            print(f"Repo {result.repo.id} is already configured.")
+        else:
+            print(f"Added repo {result.repo.id} ({result.repo.url})")
         return 0
 
-    if args.config_command == "show":
+    if args.repo_command == "remove":
+        try:
+            removed = remove_repo(paths, args.repo_id)
+        except ValueError as exc:
+            raise SvError(str(exc)) from exc
+        print(f"Removed repo {removed.id}")
+        return 0
+
+    if args.repo_command == "list":
         config = load_config(paths)
-        print(f"repo = {config.repo}")
-        print(f"source = {paths.source_repo}")
-        print(f"pi_skills = {adapter.project_skill_dir(cwd)}")
+        rows = [
+            [repo.id, repo.url, str(paths.source_repo_for(repo.id))]
+            for repo in config.repos
+        ]
+        print(format_table(["Repo", "URL", "Cache"], rows))
         return 0
 
-    raise SvError(f"Unknown config command: {args.config_command}")
+    raise SvError(f"Unknown repo command: {args.repo_command}")
 
 
 def _handle_run(args: Sequence[str], adapter: PiAdapter, process_runner) -> int:
