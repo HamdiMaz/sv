@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `sv update` to refresh configured source repo caches and sync project skills in one command.
+- Added `sv repo add`, `sv repo remove`, and `sv repo list` for multiple source repositories.
+- Changed `sv list` and `sv add -l` to show repo-aware skill metadata from parsed `SKILL.md` files.
+- Added project skill origin tracking in `.pi/skills/.sv-manifest.toml` for reliable multi-repo sync.
+- Added validation for source skills requiring `SKILL.md` frontmatter with matching `name` and non-empty `description`.
 - Added `sv remove -l` / `sv remove --list` to remove project skills from an interactive list.
 - Added `sv add -l` / `sv add --list` to choose multiple skills from an interactive scrolling list.
 - Made `sv add -l` open faster by using the cached source clone when available.
