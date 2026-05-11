@@ -113,6 +113,8 @@ def add_repo(paths: SvPaths, repo: str) -> RepoChangeResult:
     normalized = normalize_repo(repo)
     repo_config = RepoConfig(id=derive_repo_id(repo), url=normalized)
     config = load_config(paths)
+    if not paths.config_file.exists():
+        config = SvConfig(repos=())
 
     for existing in config.repos:
         if existing.id == repo_config.id:

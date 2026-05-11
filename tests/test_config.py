@@ -93,7 +93,7 @@ def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):
     second = add_repo(paths, "https://github.com/SomeOrg/TeamSkills.git")
     duplicate = add_repo(paths, "HamdiMaz/Skills")
 
-    assert first.status == "exists"
+    assert first.status == "added"
     assert second.status == "added"
     assert duplicate.status == "exists"
     assert load_config(paths).repos == (
