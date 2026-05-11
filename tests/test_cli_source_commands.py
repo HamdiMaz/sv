@@ -303,3 +303,96 @@ def test_sync_with_no_pi_skills_dir_exits_successfully(tmp_path: Path, capsys):
 
     assert exit_code == 0
     assert "No Pi skills found to sync." in capsys.readouterr().out
+
+
+def test_sync_uses_manifest_origin_when_multiple_repos_have_same_skill(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha b v1\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "add alpha b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    repo_id_b = load_config(SvPaths.from_home(home)).repos[1].id
+    assert handle(parse(["add", f"{repo_id_b}:alpha"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+
+    write_source_skill(source_a, "alpha", "Alpha from A.", "alpha a v2\n")
+    run_git(["add", "skills/alpha"], source_a)
+    run_git(["commit", "-m", "update alpha a"], source_a)
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha b v2\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha b"], source_b)
+
+    exit_code = handle(parse(["sync"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha b v2\n"
+    assert "Synced Pi skill 'alpha'." in capsys.readouterr().out
+
+
+def test_sync_backfills_unique_legacy_skill(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    legacy = project / ".pi" / "skills" / "alpha"
+    legacy.mkdir(parents=True)
+    (legacy / "notes.md").write_text("legacy local\n")
+    configure_source(source, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["sync"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert (legacy / "notes.md").read_text() == "alpha v1\n"
+    output = capsys.readouterr().out
+    assert "Synced Pi skill 'alpha'." in output
+    assert "Recorded origin for legacy Pi skill 'alpha'." in output
+
+
+def test_sync_skips_ambiguous_legacy_skill(tmp_path: Path, capsys):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    legacy = project / ".pi" / "skills" / "alpha"
+    legacy.mkdir(parents=True)
+    (legacy / "notes.md").write_text("legacy local\n")
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["sync"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert (legacy / "notes.md").read_text() == "legacy local\n"
+    output = capsys.readouterr().out
+    assert "Skipped local Pi skill 'alpha': multiple source repos match" in output
+
+
+def test_update_pulls_sources_then_syncs_project_skills(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert handle(parse(["add", "alpha"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    exit_code = handle(parse(["update"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    output = capsys.readouterr().out
+    assert "Updating source repos..." in output
+    assert "Syncing project skills..." in output
+    assert "Synced Pi skill 'alpha'." in output

@@ -73,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("sync", help="Update local Pi skills from source repos.")
+    subparsers.add_parser("update", help="Update source caches and sync project skills.")
 
     run_parser = subparsers.add_parser(
         "run", help="Run Pi with only project skills enabled."
@@ -169,6 +170,11 @@ def handle(
         if args.command == "sync":
             catalog = _update_sources_and_catalog(paths, git_runner, update=True)
             return _handle_sync(catalog, cwd=cwd, adapter=adapter)
+
+        if args.command == "update":
+            return _handle_update(
+                cwd=cwd, paths=paths, adapter=adapter, git_runner=git_runner
+            )
 
         raise SvError(f"Unknown command: {args.command}")
     except SvError as exc:
@@ -373,6 +379,15 @@ def _print_remove_result(result: RemoveSkillResult) -> None:
 
 
 def _handle_sync(catalog: Sequence[SourceSkill], cwd: Path, adapter: PiAdapter) -> int:
+    result = sync_project_skills(catalog, adapter.project_skill_dir(cwd))
+    _print_sync_result(result)
+    return 0
+
+
+def _handle_update(cwd: Path, paths: SvPaths, adapter: PiAdapter, git_runner) -> int:
+    print("Updating source repos...")
+    catalog = _update_sources_and_catalog(paths, git_runner, update=True)
+    print("Syncing project skills...")
     result = sync_project_skills(catalog, adapter.project_skill_dir(cwd))
     _print_sync_result(result)
     return 0
