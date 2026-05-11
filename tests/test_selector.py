@@ -140,6 +140,19 @@ def test_render_outputs_inline_colored_five_item_list_without_alternate_screen()
     ]
 
 
+def test_render_uses_custom_item_labels():
+    state = SelectionState([{"name": "alpha", "repo": "Org/A"}])
+    stdout = StringIO()
+
+    _render(
+        state,
+        stdout,
+        item_label=lambda item: f"{item['name']}  {item['repo']}",
+    )
+
+    assert "alpha  Org/A" in stdout.getvalue()
+
+
 def _read_key_from_bytes(data: bytes) -> str:
     read_fd, write_fd = os.pipe()
     try:

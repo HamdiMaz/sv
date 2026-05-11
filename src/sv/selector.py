@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import os
 import select
 import sys
-from typing import TextIO
+from typing import Generic, TextIO, TypeVar
 
 from sv.errors import SvError
+
+T = TypeVar("T")
 
 VIEWPORT_SIZE = 5
 
@@ -25,10 +27,10 @@ _SHOW_CURSOR = "\x1b[?25h"
 
 
 @dataclass
-class SelectionState:
+class SelectionState(Generic[T]):
     """State for a scrollable multi-select skill list."""
 
-    items: Sequence[str]
+    items: Sequence[T]
     viewport_size: int = VIEWPORT_SIZE
     cursor: int = 0
     viewport_start: int = 0
@@ -52,7 +54,7 @@ class SelectionState:
     def visible_end(self) -> int:
         return min(self.viewport_start + self.viewport_size, len(self.items))
 
-    def visible_items(self) -> list[tuple[int, str]]:
+    def visible_items(self) -> list[tuple[int, T]]:
         return [
             (index, self.items[index])
             for index in range(self.viewport_start, self.visible_end)
@@ -95,7 +97,7 @@ class SelectionState:
         else:
             self.selected.add(self.cursor)
 
-    def selected_items(self) -> list[str]:
+    def selected_items(self) -> list[T]:
         return [self.items[index] for index in sorted(self.selected)]
 
     def _scroll_to_cursor(self) -> None:
@@ -108,12 +110,13 @@ class SelectionState:
 
 
 def select_skills(
-    skills: Sequence[str],
+    skills: Sequence[T],
     *,
     viewport_size: int = VIEWPORT_SIZE,
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
-) -> list[str]:
+    item_label: Callable[[T], str] = str,
+) -> list[T]:
     """Prompt for skills with arrow-key navigation and spacebar selection."""
     input_stream = sys.stdin if stdin is None else stdin
     output_stream = sys.stdout if stdout is None else stdout
@@ -140,7 +143,7 @@ def select_skills(
         tty.setcbreak(fd)
         output_stream.write(_HIDE_CURSOR)
         output_stream.flush()
-        rendered_lines = _render(state, output_stream)
+        rendered_lines = _render(state, output_stream, item_label=item_label)
 
         while True:
             key = _read_key(fd)
@@ -160,6 +163,7 @@ def select_skills(
                     output_stream,
                     previous_line_count=rendered_lines,
                     highlight_cursor=False,
+                    item_label=item_label,
                 )
                 return state.selected_items()
             elif key in {"escape", "quit", "eof"}:
@@ -168,13 +172,17 @@ def select_skills(
                     output_stream,
                     previous_line_count=rendered_lines,
                     highlight_cursor=False,
+                    item_label=item_label,
                 )
                 return []
             else:
                 continue
 
             rendered_lines = _render(
-                state, output_stream, previous_line_count=rendered_lines
+                state,
+                output_stream,
+                previous_line_count=rendered_lines,
+                item_label=item_label,
             )
     finally:
         try:
@@ -185,18 +193,21 @@ def select_skills(
 
 
 def _render(
-    state: SelectionState,
+    state: SelectionState[T],
     stdout: TextIO,
     *,
     previous_line_count: int = 0,
     highlight_cursor: bool = True,
+    item_label: Callable[[T], str] = str,
 ) -> int:
     if previous_line_count:
         stdout.write(f"\x1b[{previous_line_count}F")
         stdout.write("\x1b[J")
 
     lines = [
-        _format_skill_line(state, index, skill, highlight_cursor=highlight_cursor)
+        _format_skill_line(
+            state, index, item_label(skill), highlight_cursor=highlight_cursor
+        )
         for index, skill in state.visible_items()
     ]
     stdout.write("\n".join(lines))
@@ -206,7 +217,7 @@ def _render(
 
 
 def _format_skill_line(
-    state: SelectionState, index: int, skill: str, *, highlight_cursor: bool = True
+    state: SelectionState[T], index: int, skill: str, *, highlight_cursor: bool = True
 ) -> str:
     is_selected = index in state.selected
     is_cursor = highlight_cursor and index == state.cursor
