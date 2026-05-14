@@ -218,6 +218,22 @@ def test_format_table_measures_emoji_by_display_width():
     ]
 
 
+def test_format_table_wraps_multiple_wide_symbols_at_narrow_widths():
+    output = format_table(["Sym", "Value"], [["😀😄😁", "abc"]], max_table_width=6)
+
+    lines = output.splitlines()
+    assert lines == [
+        "Sy  Va",
+        "m   lu",
+        "    e",
+        "--  --",
+        "😀  ab",
+        "😄  c",
+        "😁",
+    ]
+    assert all(display_width(line) <= 6 for line in lines)
+
+
 def test_format_table_handles_combining_characters_in_narrow_tables():
     output = format_table(["Base", "Desc"], [["Cafe\u0301", "ab"]], max_table_width=4)
 
@@ -237,8 +253,16 @@ def test_format_table_handles_combining_characters_in_narrow_tables():
 
 
 def test_format_table_handles_fewer_and_extra_cells_per_row():
-    sparse_row = format_table(["Skill", "Repo", "Description"], [["alpha", "Org/A"]], max_table_width=30)
-    dense_row = format_table(["A", "B"], [["alpha", "beta", "gamma", "delta"]], max_table_width=20)
+    sparse_row = format_table(
+        ["Skill", "Repo", "Description"],
+        [["alpha", "Org/A"]],
+        max_table_width=30,
+    )
+    dense_row = format_table(
+        ["A", "B"],
+        [["alpha", "beta", "gamma", "delta"]],
+        max_table_width=20,
+    )
 
     assert sparse_row.splitlines() == [
         "Skill  Repo   Description",
@@ -250,6 +274,61 @@ def test_format_table_handles_fewer_and_extra_cells_per_row():
         "-----  ----",
         "alpha  beta",
     ]
+
+
+def test_format_table_wraps_sparse_rows_at_tight_widths():
+    output = format_table(
+        ["Skill", "Repo", "Description"],
+        [["alpha"]],
+        max_table_width=6,
+    )
+
+    assert output.splitlines() == [
+        "S R De",
+        "k e sc",
+        "i p ri",
+        "l o pt",
+        "l   io",
+        "    n",
+        "- - --",
+        "a",
+        "l",
+        "p",
+        "h",
+        "a",
+    ]
+
+
+def test_format_table_ignores_extra_cells_at_tight_widths():
+    output = format_table(
+        ["A", "B"],
+        [["alpha", "beta", "gamma", "delta"]],
+        max_table_width=6,
+    )
+
+    assert output.splitlines() == [
+        "A   B",
+        "--  --",
+        "al  be",
+        "ph  ta",
+        "a",
+    ]
+
+
+def test_format_table_treats_zero_or_negative_max_table_width_as_unbounded_with_wide_and_unicode_cells():
+    for max_table_width in (0, -1, -2):
+        output = format_table(
+            ["Emoji", "Wide"],
+            [["😀", "日本語"]],
+            max_table_width=max_table_width,
+        )
+
+        assert output.splitlines() == [
+            "EmojiWide",
+            "-----------",
+            "😀   日本語",
+        ]
+        assert all("?" not in line for line in output.splitlines())
 
 
 def test_format_table_handles_empty_string_cells_while_wrapping():

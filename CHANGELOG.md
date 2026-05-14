@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Completed T030: added table rendering edge-case coverage for emoji/wide symbols, combining marks, row shape mismatches, empty cells in wrapped rows, and zero/negative table width behavior in `tests/test_table.py`.
+- Completed T030: expanded `tests/test_table.py` with additional table-rendering edge-case coverage for multi-wide symbols, sparse/extra rows under tight widths, and zero/negative width behavior with Unicode content.
 - Completed T029: added `tests/test_cli_run_contracts.py` to lock `sv run` command contracts (argument forwarding, launch failures, and unsafe path rejection).
 - Completed T028: added `tests/test_cli_update_contracts.py` to lock `sv update` progress output and source-refresh failure behavior (including user-facing errors and sync prevention).
 - Added `tests/test_cli_sync_contracts.py` to lock `sv sync` contracts for missing `.pi/skills`, managed updates, source-missing, legacy backfill, ambiguous legacy, and local-only skip behavior.
