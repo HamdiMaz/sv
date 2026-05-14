@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added GitHub Actions release-readiness workflow for pushes and PRs running lint, type checks, coverage tests, and package build.
+- Made the CI workflow install dependencies with `uv sync --locked --dev` for reproducible release checks.
 - Added coverage defaults (`pytest-cov` branch coverage + marker registration for `integration` and `security`) with an initial 85% fail-under gate.
 - Reduced visual repetition in duplicate-skill UIs by showing each duplicate skill name only once in `sv list`'s duplicate section and removing the redundant skill column from the `sv add <skill>` source-choice table.
 - Grouped duplicate skill names into a single `N sources` row in the main `sv list` table and added descriptions to the duplicate-source section so source choices are clearer without visually repeating skills.
