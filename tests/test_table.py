@@ -203,3 +203,79 @@ def test_format_table_drops_overwide_characters_when_width_is_one():
 
     assert all(display_width(line) <= 1 for line in output.splitlines())
     assert output.splitlines() == ["?", "-", "?"]
+
+
+def test_format_table_measures_emoji_by_display_width():
+    output = format_table(["Name"], [["😀😄😁"]], max_table_width=5)
+
+    lines = output.splitlines()
+    assert all(display_width(line) <= 5 for line in lines)
+    assert lines == [
+        "Name",
+        "-----",
+        "😀😄",
+        "😁",
+    ]
+
+
+def test_format_table_handles_combining_characters_in_narrow_tables():
+    output = format_table(["Base", "Desc"], [["Cafe\u0301", "ab"]], max_table_width=4)
+
+    lines = output.splitlines()
+    assert all(display_width(line) <= 4 for line in lines)
+    assert lines == [
+        "B  D",
+        "a  e",
+        "s  s",
+        "e  c",
+        "-  -",
+        "C  a",
+        "a  b",
+        "f",
+        "é",
+    ]
+
+
+def test_format_table_handles_fewer_and_extra_cells_per_row():
+    sparse_row = format_table(["Skill", "Repo", "Description"], [["alpha", "Org/A"]], max_table_width=30)
+    dense_row = format_table(["A", "B"], [["alpha", "beta", "gamma", "delta"]], max_table_width=20)
+
+    assert sparse_row.splitlines() == [
+        "Skill  Repo   Description",
+        "-----  -----  -----------",
+        "alpha  Org/A",
+    ]
+    assert dense_row.splitlines() == [
+        "A      B",
+        "-----  ----",
+        "alpha  beta",
+    ]
+
+
+def test_format_table_handles_empty_string_cells_while_wrapping():
+    output = format_table(["A", "B", "C"], [["a", "", "abcdef"]], max_table_width=6)
+
+    assert output.splitlines() == [
+        "A B C",
+        "- - --",
+        "a   ab",
+        "    cd",
+        "    ef",
+    ]
+    assert all(display_width(line) <= 6 for line in output.splitlines())
+
+
+def test_format_table_treats_zero_or_negative_max_table_width_as_unbounded():
+    for max_table_width in (0, -1, -2):
+        output = format_table(
+            ["A", "B", "C"],
+            [["alpha", "beta", "gamma"]],
+            max_table_width=max_table_width,
+        )
+
+        assert output.splitlines() == [
+            "A    B   C",
+            "--------------",
+            "alphabetagamma",
+        ]
+        assert " " not in output.splitlines()[2]
