@@ -23,7 +23,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | --- | --- |
 | `sv repo add <owner/repo>` | Add a GitHub source repo. |
 | `sv repo add <path-or-url>` | Add a local or Git URL source repo. |
-| `sv repo list` | Show configured source IDs, URLs, and cache paths. |
+| `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. |
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
 
 `sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects.

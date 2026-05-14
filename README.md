@@ -2,7 +2,7 @@
 
 `sv` manages project-local AI agent skills for Pi. It copies valid skills from one or more Git-backed source repositories into the current project's `.pi/skills` directory and records where installed skills came from so they can be synced reliably.
 
-For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, wrapping behavior, and duplicate-name guidance, see [reading sv output](docs/output.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
+For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
 
 ## Installation
 
@@ -112,7 +112,7 @@ sv add -l
 
 Use ↑/↓ to move, ←/→ to page through skills, Space to select, Enter to add,
 and `q` to cancel. The picker renders inline, shows 5 skills at a time, and
-scrolls as you move. Each picker row includes the source repo ID so duplicate skill names are easy to distinguish without repeating the skill name twice. If you select two sources for the same skill name, `sv` stops before copying anything and asks you to choose only one source. When a source repo is already cached, `sv add -l` reads the
+scrolls as you move. Each picker row includes the source repo ID so duplicate skill names are easy to distinguish without repeating the skill name twice. Long picker labels are truncated to the terminal width, and control characters from source metadata are escaped before display so the inline UI stays stable. If you select two sources for the same skill name, `sv` stops before copying anything and asks you to choose only one source. When a source repo is already cached, `sv add -l` reads the
 cache without pulling first so the picker opens quickly. Run `sv list` when you
 want to refresh source caches without changing project skills; use `sv update`
 only when you also want to sync installed project skills.

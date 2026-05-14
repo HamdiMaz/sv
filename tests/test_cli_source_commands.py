@@ -46,6 +46,25 @@ def configure_source(source: Path, project: Path, home: Path):
     assert exit_code == 0
 
 
+def test_repo_list_with_no_configured_repos_explains_how_to_add_one(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    paths = SvPaths.from_home(home)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text("repos = []\n")
+
+    exit_code = handle(parse(["repo", "list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "No skill source repos configured." in output
+    assert "sv repo add" in output
+    assert "Repo  URL" not in output
+
+
 def test_list_with_no_configured_repos_explains_how_to_add_one(
     tmp_path: Path, capsys
 ):

@@ -4,8 +4,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import os
 import select
+import shutil
 import sys
 from typing import Generic, TextIO, TypeVar
+import unicodedata
 
 from sv.errors import SvError
 
@@ -136,11 +138,21 @@ def select_skills(
         ) from exc
 
     state = SelectionState(skills, viewport_size=viewport_size)
-    fd = input_stream.fileno()
-    original_settings = termios.tcgetattr(fd)
+    try:
+        fd = input_stream.fileno()
+        original_settings = termios.tcgetattr(fd)
+    except (AttributeError, OSError, termios.error) as exc:
+        raise SvError(
+            "Interactive skill selection could not read terminal settings."
+        ) from exc
 
     try:
-        tty.setcbreak(fd)
+        try:
+            tty.setcbreak(fd)
+        except (OSError, termios.error) as exc:
+            raise SvError(
+                "Interactive skill selection could not configure terminal input."
+            ) from exc
         output_stream.write(_HIDE_CURSOR)
         output_stream.flush()
         rendered_lines = _render(state, output_stream, item_label=item_label)
@@ -185,11 +197,18 @@ def select_skills(
                 item_label=item_label,
             )
     finally:
+        restore_error: BaseException | None = None
         try:
             termios.tcsetattr(fd, termios.TCSADRAIN, original_settings)
+        except (OSError, termios.error) as exc:
+            restore_error = exc
         finally:
             output_stream.write(_SHOW_CURSOR)
             output_stream.flush()
+        if restore_error is not None:
+            raise SvError(
+                "Interactive skill selection could not restore terminal settings."
+            ) from restore_error
 
 
 def _render(
@@ -219,10 +238,14 @@ def _render(
 def _format_skill_line(
     state: SelectionState[T], index: int, skill: str, *, highlight_cursor: bool = True
 ) -> str:
+    terminal_width = _terminal_width()
     is_selected = index in state.selected
     is_cursor = highlight_cursor and index == state.cursor
     checked = "[x]" if is_selected else "[ ]"
-    line = f"{checked} {index + 1}- {skill}"
+    prefix = f"{checked} {index + 1}- "
+    prefix_width = _display_width(prefix)
+    label = _fit_label(skill, max(terminal_width - prefix_width, 0))
+    line = _fit_text(f"{prefix}{label}", terminal_width)
 
     if is_cursor and is_selected:
         return f"{_BG_CURSOR_SELECTED}{_FG_CURSOR_SELECTED}{_BOLD}{line}{_RESET}"
@@ -230,8 +253,66 @@ def _format_skill_line(
         return f"{_BG_CURSOR}{_FG_CURSOR}{_BOLD}{line}{_RESET}"
     if is_selected:
         return f"{_FG_YELLOW}{_BOLD}{line}{_RESET}"
+    if _display_width(line) < prefix_width:
+        return f"{_FG_TEXT}{line}{_RESET}"
 
-    return f"{_FG_TEXT}{checked}{_RESET} {_FG_MUTED}{index + 1}-{_RESET} {skill}"
+    return f"{_FG_TEXT}{checked}{_RESET} {_FG_MUTED}{index + 1}-{_RESET} {label}"
+
+
+def _terminal_width() -> int:
+    return max(shutil.get_terminal_size(fallback=(120, 24)).columns, 1)
+
+
+def _fit_label(value: str, max_width: int) -> str:
+    return _fit_text(_sanitize_label(value), max_width)
+
+
+def _fit_text(value: str, max_width: int) -> str:
+    if max_width < 1:
+        return ""
+    if _display_width(value) <= max_width:
+        return value
+
+    ellipsis = "..."[:max_width]
+    if max_width <= len(ellipsis):
+        return ellipsis
+
+    available_width = max_width - len(ellipsis)
+    trimmed: list[str] = []
+    current_width = 0
+    for char in value:
+        char_width = _character_width(char)
+        if char_width == 0:
+            trimmed.append(char)
+            continue
+        if current_width + char_width > available_width:
+            break
+        trimmed.append(char)
+        current_width += char_width
+    return "".join(trimmed).rstrip() + ellipsis
+
+
+def _sanitize_label(value: str) -> str:
+    escaped: list[str] = []
+    for char in str(value):
+        codepoint = ord(char)
+        if codepoint < 0x20 or 0x7F <= codepoint < 0xA0:
+            escaped.append(f"\\x{codepoint:02x}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
+
+
+def _display_width(value: str) -> int:
+    return sum(_character_width(char) for char in value)
+
+
+def _character_width(char: str) -> int:
+    if unicodedata.combining(char):
+        return 0
+    if unicodedata.east_asian_width(char) in {"F", "W"}:
+        return 2
+    return 1
 
 
 def _read_key(fd: int) -> str:

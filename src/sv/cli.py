@@ -301,6 +301,13 @@ def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:
 
     if args.repo_command == "list":
         config = load_config(paths)
+        if not config.repos:
+            print(
+                "No skill source repos configured. "
+                "Add one with 'sv repo add <owner/repo>'."
+            )
+            return 0
+
         rows = [
             [repo.id, repo.url, str(paths.source_repo_for(repo.id))]
             for repo in config.repos

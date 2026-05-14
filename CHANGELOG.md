@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Polished interactive skill picker rows by escaping control characters from source metadata and truncating long labels to the terminal width so the inline UI stays stable, even in ultra-narrow terminals.
+- Fixed interactive picker terminal setup and restore failures to report user-facing errors instead of tracebacks.
+- Made `sv repo list` show the same friendly next step as `sv list` when the repo config is intentionally empty.
 - Simplified `sv list` duplicate UX by hiding the `Add as` column until duplicate skill names require qualified references and filling it only on rows whose skill names actually collide.
 - Simplified `sv add -l` labels so they show the source repo without repeating the skill name inside `repo:skill`.
 - Coalesced duplicate and equivalent GitHub source URLs configured under different repo IDs while keeping aliases usable for qualified adds, source cache validation, and existing sync metadata.

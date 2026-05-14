@@ -4,7 +4,7 @@ Use this page when `sv` output is surprising or you are not sure which command t
 
 ## `No skill source repos configured.`
 
-Your global config exists and contains no repos, usually after removing the last source with `sv repo remove`.
+Your global config exists and contains no repos, usually after removing the last source with `sv repo remove`. `sv list` and `sv repo list` both print this message instead of an empty table.
 
 Add a source repo before listing or adding skills:
 
@@ -47,7 +47,7 @@ If `~/.sv/config.toml` repeats the exact same repo, lists the same normalized UR
 
 ## Interactive commands fail in scripts
 
-`sv add -l` and `sv remove -l` require an interactive terminal. In scripts, use explicit commands instead:
+`sv add -l` and `sv remove -l` require an interactive terminal with usable terminal settings. If your shell, editor, or pseudo-terminal cannot provide those settings, `sv` reports a user-facing terminal error instead of a traceback. In scripts, use explicit commands instead:
 
 ```bash
 sv add find-docs

@@ -35,6 +35,10 @@ find-docs  Team/Skills  Retrieves documentation
 
 Terminal control characters from repo metadata or skill descriptions are escaped before printing, so source content cannot clear your screen or hide output.
 
+## Interactive picker output
+
+`sv add -l` uses an inline picker instead of a full-screen interface. Each row is kept to one terminal line so arrow-key navigation remains predictable. Long skill labels are truncated to the current terminal width, and control characters from source names or descriptions are escaped before display.
+
 ## Duplicate-name guidance
 
 When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the table. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` shows the matching sources and asks you to choose one.
