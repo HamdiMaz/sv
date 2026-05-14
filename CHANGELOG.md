@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T015: added `tests/test_security_paths.py` with security-path traversal coverage for hostile skill names and repo IDs, validating SvError behavior and no filesystem mutation on validation failures.
 - Completed T014: verified alias-preservation regression coverage for config rewrites and legacy-qualified `repo:skill` lookup in `tests/test_regressions_source_identity.py`.
 - Added source identity regression coverage to ensure equivalent GitHub source forms (`owner/repo`, HTTPS, and SSH variants) normalize consistently and coalesce catalog entries while preserving aliases.
 - Added alias-preservation regression coverage for config rewrites so add/remove operations keep legacy repo aliases and qualified reference resolution remains valid.
