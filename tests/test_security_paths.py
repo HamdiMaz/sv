@@ -5,6 +5,8 @@ from sv.config import SvPaths, load_config
 from sv.errors import SvError
 from sv.project import normalize_skill_name
 
+from tests.helpers import assert_no_raw_control_characters, assert_no_traceback
+
 
 def parse(argv):
     return build_parser().parse_args(argv)
@@ -103,9 +105,45 @@ def test_security_paths_reject_invalid_skill_inputs_without_filesystem_mutation(
     assert result == 1
     assert "error:" in captured.err
     assert "Invalid skill name" in captured.err
-    assert "Traceback" not in captured.err
+    assert_no_traceback(captured.err)
+    assert_no_raw_control_characters(captured.err)
     assert paths.config_file.read_text() == config_before
     assert not (project / ".pi").exists()
+
+
+@pytest.mark.parametrize(
+    ("repo_input", "expected_error"),
+    [
+        ("Org/..", "unsafe path components"),
+        ("bad\x1brepo", "repo cannot contain control characters"),
+    ],
+)
+def test_repo_add_rejects_invalid_repo_inputs_without_filesystem_mutation(
+    repo_input: str, expected_error: str, tmp_path, capsys
+) -> None:
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    paths = SvPaths.from_home(home)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text("repos = []\n")
+    config_before = paths.config_file.read_text()
+    project_skills = project / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    sentinel = project_skills / "kept.txt"
+    sentinel.write_text("do not touch\n")
+
+    result = handle(parse(["repo", "add", repo_input]), cwd=project, home=home)
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "error:" in captured.err
+    assert expected_error in captured.err
+    assert_no_traceback(captured.err)
+    assert_no_raw_control_characters(captured.err)
+    assert paths.config_file.read_text() == config_before
+    assert sentinel.read_text() == "do not touch\n"
+    assert not paths.sources_dir.exists()
 
 
 @pytest.mark.parametrize("repo_id", INVALID_REPO_IDS)
