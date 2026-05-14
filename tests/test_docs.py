@@ -15,6 +15,7 @@ EXPECTED_DOC_LINKS = {
     "usage": "docs/usage.md",
     "commands": "docs/commands.md",
     "output": "docs/output.md",
+    "testing": "docs/testing.md",
     "troubleshooting": "docs/troubleshooting.md",
 }
 

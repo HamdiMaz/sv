@@ -2,7 +2,7 @@
 
 `sv` manages project-local AI agent skills for Pi. It copies valid skills from one or more Git-backed source repositories into the current project's `.pi/skills` directory and records where installed skills came from so they can be synced reliably.
 
-Start with [getting started](docs/getting-started.md) for the shortest setup path. For copy-paste workflows, see [examples](docs/examples.md). For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
+Start with [getting started](docs/getting-started.md) for the shortest setup path. For copy-paste workflows, see [examples](docs/examples.md). For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For test commands and marker usage, see [testing sv](docs/testing.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
 
 ## Installation
 
