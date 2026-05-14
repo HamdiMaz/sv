@@ -294,6 +294,29 @@ def test_add_interactive_adds_selected_skills(tmp_path: Path, capsys):
 
 
 @pytest.mark.integration
+def test_add_interactive_requires_tty_without_mutating_project(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    result = run_sv(
+        ["add", "-l"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Interactive skill selection requires a TTY." in result.stderr
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stderr)
+    assert not (project / ".pi").exists()
+
+
+@pytest.mark.integration
 def test_add_interactive_reports_no_selection(tmp_path: Path, capsys):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
