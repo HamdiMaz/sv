@@ -1,59 +1,16 @@
 from pathlib import Path
 import shutil
 import subprocess
-import unicodedata
 
 import pytest
 
 from sv.cli import build_parser, handle
 from sv.config import SvPaths, derive_repo_id, load_config
+from tests.helpers import configure_source, display_width, make_source_repo, run_git, write_source_skill
 
 
 def parse(argv):
     return build_parser().parse_args(argv)
-
-
-def display_width(value: str) -> int:
-    width = 0
-    for char in value:
-        if unicodedata.combining(char):
-            continue
-        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
-    return width
-
-
-def run_git(args, cwd: Path):
-    subprocess.run(["git", *args], cwd=cwd, check=True, text=True, capture_output=True)
-
-
-def write_source_skill(source: Path, name: str, description: str, body: str) -> None:
-    skill_dir = source / "skills" / name
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n"
-    )
-    (skill_dir / "notes.md").write_text(body)
-
-
-def make_source_repo(tmp_path: Path, name: str = "skill-source") -> Path:
-    if shutil.which("git") is None:
-        pytest.skip("git is required for integration tests")
-
-    source = tmp_path / name
-    write_source_skill(source, "alpha", "Alpha skill.", "alpha v1\n")
-    write_source_skill(source, "beta", "Beta skill.", "beta v1\n")
-
-    run_git(["init"], source)
-    run_git(["config", "user.email", "tests@example.com"], source)
-    run_git(["config", "user.name", "sv tests"], source)
-    run_git(["add", "skills"], source)
-    run_git(["commit", "-m", "initial skills"], source)
-    return source
-
-
-def configure_source(source: Path, project: Path, home: Path):
-    exit_code = handle(parse(["repo", "add", str(source)]), cwd=project, home=home)
-    assert exit_code == 0
 
 
 def test_repo_list_with_no_configured_repos_explains_how_to_add_one(

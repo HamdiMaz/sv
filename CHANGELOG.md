@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Centralized git/source helper utilities in `tests/helpers.py` and switched `tests/test_cli_source_commands.py` to use shared helpers for local source/repo test setup.
 - Added GitHub Actions release-readiness workflow for pushes and PRs running lint, type checks, coverage tests, and package build.
 - Made the CI workflow install dependencies with `uv sync --locked --dev` for reproducible release checks.
 - Added coverage defaults (`pytest-cov` branch coverage + marker registration for `integration` and `security`) with an initial 85% fail-under gate.
