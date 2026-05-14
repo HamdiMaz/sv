@@ -37,6 +37,7 @@
 - Improved `sv add --help` with clearer positional argument guidance and examples for plain, qualified, interactive, and all-skill adds.
 - Added `docs/output.md` explaining table columns, wrapping behavior, duplicate skill names, and exact `repo:skill` references.
 - Improved `sv list` output with qualified `Add as` references, duplicate-name guidance, wrapped table cells, and safer control-character escaping.
+- Added `tests/test_regressions_duplicates.py` regression coverage for `sv list` duplicate-skill UX, including compact main table behavior and duplicate qualified references.
 - Fixed `sv add -l` to reject selections containing multiple sources for the same skill before copying any project files.
 - Documented the daily CLI workflow, duplicate skill handling, table columns, and update behavior in `docs/usage.md` and linked it from the README.
 - Fixed qualified `sv add repo:skill` and missing `sv repo remove` error messages to escape control characters from user input before printing.
