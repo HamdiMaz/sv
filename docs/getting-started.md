@@ -1,0 +1,80 @@
+# Getting started with sv
+
+This is the shortest path from a new install to a project-local Pi skill set.
+
+## 1. Add a skill source
+
+If you have not configured any source repos yet, add one:
+
+```bash
+sv repo add HamdiMaz/Skills
+# or your team's source repo
+sv repo add SomeOrg/TeamSkills
+```
+
+Check what `sv` will use:
+
+```bash
+sv repo list
+```
+
+## 2. Browse available skills
+
+```bash
+sv list
+```
+
+The normal list shows `Skill`, `Repo`, and `Description`. If two repos provide the same skill name, `sv` adds an `Add as` column. Copy that exact value when you need a specific source:
+
+```bash
+sv add HamdiMaz/Skills:find-docs
+```
+
+## 3. Add skills to your project
+
+Run from the project root:
+
+```bash
+sv add find-docs
+```
+
+To pick several skills interactively:
+
+```bash
+sv add -l
+```
+
+The picker shows the visible range and controls at the bottom. Use ↑/↓ to move, Space to select, Enter to confirm, and `q` to cancel.
+
+## 4. Keep skills updated
+
+```bash
+sv sync
+```
+
+`sv sync` refreshes configured source repos and updates installed skills from their recorded sources. Managed skill folders are replaced with the source copy, so do not keep local edits inside synced skill folders.
+
+## 5. Run Pi with project skills only
+
+```bash
+sv run -- <pi args>
+```
+
+This launches Pi as:
+
+```bash
+pi --no-skills --skill .pi/skills <pi args>
+```
+
+## Common next steps
+
+| Goal | Command |
+| --- | --- |
+| See source repos | `sv repo list` |
+| Add another source | `sv repo add <owner/repo>` |
+| Remove a source from config | `sv repo remove <repo-id>` |
+| Remove a project skill | `sv remove <skill>` |
+| Select project skills to remove | `sv remove -l` |
+| Refresh and sync with progress messages | `sv update` |
+
+For more detail, read the [usage guide](usage.md), [command reference](commands.md), and [output guide](output.md).

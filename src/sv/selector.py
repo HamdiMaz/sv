@@ -229,10 +229,22 @@ def _render(
         )
         for index, skill in state.visible_items()
     ]
+    lines.append(_format_help_line(state))
     stdout.write("\n".join(lines))
     stdout.write("\n")
     stdout.flush()
     return len(lines)
+
+
+def _format_help_line(state: SelectionState[T]) -> str:
+    if state.items:
+        text = (
+            f"Showing {state.viewport_start + 1}-{state.visible_end} of "
+            f"{len(state.items)} • ↑/↓ move • ←/→ page • Space select • Enter confirm • q cancel"
+        )
+    else:
+        text = "No skills to show • q cancel"
+    return f"{_FG_MUTED}{_fit_text(text, _terminal_width())}{_RESET}"
 
 
 def _format_skill_line(

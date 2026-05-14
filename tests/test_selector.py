@@ -137,6 +137,7 @@ def test_render_can_remove_cursor_highlight_after_selection_finishes():
     assert stdout.getvalue().splitlines() == [
         "\x1b[38;5;220m\x1b[1m[x] 1- alpha\x1b[0m",
         "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m2-\x1b[0m beta",
+        "\x1b[38;5;245mShowing 1-2 of 2 • ↑/↓ move • ←/→ page • Space select • Enter confirm • q cancel\x1b[0m",
     ]
 
 
@@ -147,7 +148,7 @@ def test_render_outputs_inline_colored_five_item_list_without_alternate_screen()
 
     line_count = _render(state, stdout)
 
-    assert line_count == 5
+    assert line_count == 6
     output = stdout.getvalue()
     assert "\x1b[?1049h" not in output
     assert "\x1b[2J" not in output
@@ -157,6 +158,7 @@ def test_render_outputs_inline_colored_five_item_list_without_alternate_screen()
         "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m3-\x1b[0m skill 3",
         "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m4-\x1b[0m skill 4",
         "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m5-\x1b[0m skill 5",
+        "\x1b[38;5;245mShowing 1-5 of 6 • ↑/↓ move • ←/→ page • Space select • Enter confirm • q cancel\x1b[0m",
     ]
 
 
@@ -184,7 +186,7 @@ def test_render_escapes_control_characters_in_item_labels():
     assert "alpha\\x1b[2J" in output
 
 
-def test_render_truncates_long_labels_to_terminal_width(monkeypatch):
+def test_render_truncates_long_labels_and_footer_to_terminal_width(monkeypatch):
     monkeypatch.setenv("COLUMNS", "32")
     state = SelectionState(["alpha " + "description " * 10])
     stdout = StringIO()
@@ -194,6 +196,8 @@ def test_render_truncates_long_labels_to_terminal_width(monkeypatch):
     lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
     assert all(display_width(line) <= 32 for line in lines)
     assert lines[0].endswith("...")
+    assert lines[-1].startswith("Showing 1-1")
+    assert lines[-1].endswith("...")
 
 
 def test_render_compacts_rows_when_terminal_is_narrower_than_prefix(monkeypatch):

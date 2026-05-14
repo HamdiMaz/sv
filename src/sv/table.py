@@ -170,6 +170,8 @@ def _sanitize_cell(value: str) -> str:
 def _wrap_cell(value: str, width: int) -> list[str]:
     if not value:
         return [""]
+    if _is_unspaced_value(value):
+        return _wrap_unspaced_value(value, width)
     wrapped = textwrap.wrap(
         value,
         width=width,
@@ -181,6 +183,42 @@ def _wrap_cell(value: str, width: int) -> list[str]:
         for wrapped_line in wrapped
         for line in (_wrap_display_width(wrapped_line, width) or [wrapped_line])
     ]
+
+
+def _is_unspaced_value(value: str) -> bool:
+    return not any(char.isspace() for char in value)
+
+
+def _wrap_unspaced_value(value: str, width: int) -> list[str]:
+    lines: list[str] = []
+    remaining = value
+    while remaining and _display_width(remaining) > width:
+        cut = _preferred_unspaced_cut(remaining, width)
+        if cut < 1:
+            hard_wrapped = _wrap_display_width(remaining, width)
+            return [*lines, *(hard_wrapped or [remaining])]
+        lines.append(remaining[:cut])
+        remaining = remaining[cut:]
+    if remaining:
+        lines.append(remaining)
+    return lines or [""]
+
+
+def _preferred_unspaced_cut(value: str, width: int) -> int:
+    current_width = 0
+    hard_cut = 0
+    preferred_cut = 0
+    for index, char in enumerate(value):
+        char_width = _character_width(char)
+        if current_width + char_width > width:
+            break
+        current_width += char_width
+        hard_cut = index + 1
+        if char in {"/", ":"}:
+            preferred_cut = index + 1
+    if preferred_cut:
+        return preferred_cut
+    return hard_cut
 
 
 def _wrap_display_width(value: str, width: int) -> list[str]:

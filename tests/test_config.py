@@ -328,6 +328,33 @@ def test_load_config_coalesces_equivalent_github_repo_urls(tmp_path: Path):
     )
 
 
+def test_add_repo_preserves_duplicate_source_aliases_when_rewriting_config(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
+    )
+
+    result = add_repo(paths, "SomeOrg/TeamSkills")
+
+    assert result.status == "added"
+    assert load_config(paths).repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            aliases=("Mirror/Skills",),
+        ),
+        RepoConfig(
+            id="SomeOrg/TeamSkills",
+            url="https://github.com/SomeOrg/TeamSkills.git",
+        ),
+    )
+    assert 'aliases = ["Mirror/Skills"]' in paths.config_file.read_text()
+
+
 def test_remove_repo_does_not_remove_canonical_repo_by_alias(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)

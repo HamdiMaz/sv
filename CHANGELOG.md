@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a getting-started guide focused on the shortest setup path and linked it from the README.
+- Added a compact interactive picker help/status line showing the visible range and controls, with terminal-width truncation for narrow terminals.
+- Improved table wrapping for repo-like values so `owner/repo` IDs and `repo:skill` references prefer clean `/` and `:` wrap points before hard wrapping.
+- Preserved duplicate-source repo aliases across config rewrites so legacy qualified `repo:skill` references keep working after `sv repo add` or `sv repo remove`.
 - Polished interactive skill picker rows by escaping control characters from source metadata and truncating long labels to the terminal width so the inline UI stays stable, even in ultra-narrow terminals.
 - Fixed interactive picker terminal setup and restore failures to report user-facing errors instead of tracebacks.
 - Made `sv repo list` show the same friendly next step as `sv list` when the repo config is intentionally empty.

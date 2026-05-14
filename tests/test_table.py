@@ -67,6 +67,36 @@ def test_format_table_escapes_control_characters_before_measuring_columns():
     ]
 
 
+def test_format_table_wraps_repo_like_values_at_slash_boundaries():
+    output = format_table(
+        ["Repo"],
+        [["OrgName/SkillRepo"]],
+        max_widths={"Repo": 10},
+    )
+
+    assert output.splitlines() == [
+        "Repo",
+        "----------",
+        "OrgName/",
+        "SkillRepo",
+    ]
+
+
+def test_format_table_wraps_qualified_skill_values_at_colon_boundaries():
+    output = format_table(
+        ["Add as"],
+        [["Org/Repo:alpha"]],
+        max_widths={"Add as": 9},
+    )
+
+    assert output.splitlines() == [
+        "Add as",
+        "---------",
+        "Org/Repo:",
+        "alpha",
+    ]
+
+
 def test_format_table_breaks_long_words_to_honor_configured_widths():
     output = format_table(
         ["URL"],

@@ -6,8 +6,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import textwrap
 from typing import Any
+import unicodedata
 
 from sv.agents import PiAdapter
 from sv.catalog import (
@@ -268,15 +268,72 @@ def _print_wrapped(message: str, *, leading_blank_line: bool = False) -> None:
         print()
     width = _table_width()
     indent = "     " if width > 5 else ""
-    print(
-        textwrap.fill(
-            message,
-            width=width,
-            subsequent_indent=indent,
-            break_long_words=True,
-            break_on_hyphens=False,
-        )
-    )
+    for line in _wrap_message_to_display_width(message, width, subsequent_indent=indent):
+        print(line)
+
+
+def _wrap_message_to_display_width(
+    message: str, width: int, *, subsequent_indent: str = ""
+) -> list[str]:
+    line_width = max(width, 1)
+    subsequent_width = max(line_width - _display_width(subsequent_indent), 1)
+    lines: list[str] = []
+    current = ""
+    current_width = line_width
+    current_indent = ""
+
+    for word in message.split():
+        remaining = word
+        while remaining:
+            separator_width = 1 if current else 0
+            available = current_width - _display_width(current) - separator_width
+            if _display_width(remaining) <= available:
+                current = f"{current} {remaining}" if current else remaining
+                break
+            if current:
+                lines.append(f"{current_indent}{current}")
+                current = ""
+                current_width = subsequent_width
+                current_indent = subsequent_indent
+                continue
+
+            chunk, remaining = _split_display_width(remaining, current_width)
+            lines.append(f"{current_indent}{chunk}")
+            current_width = subsequent_width
+            current_indent = subsequent_indent
+
+    if current:
+        lines.append(f"{current_indent}{current}")
+    return lines or [""]
+
+
+def _split_display_width(value: str, width: int) -> tuple[str, str]:
+    chunk: list[str] = []
+    current_width = 0
+    for index, char in enumerate(value):
+        char_width = _character_width(char)
+        if char_width == 0:
+            chunk.append(char)
+            continue
+        if char_width > width and not chunk:
+            return "?" * width, value[index + 1 :]
+        if current_width + char_width > width:
+            return "".join(chunk), value[index:]
+        chunk.append(char)
+        current_width += char_width
+    return "".join(chunk), ""
+
+
+def _display_width(value: str) -> int:
+    return sum(_character_width(char) for char in value)
+
+
+def _character_width(char: str) -> int:
+    if unicodedata.combining(char):
+        return 0
+    if unicodedata.east_asian_width(char) in {"F", "W"}:
+        return 2
+    return 1
 
 
 def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:

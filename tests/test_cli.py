@@ -1,4 +1,5 @@
 from pathlib import Path
+import unicodedata
 
 import pytest
 
@@ -8,6 +9,15 @@ from sv.project import AddSkillResult, SyncResult, SyncSkip
 
 def parse(argv):
     return build_parser().parse_args(argv)
+
+
+def display_width(value: str) -> int:
+    width = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    return width
 
 
 def test_print_add_result_escapes_existing_manifest_repo_id(
@@ -462,6 +472,14 @@ def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(
     _print_wrapped("one two three")
 
     assert all(len(line) <= 4 for line in capsys.readouterr().out.splitlines())
+
+
+def test_print_wrapped_honors_display_width_for_wide_unicode(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "20")
+
+    _print_wrapped("Duplicate 日本語日本語日本語 skill names")
+
+    assert all(display_width(line) <= 20 for line in capsys.readouterr().out.splitlines())
 
 
 def test_config_command_is_removed_from_parser():

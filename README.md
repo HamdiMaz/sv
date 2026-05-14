@@ -2,7 +2,7 @@
 
 `sv` manages project-local AI agent skills for Pi. It copies valid skills from one or more Git-backed source repositories into the current project's `.pi/skills` directory and records where installed skills came from so they can be synced reliably.
 
-For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
+Start with [getting started](docs/getting-started.md) for the shortest setup path. For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
 
 ## Installation
 
@@ -88,7 +88,7 @@ List valid skills available in configured source repos:
 sv list
 ```
 
-`sv list` shows the skill name, source repo, and parsed description from `SKILL.md`. To keep normal lists easy to scan, the qualified `Add as` column appears only when duplicate skill names exist across different repos, and only duplicate-name rows fill it in. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. When duplicate skill names exist, `sv list` keeps each source visible and prints a tip telling you to use the qualified `Add as` value. See [reading sv output](docs/output.md) for examples.
+`sv list` shows the skill name, source repo, and parsed description from `SKILL.md`. To keep normal lists easy to scan, the qualified `Add as` column appears only when duplicate skill names exist across different repos, and only duplicate-name rows fill it in. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. When duplicate skill names exist, `sv list` keeps each source visible and prints a tip telling you to use the qualified `Add as` value. See [reading sv output](docs/output.md) for examples.
 
 Add a skill to the current project:
 
@@ -111,8 +111,8 @@ sv add -l
 ```
 
 Use ↑/↓ to move, ←/→ to page through skills, Space to select, Enter to add,
-and `q` to cancel. The picker renders inline, shows 5 skills at a time, and
-scrolls as you move. Each picker row includes the source repo ID so duplicate skill names are easy to distinguish without repeating the skill name twice. Long picker labels are truncated to the terminal width, and control characters from source metadata are escaped before display so the inline UI stays stable. If you select two sources for the same skill name, `sv` stops before copying anything and asks you to choose only one source. When a source repo is already cached, `sv add -l` reads the
+and `q` to cancel. The picker renders inline, shows 5 skills at a time, displays a compact help/status line with the visible range and controls, and
+scrolls as you move. Each picker row includes the source repo ID so duplicate skill names are easy to distinguish without repeating the skill name twice. Long picker labels and the help line are truncated to the terminal width, and control characters from source metadata are escaped before display so the inline UI stays stable. If you select two sources for the same skill name, `sv` stops before copying anything and asks you to choose only one source. When a source repo is already cached, `sv add -l` reads the
 cache without pulling first so the picker opens quickly. Run `sv list` when you
 want to refresh source caches without changing project skills; use `sv update`
 only when you also want to sync installed project skills.

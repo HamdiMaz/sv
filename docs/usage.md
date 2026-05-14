@@ -44,7 +44,7 @@ When two repos contain the same skill name, `sv list` keeps both rows visible, a
 
 - `sv add <skill>` installs the skill when exactly one configured repo provides that name.
 - `sv add <repo>:<skill>` installs from one exact source.
-- `sv add -l` opens an interactive picker. The picker labels each row with its source repo ID so duplicate names are easy to distinguish without repeating the skill name twice. Long labels are shortened to your terminal width, and control characters in source metadata are printed as escaped text so the inline picker does not jump or clear the screen.
+- `sv add -l` opens an interactive picker. The picker labels each row with its source repo ID so duplicate names are easy to distinguish without repeating the skill name twice. A help line keeps the controls visible while you move through the list. Long labels and the help line are shortened to your terminal width, and control characters in source metadata are printed as escaped text so the inline picker does not jump or clear the screen.
 - `sv add --all` installs every valid skill only when there are no duplicate skill names across configured repos.
 
 `sv` never overwrites an existing project skill during add. If the skill folder already exists, it reports that the skill is already present and leaves local files unchanged. When origin metadata is available, the message also tells you whether the existing skill came from the same repo or a different repo than the one you requested.
@@ -66,4 +66,4 @@ Synced skill folders are replaced with the source version. Local edits inside ma
 
 ## Output and table behavior
 
-Tables are plain text so they work in terminals, logs, and CI. Long descriptions, URLs, and cache paths wrap within the current terminal width instead of pushing important columns off screen. Very narrow terminals use tighter column spacing and last-resort hard wrapping when necessary. Duplicate-name guidance wraps as well, so narrow terminals and CI logs stay readable. Terminal control characters from source metadata are escaped before display. Interactive picker rows are single-line and terminal-width aware so arrow-key navigation remains stable.
+Tables are plain text so they work in terminals, logs, and CI. Long descriptions, URLs, and cache paths wrap within the current terminal width instead of pushing important columns off screen. Repo-like values prefer clean wrap points at `/` and `:` before hard wrapping, which keeps `owner/repo` IDs and `repo:skill` references easier to scan. Very narrow terminals use tighter column spacing and last-resort hard wrapping when necessary. Duplicate-name guidance wraps as well, so narrow terminals and CI logs stay readable. Terminal control characters from source metadata are escaped before display. Interactive picker rows are single-line and terminal-width aware so arrow-key navigation remains stable.

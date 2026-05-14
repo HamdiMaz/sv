@@ -43,7 +43,7 @@ Wide Unicode characters are counted by display width so rows should stay within 
 
 ## The same source appears twice
 
-If `~/.sv/config.toml` repeats the exact same repo, lists the same normalized URL under more than one repo ID, or mixes equivalent GitHub URL forms (HTTPS, SSH, optional `.git`), `sv` keeps the first entry and ignores the duplicate while loading skills. Existing sync metadata or qualified commands that point at a duplicate repo ID are still matched to the kept source. Use `sv repo list` to inspect the active sources; the next `sv repo add` or `sv repo remove` write keeps only active source entries.
+If `~/.sv/config.toml` repeats the exact same repo, lists the same normalized URL under more than one repo ID, or mixes equivalent GitHub URL forms (HTTPS, SSH, optional `.git`), `sv` keeps the first entry and treats later IDs as aliases while loading skills. Existing sync metadata or qualified commands that point at a duplicate repo ID are still matched to the kept source. Use `sv repo list` to inspect the active sources; config rewrites preserve duplicate-source aliases so legacy `repo:skill` references keep working without listing the same skill twice.
 
 ## Interactive commands fail in scripts
 

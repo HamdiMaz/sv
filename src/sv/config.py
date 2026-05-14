@@ -197,7 +197,8 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
                 f"Invalid sv config at {paths.config_file}: repo entry {index} is missing {exc.args[0]!r}."
             ) from exc
         _validate_repo_id(repo_id, f"repo entry {index} field 'id'")
-        repo_config = RepoConfig(id=repo_id, url=repo_url)
+        aliases = _parse_repo_aliases(repo_item.get("aliases", []), index, paths)
+        repo_config = RepoConfig(id=repo_id, url=repo_url, aliases=aliases)
         source_key = repo_source_key(repo_url)
         existing = seen_by_id.get(repo_id)
         if existing is not None:
@@ -212,12 +213,32 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
             existing_source = repos[existing_source_index]
             repos[existing_source_index] = replace(
                 existing_source,
-                aliases=(*existing_source.aliases, repo_id),
+                aliases=(*existing_source.aliases, repo_id, *repo_config.aliases),
             )
             continue
         seen_by_source[source_key] = len(repos)
         repos.append(repo_config)
     return tuple(repos)
+
+
+def _parse_repo_aliases(raw_aliases: Any, repo_index: int, paths: SvPaths) -> tuple[str, ...]:
+    if raw_aliases == []:
+        return ()
+    if not isinstance(raw_aliases, list):
+        raise SvError(
+            f"Invalid sv config at {paths.config_file}: repo entry {repo_index} field 'aliases' must be a list."
+        )
+    aliases: list[str] = []
+    for alias_index, raw_alias in enumerate(raw_aliases, start=1):
+        alias = _expect_string(
+            raw_alias,
+            f"repo entry {repo_index} alias {alias_index}",
+            paths,
+        )
+        _validate_repo_id(alias, f"repo entry {repo_index} alias {alias_index}")
+        if alias not in aliases:
+            aliases.append(alias)
+    return tuple(aliases)
 
 
 def repo_source_key(repo: str) -> str:
@@ -254,6 +275,9 @@ def _save_config(paths: SvPaths, config: SvConfig) -> None:
             lines.append("[[repos]]")
             lines.append(f'id = "{_toml_escape(repo.id)}"')
             lines.append(f'url = "{_toml_escape(repo.url)}"')
+            if repo.aliases:
+                aliases = ", ".join(f'"{_toml_escape(alias)}"' for alias in repo.aliases)
+                lines.append(f"aliases = [{aliases}]")
         paths.config_file.write_text("\n".join(lines) + "\n")
     except OSError as exc:
         raise SvError(
