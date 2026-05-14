@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 import hashlib
@@ -29,6 +29,7 @@ _REPO_ID_ALLOWED = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 class RepoConfig:
     id: str
     url: str
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -147,8 +148,9 @@ def add_repo(paths: SvPaths, repo: str) -> RepoChangeResult:
     if not paths.config_file.exists():
         config = SvConfig(repos=())
 
+    repo_key = repo_source_key(repo_config.url)
     for existing in config.repos:
-        if existing.id == repo_config.id:
+        if existing.id == repo_config.id or repo_source_key(existing.url) == repo_key:
             return RepoChangeResult(repo=existing, status="exists")
 
     _save_config(paths, SvConfig(repos=(*config.repos, repo_config)))
@@ -174,6 +176,7 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
 
     repos: list[RepoConfig] = []
     seen_by_id: dict[str, RepoConfig] = {}
+    seen_by_source: dict[str, int] = {}
     for index, item in enumerate(raw_repos, start=1):
         if not isinstance(item, dict):
             raise SvError(
@@ -195,16 +198,38 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
             ) from exc
         _validate_repo_id(repo_id, f"repo entry {index} field 'id'")
         repo_config = RepoConfig(id=repo_id, url=repo_url)
+        source_key = repo_source_key(repo_url)
         existing = seen_by_id.get(repo_id)
         if existing is not None:
-            if existing.url == repo_url:
+            if existing.url == repo_url or repo_source_key(existing.url) == source_key:
                 continue
             raise SvError(
                 f"Invalid sv config at {paths.config_file}: repo id {repo_id!r} is listed more than once with different URLs."
             )
         seen_by_id[repo_id] = repo_config
+        existing_source_index = seen_by_source.get(source_key)
+        if existing_source_index is not None:
+            existing_source = repos[existing_source_index]
+            repos[existing_source_index] = replace(
+                existing_source,
+                aliases=(*existing_source.aliases, repo_id),
+            )
+            continue
+        seen_by_source[source_key] = len(repos)
         repos.append(repo_config)
     return tuple(repos)
+
+
+def repo_source_key(repo: str) -> str:
+    """Return a stable identity for duplicate source detection."""
+    normalized = normalize_repo(repo)
+    for pattern in (_GITHUB_HTTPS, _GITHUB_SSH, _GITHUB_SSH_URL):
+        match = pattern.fullmatch(normalized)
+        if match:
+            owner = match.group("owner").lower()
+            repo_name = match.group("repo").lower()
+            return f"github:{owner}/{repo_name}"
+    return normalized
 
 
 def _expect_string(value: Any, field: str, paths: SvPaths) -> str:

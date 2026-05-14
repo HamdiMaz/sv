@@ -436,6 +436,152 @@ def test_sync_project_skills_updates_manifest_tracked_origin(tmp_path: Path):
     assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
 
 
+def test_sync_project_skills_updates_manifest_tracked_origin_from_repo_alias(
+    tmp_path: Path,
+):
+    entry = SourceSkill(
+        name="managed",
+        description="Managed skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "skills" / "managed",
+        repo_aliases=("Mirror/Skills",),
+    )
+    entry.source_path.mkdir(parents=True)
+    (entry.source_path / "SKILL.md").write_text("remote\n")
+    (entry.source_path / "notes.md").write_text("managed remote\n")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    local = project_skills / "managed"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("managed local\n")
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id="Mirror/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/managed",
+                description="Managed skill.",
+            )
+        },
+    )
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == ["managed"]
+    assert result.skipped == []
+    assert (local / "notes.md").read_text() == "managed remote\n"
+    assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
+
+
+def test_sync_project_skills_skips_recorded_origin_when_repo_id_url_changes(
+    tmp_path: Path,
+):
+    entry = SourceSkill(
+        name="managed",
+        description="Managed skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/NewSkills.git",
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "skills" / "managed",
+    )
+    entry.source_path.mkdir(parents=True)
+    (entry.source_path / "notes.md").write_text("managed remote\n")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    local = project_skills / "managed"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("managed local\n")
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/OldSkills.git",
+                source_path="skills/managed",
+                description="Managed skill.",
+            )
+        },
+    )
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == []
+    assert [(skip.skill, skip.reason, skip.repo_ids) for skip in result.skipped] == [
+        ("managed", "source-missing", ("Org/Skills",))
+    ]
+    assert (local / "notes.md").read_text() == "managed local\n"
+
+
+def test_sync_project_skills_skips_invalid_recorded_repo_url(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    local = project_skills / "managed"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("managed local\n")
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git\x1b[2J",
+                source_path="skills/managed",
+                description="Managed skill.",
+            )
+        },
+    )
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == []
+    assert [(skip.skill, skip.reason, skip.repo_ids) for skip in result.skipped] == [
+        ("managed", "source-missing", ("Org/Skills",))
+    ]
+    assert (local / "notes.md").read_text() == "managed local\n"
+
+
+def test_sync_project_skills_updates_manifest_tracked_origin_from_repo_url_fallback(
+    tmp_path: Path,
+):
+    entry = SourceSkill(
+        name="managed",
+        description="Managed skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "skills" / "managed",
+    )
+    entry.source_path.mkdir(parents=True)
+    (entry.source_path / "SKILL.md").write_text("remote\n")
+    (entry.source_path / "notes.md").write_text("managed remote\n")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    local = project_skills / "managed"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("managed local\n")
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id="Mirror/Skills",
+                repo_url="git@github.com:Org/Skills.git",
+                source_path="skills/managed",
+                description="Managed skill.",
+            )
+        },
+    )
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == ["managed"]
+    assert result.skipped == []
+    assert (local / "notes.md").read_text() == "managed remote\n"
+    assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
+
+
 def test_sync_project_skills_backfills_unique_untracked_skill(tmp_path: Path):
     entry = make_source_skill(tmp_path / "source", "legacy")
     project_skills = tmp_path / "project" / ".pi" / "skills"

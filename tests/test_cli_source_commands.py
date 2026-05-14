@@ -46,6 +46,29 @@ def configure_source(source: Path, project: Path, home: Path):
     assert exit_code == 0
 
 
+def test_list_with_no_configured_repos_explains_how_to_add_one(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    paths = SvPaths.from_home(home)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text("repos = []\n")
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(
+        parse(["list"]), cwd=project, home=home, git_runner=git_runner
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "No skill source repos configured." in output
+    assert "sv repo add" in output
+
+
 def test_list_and_add_from_local_git_source(tmp_path: Path, capsys):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
@@ -115,9 +138,7 @@ def test_add_interactive_adds_selected_skills(tmp_path: Path, capsys):
     selector_calls = []
 
     def skill_selector(skills, **kwargs):
-        selector_calls.append(
-            ([(skill.name, skill.repo_id) for skill in skills], kwargs)
-        )
+        selector_calls.append((list(skills), kwargs))
         return [skills[1]]
 
     exit_code = handle(
@@ -128,8 +149,13 @@ def test_add_interactive_adds_selected_skills(tmp_path: Path, capsys):
     )
 
     assert exit_code == 0
-    assert selector_calls[0][0][0][0] == "alpha"
+    assert selector_calls[0][0][0].name == "alpha"
     assert "item_label" in selector_calls[0][1]
+    item_label = selector_calls[0][1]["item_label"]
+    first_skill = selector_calls[0][0][0]
+    label = item_label(first_skill)
+    assert first_skill.repo_id in label
+    assert f"{first_skill.repo_id}:alpha" not in label
     assert not (project / ".pi" / "skills" / "alpha").exists()
     assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
     assert "Added Pi skill 'beta'" in capsys.readouterr().out
@@ -284,6 +310,35 @@ def test_add_qualified_skill_selects_repo_when_names_overlap(tmp_path: Path, cap
     assert "Added Pi skill 'alpha'" in capsys.readouterr().out
 
 
+def test_add_existing_skill_from_different_origin_explains_source_conflict(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    repo_ids = [repo.id for repo in load_config(SvPaths.from_home(home)).repos]
+    assert handle(parse(["add", f"{repo_ids[0]}:alpha"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", f"{repo_ids[1]}:alpha"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v1\n"
+    output = capsys.readouterr().out
+    assert f"currently from {repo_ids[0]}" in output
+    assert f"requested {repo_ids[1]}" in output
+    assert "sv remove alpha" in output
+
+
 def test_add_duplicate_skill_uses_choice_callback(tmp_path: Path, capsys, monkeypatch):
     source_a = make_source_repo(tmp_path, "source-a")
     source_b = make_source_repo(tmp_path, "source-b")
@@ -370,6 +425,51 @@ def test_list_table_fits_terminal_width(tmp_path: Path, capsys, monkeypatch):
     assert all(len(line) <= 40 for line in lines)
 
 
+def test_list_and_add_coalesce_equivalent_repo_aliases(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    paths = SvPaths.from_home(home)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
+        '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
+    )
+    repo_path = paths.source_repo_for("Org/Skills")
+    (repo_path / ".git").mkdir(parents=True)
+    write_source_skill(repo_path, "alpha", "Alpha skill.", "alpha v1\n")
+
+    def git_runner(args, cwd=None):
+        if args == ["git", "--version"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="git\n")
+        if args == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout="https://github.com/Org/Skills.git\n",
+            )
+        if args == ["git", "pull", "--ff-only"]:
+            return subprocess.CompletedProcess(args=args, returncode=0)
+        raise AssertionError(f"unexpected git call: {args}")
+
+    assert handle(parse(["list"]), cwd=project, home=home, git_runner=git_runner) == 0
+    list_output = capsys.readouterr().out
+    assert list_output.count("alpha") == 1
+    assert "Add as" not in list_output
+
+    exit_code = handle(
+        parse(["add", "Mirror/Skills:alpha"]),
+        cwd=project,
+        home=home,
+        git_runner=git_runner,
+    )
+
+    assert exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == (
+        "alpha v1\n"
+    )
+
+
 def test_list_coalesces_repeated_repo_config_entries(tmp_path: Path, capsys):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
@@ -421,9 +521,12 @@ def test_list_shows_qualified_references_for_duplicate_skill_names(
 ):
     source_a = make_source_repo(tmp_path, "source-a")
     source_b = make_source_repo(tmp_path, "source-b")
+    shutil.rmtree(source_b / "skills" / "beta")
+    run_git(["rm", "-r", "skills/beta"], source_b)
     write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
-    run_git(["add", "skills/alpha"], source_b)
-    run_git(["commit", "-m", "update alpha in b"], source_b)
+    write_source_skill(source_b, "gamma", "Gamma from B.", "gamma from b\n")
+    run_git(["add", "skills/alpha", "skills/gamma"], source_b)
+    run_git(["commit", "-m", "update source b skills"], source_b)
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -439,6 +542,8 @@ def test_list_shows_qualified_references_for_duplicate_skill_names(
     assert "Add as" in output
     assert f"{repo_ids[0]}:alpha" in output
     assert f"{repo_ids[1]}:alpha" in output
+    assert f"{repo_ids[0]}:beta" not in output
+    assert f"{repo_ids[1]}:gamma" not in output
     assert "Tip: duplicate skill names are available" in output
 
 

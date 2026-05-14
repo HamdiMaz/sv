@@ -265,6 +265,19 @@ def test_load_config_coalesces_identical_duplicate_repo_entries(tmp_path: Path):
     )
 
 
+def test_load_config_coalesces_duplicate_repo_id_with_equivalent_url(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
+        '[[repos]]\nid = "Org/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
+    )
+
+    assert load_config(paths).repos == (
+        RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills"),
+    )
+
+
 def test_load_config_rejects_duplicate_repo_id_with_different_urls(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
@@ -275,6 +288,64 @@ def test_load_config_rejects_duplicate_repo_id_with_different_urls(tmp_path: Pat
 
     with pytest.raises(SvError, match="listed more than once with different URLs"):
         load_config(paths)
+
+
+def test_load_config_coalesces_duplicate_repo_urls_with_different_ids(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        '[[repos]]\nid = "Mirror/Skills"\nurl = "https://github.com/Org/Skills.git"\n'
+    )
+
+    config = load_config(paths)
+
+    assert config.repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            aliases=("Mirror/Skills",),
+        ),
+    )
+
+
+def test_load_config_coalesces_equivalent_github_repo_urls(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
+        '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
+    )
+
+    config = load_config(paths)
+
+    assert config.repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills",
+            aliases=("Mirror/Skills",),
+        ),
+    )
+
+
+def test_remove_repo_does_not_remove_canonical_repo_by_alias(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
+    )
+
+    with pytest.raises(ValueError, match="not configured"):
+        remove_repo(paths, "Mirror/Skills")
+
+    assert load_config(paths).repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            aliases=("Mirror/Skills",),
+        ),
+    )
 
 
 def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):

@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from sv.catalog import SourceSkill, build_source_catalog
+from sv.catalog import SourceSkill, build_source_catalog, find_qualified_catalog_entry
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 
@@ -70,6 +70,52 @@ def test_build_source_catalog_ignores_exact_repeated_repo_entries(tmp_path: Path
     assert [(entry.name, entry.repo_id) for entry in catalog] == [
         ("alpha", "Org/Skills")
     ]
+
+
+def test_build_source_catalog_ignores_repeated_repo_urls(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    duplicate_url = RepoConfig(
+        id="Mirror/Skills", url="https://github.com/Org/Skills.git"
+    )
+    make_skill(paths.source_repo_for(repo.id), "alpha", "Alpha skill.")
+    make_skill(paths.source_repo_for(duplicate_url.id), "alpha", "Alpha skill.")
+
+    catalog = build_source_catalog([repo, duplicate_url], paths)
+
+    assert [(entry.name, entry.repo_id, entry.repo_aliases) for entry in catalog] == [
+        ("alpha", "Org/Skills", ("Mirror/Skills",))
+    ]
+
+
+def test_build_source_catalog_ignores_equivalent_github_repo_urls(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills")
+    duplicate_url = RepoConfig(
+        id="Mirror/Skills", url="git@github.com:Org/Skills.git"
+    )
+    make_skill(paths.source_repo_for(repo.id), "alpha", "Alpha skill.")
+    make_skill(paths.source_repo_for(duplicate_url.id), "alpha", "Alpha skill.")
+
+    catalog = build_source_catalog([repo, duplicate_url], paths)
+
+    assert [(entry.name, entry.repo_id, entry.repo_aliases) for entry in catalog] == [
+        ("alpha", "Org/Skills", ("Mirror/Skills",))
+    ]
+
+
+def test_find_qualified_catalog_entry_matches_repo_alias(tmp_path: Path):
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "skills" / "alpha",
+        repo_aliases=("Mirror/Skills",),
+    )
+
+    assert find_qualified_catalog_entry([entry], "Mirror/Skills:alpha") is entry
 
 
 def test_build_source_catalog_skips_invalid_skills(tmp_path: Path):

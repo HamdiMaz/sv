@@ -16,7 +16,7 @@ from sv.catalog import (
     find_catalog_matches,
     find_qualified_catalog_entry,
 )
-from sv.config import SvPaths, add_repo, load_config, remove_repo
+from sv.config import RepoConfig, SvPaths, add_repo, load_config, remove_repo
 from sv.errors import SvError
 from sv.project import (
     AddSkillResult,
@@ -193,7 +193,13 @@ def handle(
             return _handle_remove(skill_name, cwd=cwd, adapter=adapter)
 
         if args.command == "list":
-            catalog = _update_sources_and_catalog(paths, git_runner, update=True)
+            config = load_config(paths)
+            if not config.repos:
+                print("No skill source repos configured. Add one with 'sv repo add <owner/repo>'.")
+                return 0
+            catalog = _update_sources_and_catalog_from_repos(
+                config.repos, paths, git_runner, update=True
+            )
             return _handle_list(catalog)
 
         if args.command == "sync":
@@ -221,8 +227,16 @@ def _update_sources_and_catalog(
     paths: SvPaths, git_runner, *, update: bool = True
 ) -> list[SourceSkill]:
     config = load_config(paths)
-    ensure_source_repos(config.repos, paths, runner=git_runner, update=update)
-    return build_source_catalog(config.repos, paths)
+    return _update_sources_and_catalog_from_repos(
+        config.repos, paths, git_runner, update=update
+    )
+
+
+def _update_sources_and_catalog_from_repos(
+    repos: Sequence[RepoConfig], paths: SvPaths, git_runner, *, update: bool = True
+) -> list[SourceSkill]:
+    ensure_source_repos(repos, paths, runner=git_runner, update=update)
+    return build_source_catalog(repos, paths)
 
 
 def _validate_skill_reference(reference: str) -> None:
@@ -340,11 +354,16 @@ def _handle_list(catalog: Sequence[SourceSkill]) -> int:
         return 0
 
     duplicates = _duplicate_skill_names(catalog)
+    duplicate_names = set(duplicates)
     include_references = bool(duplicates)
     print(
         format_table(
             _source_skill_headers(include_references=include_references),
-            _source_skill_rows(catalog, include_references=include_references),
+            _source_skill_rows(
+                catalog,
+                include_references=include_references,
+                duplicate_names=duplicate_names,
+            ),
             max_widths=_source_skill_max_widths(include_references=include_references),
             min_widths=_source_skill_min_widths(include_references=include_references),
             max_table_width=_table_width(),
@@ -462,9 +481,30 @@ def _handle_add_interactive(
 
 
 def _print_add_result(result: AddSkillResult) -> None:
-    source = f" from {result.repo_id}" if result.repo_id else ""
+    requested_repo = (
+        _escape_control_characters(result.repo_id) if result.repo_id else None
+    )
+    existing_repo = (
+        _escape_control_characters(result.existing_repo_id)
+        if result.existing_repo_id
+        else None
+    )
+    source = f" from {requested_repo}" if requested_repo else ""
     if result.status == "exists":
-        print(f"Pi skill '{result.skill}' already exists at {result.target}")
+        message = f"Pi skill '{result.skill}' already exists at {result.target}"
+        if existing_repo and requested_repo == existing_repo:
+            message += f" from {existing_repo}."
+        elif existing_repo and requested_repo:
+            message += (
+                f" (currently from {existing_repo}; requested {requested_repo}). "
+                f"Run 'sv remove {result.skill}' first if you want to switch sources."
+            )
+        elif requested_repo:
+            message += (
+                f" (no sv origin recorded; requested {requested_repo}). "
+                f"Run 'sv remove {result.skill}' first if you want to replace it."
+            )
+        print(message)
         return
 
     print(f"Added Pi skill '{result.skill}'{source} to {result.target}")
@@ -531,12 +571,12 @@ def _print_sync_result(result: SyncResult) -> None:
 
     for skip in result.skipped:
         if skip.reason == "ambiguous":
-            repos = ", ".join(skip.repo_ids)
+            repos = ", ".join(_escape_control_characters(repo) for repo in skip.repo_ids)
             print(
                 f"Skipped local Pi skill '{skip.skill}': multiple source repos match ({repos})."
             )
         elif skip.reason == "source-missing":
-            repos = ", ".join(skip.repo_ids)
+            repos = ", ".join(_escape_control_characters(repo) for repo in skip.repo_ids)
             print(
                 f"Skipped local Pi skill '{skip.skill}': recorded source is missing ({repos})."
             )
@@ -607,14 +647,14 @@ def _source_skill_min_widths(*, include_references: bool) -> CellWidths:
 
 
 def _source_skill_rows(
-    catalog: Sequence[SourceSkill], *, include_references: bool
+    catalog: Sequence[SourceSkill], *, include_references: bool, duplicate_names: set[str]
 ) -> list[list[str]]:
     if include_references:
         return [
             [
                 entry.name,
                 entry.repo_id,
-                _source_skill_reference(entry),
+                _source_skill_reference(entry) if entry.name in duplicate_names else "",
                 entry.description,
             ]
             for entry in catalog
@@ -634,7 +674,7 @@ def _source_skill_reference(entry: SourceSkill) -> str:
 
 
 def _source_skill_label(entry: SourceSkill) -> str:
-    return f"{entry.name}  {_source_skill_reference(entry)}  {entry.description}"
+    return f"{entry.name}  from {entry.repo_id}  {entry.description}"
 
 
 def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:

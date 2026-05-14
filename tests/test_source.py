@@ -150,6 +150,29 @@ def test_ensure_source_repo_can_skip_pull_for_existing_clone(tmp_path: Path):
     ]
 
 
+def test_ensure_source_repo_accepts_equivalent_github_remote_url(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    runner = FakeRunner(
+        [
+            completed(["git", "--version"], stdout="git version 2.0\n"),
+            completed(
+                ["git", "remote", "get-url", "origin"],
+                stdout="https://github.com/Org/Skills.git\n",
+            ),
+            completed(["git", "pull", "--ff-only"]),
+        ]
+    )
+
+    ensure_source_repo("https://github.com/Org/Skills", repo_path, runner=runner)
+
+    assert runner.calls == [
+        (["git", "--version"], None),
+        (["git", "remote", "get-url", "origin"], repo_path),
+        (["git", "pull", "--ff-only"], repo_path),
+    ]
+
+
 def test_ensure_source_repo_reports_remote_mismatch(tmp_path: Path):
     repo_path = tmp_path / "repo"
     (repo_path / ".git").mkdir(parents=True)

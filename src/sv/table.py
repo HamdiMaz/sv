@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import textwrap
+import unicodedata
 
 
 CellWidths = Mapping[str | int, int]
@@ -38,7 +39,7 @@ def format_table(
             parts = []
             for column_index, cell_lines in enumerate(wrapped_cells):
                 value = cell_lines[line_index] if line_index < len(cell_lines) else ""
-                parts.append(value.ljust(widths[column_index]))
+                parts.append(_pad_to_width(value, widths[column_index]))
             output_lines.extend(
                 _hard_wrap_output_line(separator.join(parts).rstrip(), max_table_width)
             )
@@ -65,14 +66,15 @@ def _column_widths(
     for index, header in enumerate(headers):
         configured_width = _configured_width(max_widths, header, index)
         configured_minimum = _configured_width(min_widths, header, index)
-        hard_minimums.append(max(len(header), 1))
-        min_width = max(len(header), configured_minimum or 1)
+        header_width = _display_width(header)
+        hard_minimums.append(max(header_width, 1))
+        min_width = max(header_width, configured_minimum or 1)
         preferred_minimums.append(min_width)
 
-        max_content_width = len(header)
+        max_content_width = header_width
         for row in rows:
             value = row[index] if index < len(row) else ""
-            max_content_width = max(max_content_width, len(value))
+            max_content_width = max(max_content_width, _display_width(value))
         if configured_width is None:
             widths.append(max(max_content_width, min_width))
         else:
@@ -83,15 +85,13 @@ def _column_widths(
 
 
 def _hard_wrap_output_line(line: str, max_table_width: int | None) -> list[str]:
-    if max_table_width is None or max_table_width < 1 or len(line) <= max_table_width:
+    if (
+        max_table_width is None
+        or max_table_width < 1
+        or _display_width(line) <= max_table_width
+    ):
         return [line]
-    return textwrap.wrap(
-        line,
-        width=max_table_width,
-        break_long_words=True,
-        break_on_hyphens=False,
-        drop_whitespace=False,
-    ) or [line]
+    return _wrap_display_width(line, max_table_width) or [line]
 
 
 def _column_separator(widths: Sequence[int], max_table_width: int | None) -> str:
@@ -170,9 +170,57 @@ def _sanitize_cell(value: str) -> str:
 def _wrap_cell(value: str, width: int) -> list[str]:
     if not value:
         return [""]
-    return textwrap.wrap(
+    wrapped = textwrap.wrap(
         value,
         width=width,
         break_long_words=True,
         break_on_hyphens=False,
     ) or [value]
+    return [
+        line
+        for wrapped_line in wrapped
+        for line in (_wrap_display_width(wrapped_line, width) or [wrapped_line])
+    ]
+
+
+def _wrap_display_width(value: str, width: int) -> list[str]:
+    lines: list[str] = []
+    current: list[str] = []
+    current_width = 0
+    for char in value:
+        char_width = _character_width(char)
+        if char_width == 0:
+            current.append(char)
+            continue
+        if char_width > width:
+            if current:
+                lines.append("".join(current))
+                current = []
+                current_width = 0
+            lines.append("?" * width)
+            continue
+        if current and current_width + char_width > width:
+            lines.append("".join(current))
+            current = []
+            current_width = 0
+        current.append(char)
+        current_width += char_width
+    if current:
+        lines.append("".join(current))
+    return lines
+
+
+def _pad_to_width(value: str, width: int) -> str:
+    return value + " " * max(width - _display_width(value), 0)
+
+
+def _display_width(value: str) -> int:
+    return sum(_character_width(char) for char in value)
+
+
+def _character_width(char: str) -> int:
+    if unicodedata.combining(char):
+        return 0
+    if unicodedata.east_asian_width(char) in {"F", "W"}:
+        return 2
+    return 1

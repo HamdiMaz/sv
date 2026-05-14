@@ -28,6 +28,8 @@ Run commands from the project root where `.pi/skills` should be managed.
 
 ## Reading `sv list`
 
+If no source repos are configured, `sv list` tells you to add one with `sv repo add <owner/repo>` instead of showing an empty skill table.
+
 `sv list` prints a compact table for unique skill names:
 
 | Column | Meaning |
@@ -36,16 +38,16 @@ Run commands from the project root where `.pi/skills` should be managed.
 | `Repo` | The configured source repo ID. |
 | `Description` | The description parsed from the skill's `SKILL.md` frontmatter. |
 
-When two repos contain the same skill name, `sv list` keeps both rows visible, adds an `Add as` column, and prints a duplicate-name tip. Use the `Add as` value to install the intended source. If the same repo is accidentally listed twice in `~/.sv/config.toml`, `sv` coalesces that repeated config entry so the same skill source does not appear twice.
+When two repos contain the same skill name, `sv list` keeps both rows visible, adds an `Add as` column, and prints a duplicate-name tip. Use the `Add as` value to install the intended source. Unique rows leave `Add as` blank, so the duplicate-aware table does not repeat `repo:skill` text where it is not needed. If the same repo is accidentally listed twice in `~/.sv/config.toml` (including the same or equivalent GitHub URL under different IDs), `sv` coalesces that repeated source so the same skill does not appear twice.
 
 ## Adding skills without surprises
 
 - `sv add <skill>` installs the skill when exactly one configured repo provides that name.
 - `sv add <repo>:<skill>` installs from one exact source.
-- `sv add -l` opens an interactive picker. The picker labels each row with its qualified source so duplicate names are easy to distinguish.
+- `sv add -l` opens an interactive picker. The picker labels each row with its source repo ID so duplicate names are easy to distinguish without repeating the skill name twice.
 - `sv add --all` installs every valid skill only when there are no duplicate skill names across configured repos.
 
-`sv` never overwrites an existing project skill during add. If the skill folder already exists, it reports that the skill is already present and leaves local files unchanged.
+`sv` never overwrites an existing project skill during add. If the skill folder already exists, it reports that the skill is already present and leaves local files unchanged. When origin metadata is available, the message also tells you whether the existing skill came from the same repo or a different repo than the one you requested.
 
 ## Duplicate skill names
 

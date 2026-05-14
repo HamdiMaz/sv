@@ -2,11 +2,50 @@ from pathlib import Path
 
 import pytest
 
-from sv.cli import _print_wrapped, build_parser, handle
+from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, build_parser, handle
+from sv.project import AddSkillResult, SyncResult, SyncSkip
 
 
 def parse(argv):
     return build_parser().parse_args(argv)
+
+
+def test_print_add_result_escapes_existing_manifest_repo_id(
+    tmp_path: Path, capsys
+):
+    _print_add_result(
+        AddSkillResult(
+            skill="alpha",
+            target=tmp_path / "project" / ".pi" / "skills" / "alpha",
+            status="exists",
+            repo_id="Org/Skills",
+            existing_repo_id="Bad\x1b[2JRepo",
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert "\x1b" not in output
+    assert "Bad\\x1b[2JRepo" in output
+
+
+def test_print_sync_result_escapes_manifest_repo_ids(capsys):
+    _print_sync_result(
+        SyncResult(
+            updated=[],
+            skipped=[
+                SyncSkip(
+                    skill="alpha",
+                    reason="source-missing",
+                    repo_ids=("Bad\x1b[2JRepo",),
+                )
+            ],
+            backfilled=[],
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert "\x1b" not in output
+    assert "Bad\\x1b[2JRepo" in output
 
 
 def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path):

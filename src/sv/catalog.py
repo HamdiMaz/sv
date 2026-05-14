@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sv.config import RepoConfig, SvPaths
+from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
 from sv.project import normalize_skill_name
 from sv.skills import InvalidSkillError, parse_skill_file
@@ -19,6 +19,7 @@ class SourceSkill:
     repo_url: str
     repo_path: Path
     source_path: Path
+    repo_aliases: tuple[str, ...] = ()
 
     @property
     def source_relative_path(self) -> str:
@@ -33,17 +34,33 @@ def build_source_catalog(
     repos: Iterable[RepoConfig], paths: SvPaths
 ) -> list[SourceSkill]:
     entries: list[SourceSkill] = []
+    unique_repos: list[RepoConfig] = []
+    aliases_by_source: dict[str, tuple[str, ...]] = {}
     seen_repos: dict[str, str] = {}
+    seen_sources: set[str] = set()
     for repo in repos:
+        source_key = repo_source_key(repo.url)
         existing_url = seen_repos.get(repo.id)
         if existing_url is not None:
-            if existing_url == repo.url:
+            if existing_url == repo.url or repo_source_key(existing_url) == source_key:
                 continue
             raise SvError(
                 f"Configured source repo id {repo.id!r} is listed more than once with different URLs."
             )
         seen_repos[repo.id] = repo.url
+        if source_key in seen_sources:
+            aliases_by_source[source_key] = (
+                *aliases_by_source[source_key],
+                repo.id,
+                *repo.aliases,
+            )
+            continue
+        seen_sources.add(source_key)
+        aliases_by_source[source_key] = repo.aliases
+        unique_repos.append(repo)
 
+    for repo in unique_repos:
+        source_key = repo_source_key(repo.url)
         repo_path = paths.source_repo_for(repo.id)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         skills_root = repo_path / "skills"
@@ -74,6 +91,7 @@ def build_source_catalog(
                     repo_url=repo.url,
                     repo_path=repo_path,
                     source_path=skill_dir,
+                    repo_aliases=aliases_by_source[source_key],
                 )
             )
     return sorted(entries, key=lambda entry: (entry.name, entry.repo_id))
@@ -102,6 +120,9 @@ def find_qualified_catalog_entry(
     repo_id, skill = reference.rsplit(":", 1)
     skill_name = normalize_skill_name(skill)
     for entry in catalog:
-        if entry.repo_id == repo_id and entry.name == skill_name:
+        if (
+            entry.name == skill_name
+            and (entry.repo_id == repo_id or repo_id in entry.repo_aliases)
+        ):
             return entry
     return None

@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 from typing import Protocol
 
+from sv.config import repo_source_key
 from sv.errors import SvError
 from sv.manifest import (
     ManifestEntry,
@@ -22,6 +23,7 @@ class ProjectSourceSkill(Protocol):
     repo_id: str
     repo_url: str
     source_path: Path
+    repo_aliases: tuple[str, ...]
 
     @property
     def source_relative_path(self) -> str: ...
@@ -35,6 +37,7 @@ class AddSkillResult:
     target: Path
     status: str
     repo_id: str | None = None
+    existing_repo_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,7 +103,7 @@ def add_project_skill(
             f"Failed to prepare Pi skills directory {project_skills_dir}: {exc}"
         ) from exc
 
-    load_manifest(project_skills_dir)
+    manifest = load_manifest(project_skills_dir)
     target = project_skills_dir / skill_name
     if target.exists() or target.is_symlink():
         _reject_symlinked_project_skill(target)
@@ -108,11 +111,15 @@ def add_project_skill(
             raise SvError(
                 f"Cannot add Pi skill '{skill_name}': non-directory path already exists at {target}."
             )
+        existing_entry = manifest.get(skill_name)
         return AddSkillResult(
             skill=skill_name,
             target=target,
             status="exists",
             repo_id=entry.repo_id,
+            existing_repo_id=(
+                existing_entry.repo_id if existing_entry is not None else None
+            ),
         )
 
     _copy_tree_for_add(entry.source_path, target)
@@ -224,9 +231,13 @@ def sync_project_skills(
     if not project_skills_dir.is_dir():
         return SyncResult(updated=[], skipped=[], backfilled=[], no_skills_dir=True)
 
-    by_key = {(entry.name, entry.repo_id): entry for entry in catalog}
+    by_key: dict[tuple[str, str], ProjectSourceSkill] = {}
+    by_source_key: dict[tuple[str, str], ProjectSourceSkill] = {}
     by_name: dict[str, list[ProjectSourceSkill]] = {}
     for entry in catalog:
+        for repo_id in (entry.repo_id, *entry.repo_aliases):
+            by_key[(entry.name, repo_id)] = entry
+        by_source_key[(entry.name, repo_source_key(entry.repo_url))] = entry
         by_name.setdefault(entry.name, []).append(entry)
 
     manifest = load_manifest(project_skills_dir)
@@ -251,7 +262,14 @@ def sync_project_skills(
 
         manifest_entry = manifest.get(local_skill.name)
         if manifest_entry is not None:
+            manifest_source_key = _recorded_source_key(manifest_entry)
             entry = by_key.get((manifest_entry.name, manifest_entry.repo_id))
+            if entry is not None and not _source_matches_recorded_key(
+                entry, manifest_source_key
+            ):
+                entry = None
+            if entry is None and manifest_source_key is not None:
+                entry = by_source_key.get((manifest_entry.name, manifest_source_key))
             if entry is None:
                 skipped.append(
                     SyncSkip(
@@ -288,6 +306,21 @@ def sync_project_skills(
         backfilled=backfilled,
         no_skills_dir=False,
     )
+
+
+def _recorded_source_key(manifest_entry: ManifestEntry) -> str | None:
+    try:
+        return repo_source_key(manifest_entry.repo_url)
+    except ValueError:
+        return None
+
+
+def _source_matches_recorded_key(
+    entry: ProjectSourceSkill, recorded_source_key: str | None
+) -> bool:
+    if recorded_source_key is None:
+        return False
+    return repo_source_key(entry.repo_url) == recorded_source_key
 
 
 def _contains_control_character(value: str) -> bool:

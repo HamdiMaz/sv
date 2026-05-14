@@ -1,4 +1,15 @@
+import unicodedata
+
 from sv.table import format_table
+
+
+def display_width(value: str) -> int:
+    width = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    return width
 
 
 def test_format_table_aligns_columns():
@@ -142,3 +153,23 @@ def test_format_table_hard_wraps_when_width_is_narrower_than_column_count():
     )
 
     assert all(len(line) <= 2 for line in output.splitlines())
+
+
+def test_format_table_fits_wide_unicode_to_display_width():
+    output = format_table(
+        ["Skill", "Desc"],
+        [["日本語", "abcdefghi"]],
+        max_table_width=10,
+        min_widths={"Desc": 4},
+    )
+
+    assert all(display_width(line) <= 10 for line in output.splitlines())
+    assert "日本" in output
+    assert "語" in output
+
+
+def test_format_table_drops_overwide_characters_when_width_is_one():
+    output = format_table(["言"], [["語"]], max_table_width=1)
+
+    assert all(display_width(line) <= 1 for line in output.splitlines())
+    assert output.splitlines() == ["?", "-", "?"]

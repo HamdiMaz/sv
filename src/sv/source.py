@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 import subprocess
 
-from sv.config import RepoConfig, SvPaths
+from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
 
 Runner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]]
@@ -46,7 +46,7 @@ def ensure_source_repo(
             runner=runner,
             action="Reading source repo remote",
         )
-        if current_remote != repo_url:
+        if current_remote != repo_url and not _same_source_repo(current_remote, repo_url):
             safe_current_remote = _escape_control_characters(current_remote)
             raise SvError(
                 f"Configured source repo is {repo_url}, but existing source clone uses {safe_current_remote}. "
@@ -91,6 +91,13 @@ def ensure_source_repos(
         ensure_source_repo(repo.url, repo_path, runner=runner, update=update)
         repo_paths.append(repo_path)
     return repo_paths
+
+
+def _same_source_repo(left: str, right: str) -> bool:
+    try:
+        return repo_source_key(left) == repo_source_key(right)
+    except ValueError:
+        return False
 
 
 def list_source_skills(repo_path: Path) -> list[str]:

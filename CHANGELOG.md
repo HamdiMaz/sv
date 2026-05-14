@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- Simplified `sv list` UX by hiding the duplicate-looking `Add as` column until duplicate skill names require qualified references.
+- Simplified `sv list` duplicate UX by hiding the `Add as` column until duplicate skill names require qualified references and filling it only on rows whose skill names actually collide.
+- Simplified `sv add -l` labels so they show the source repo without repeating the skill name inside `repo:skill`.
+- Coalesced duplicate and equivalent GitHub source URLs configured under different repo IDs while keeping aliases usable for qualified adds, source cache validation, and existing sync metadata.
+- Made `sv sync` verify recorded source URLs before replacing a managed skill, avoiding accidental overwrites when a repo ID is repointed.
+- Tightened table wrapping for ultra-narrow terminals with wide Unicode characters.
 - Made source catalog loading resilient to exact repeated repo entries so duplicate repo inputs cannot duplicate skill rows.
 - Added `docs/commands.md` as a compact command reference and updated docs to explain the compact vs duplicate-aware `sv list` tables.
 - Improved very narrow table rendering by compacting column separators and hard-wrapping as a last resort to keep output within terminal width.
