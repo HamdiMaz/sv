@@ -1,3 +1,5 @@
+from argparse import Namespace
+from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import subprocess
@@ -5,7 +7,7 @@ import unicodedata
 
 import pytest
 
-from sv.cli import build_parser, handle
+from sv.cli import SkillChooser, SkillSelector, build_parser, handle, select_skills
 
 
 def display_width(value: str) -> int:
@@ -15,6 +17,48 @@ def display_width(value: str) -> int:
             continue
         width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
     return width
+
+
+@dataclass
+class SvResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+def parse_sv(args: list[str] | tuple[str, ...]) -> Namespace:
+    return build_parser().parse_args(args)
+
+
+def run_sv(
+    args: list[str] | tuple[str, ...] | Namespace,
+    *,
+    cwd: Path,
+    home: Path,
+    capsys,
+    git_runner=None,
+    process_runner=None,
+    skill_selector: SkillSelector = select_skills,
+    skill_chooser: SkillChooser | None = None,
+) -> SvResult:
+    parsed = args if isinstance(args, Namespace) else parse_sv(args)
+    capsys.readouterr()
+
+    exit_code = handle(
+        parsed,
+        cwd=cwd,
+        home=home,
+        git_runner=git_runner,
+        process_runner=process_runner,
+        skill_selector=skill_selector,
+        skill_chooser=skill_chooser,
+    )
+    captured = capsys.readouterr()
+    return SvResult(
+        exit_code=exit_code,
+        stdout=captured.out,
+        stderr=captured.err,
+    )
 
 
 def run_git(args: list[str], cwd: Path) -> None:

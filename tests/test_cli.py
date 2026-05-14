@@ -3,12 +3,13 @@ import unicodedata
 
 import pytest
 
-from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, build_parser, handle
+from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, handle
 from sv.project import AddSkillResult, SyncResult, SyncSkip
+from tests.helpers import parse_sv
 
 
 def parse(argv):
-    return build_parser().parse_args(argv)
+    return parse_sv(argv)
 
 
 def display_width(value: str) -> int:
@@ -58,7 +59,7 @@ def test_print_sync_result_escapes_manifest_repo_ids(capsys):
     assert "Bad\\x1b[2JRepo" in output
 
 
-def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path):
+def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -68,18 +69,18 @@ def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path):
         calls.append(command)
         return 23
 
-    exit_code = handle(
+    result = run_sv(
         parse(["run", "--", "--model", "fast"]),
         cwd=project,
         home=home,
         process_runner=process_runner,
     )
 
-    assert exit_code == 23
+    assert result.exit_code == 23
     assert calls == [["pi", "--no-skills", "--skill", ".pi/skills", "--model", "fast"]]
 
 
-def test_run_reports_missing_pi_binary(tmp_path: Path, capsys):
+def test_run_reports_missing_pi_binary(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -87,12 +88,15 @@ def test_run_reports_missing_pi_binary(tmp_path: Path, capsys):
     def process_runner(command):
         raise FileNotFoundError(command[0])
 
-    exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+    result = run_sv(
+        parse(["run"]),
+        cwd=project,
+        home=home,
+        process_runner=process_runner,
     )
 
-    assert exit_code == 1
-    assert "Unable to run 'pi'" in capsys.readouterr().err
+    assert result.exit_code == 1
+    assert "Unable to run 'pi'" in result.stderr
 
 
 def test_run_reports_process_launch_os_errors_without_traceback(
