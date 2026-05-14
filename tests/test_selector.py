@@ -122,9 +122,22 @@ def test_selection_state_rejects_empty_viewport():
         SelectionState(["alpha"], viewport_size=0)
 
 
-def test_read_key_supports_left_and_right_arrows():
+def test_read_key_reads_simple_keypresses():
+    assert _read_key_from_bytes(b"\x1b[A") == "up"
+    assert _read_key_from_bytes(b"\x1b[B") == "down"
     assert _read_key_from_bytes(b"\x1b[D") == "left"
     assert _read_key_from_bytes(b"\x1b[C") == "right"
+    assert _read_key_from_bytes(b" ") == "space"
+    assert _read_key_from_bytes(b"\r") == "enter"
+    assert _read_key_from_bytes(b"q") == "quit"
+    assert _read_key_from_bytes(b"\x1b") == "escape"
+    assert _read_key_from_bytes(b"") == "eof"
+
+
+def test_read_key_treats_malformed_escape_sequences_as_escape_or_unknown():
+    assert _read_key_from_bytes(b"\x1bX") in {"escape", "unknown"}
+    assert _read_key_from_bytes(b"\x1b[") in {"escape", "unknown"}
+    assert _read_key_from_bytes(b"\x1b[Z") in {"escape", "unknown"}
 
 
 def test_render_can_remove_cursor_highlight_after_selection_finishes():
