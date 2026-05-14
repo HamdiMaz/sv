@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added CLI help smoke tests for documented top-level and nested commands (`--help` output for `sv`, `add`, `remove`, `repo*`, `run`, `sync`, and `update`) without filesystem side effects.
 - Added package smoke tests for import/version checks, console-script wiring, and distribution metadata version consistency.
 - Added shared CLI test helpers (`parse_sv`, `run_sv`) for consistent parser and command execution assertions in tests.
 - Centralized git/source helper utilities in `tests/helpers.py` and switched `tests/test_cli_source_commands.py` to use shared helpers for local source/repo test setup.
