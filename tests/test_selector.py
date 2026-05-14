@@ -301,6 +301,91 @@ def test_select_skills_reports_terminal_restore_errors_as_sv_errors(monkeypatch)
         select_skills(["alpha"], stdin=TtyStream(), stdout=TtyStream())
 
 
+def test_select_skills_selects_items_in_list_order(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["space", "down", "down", "space", "enter"])
+    stdin = TtyStream()
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
+
+    selected = select_skills(["alpha", "beta", "gamma"], stdin=stdin, stdout=output)
+
+    assert selected == ["alpha", "gamma"]
+    rendered = output.getvalue()
+    assert "\x1b[?25l" in rendered
+    assert "\x1b[?25h" in rendered
+
+
+def test_select_skills_returns_empty_when_cancelled(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["down", "down", "quit"])
+    stdin = TtyStream()
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
+
+    selected = select_skills(["alpha", "beta", "gamma"], stdin=stdin, stdout=output)
+
+    assert selected == []
+    assert "\x1b[?25h" in output.getvalue()
+
+
+def test_select_skills_returns_empty_when_enter_pressed_without_selection(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
+
+    selected = select_skills(["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output)
+
+    assert selected == []
+    assert "\x1b[?25h" in output.getvalue()
+
+
+def test_select_skills_restores_cursor_and_terminal_settings_after_render_error(monkeypatch):
+    output = TtyStream()
+    restore_calls: list[tuple[int, int, list[str]]] = []
+
+    class RecordingTermios:
+        TCSADRAIN = 1
+        error = OSError
+
+        @staticmethod
+        def tcgetattr(fd):
+            return ["settings"]
+
+        @staticmethod
+        def tcsetattr(fd, when, settings):
+            restore_calls.append((fd, when, settings))
+            return None
+
+    monkeypatch.setitem(sys.modules, "termios", RecordingTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._render", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("render failure")))
+
+    with pytest.raises(RuntimeError, match="render failure"):
+        select_skills(["alpha"], stdin=TtyStream(), stdout=output)
+
+    assert "\x1b[?25l" in output.getvalue()
+    assert "\x1b[?25h" in output.getvalue()
+    assert restore_calls == [(0, 1, ["settings"])
+    ]
+
+
 def _read_key_from_bytes(data: bytes) -> str:
     read_fd, write_fd = os.pipe()
     try:
