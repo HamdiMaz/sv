@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import subprocess
 
 import pytest
 
@@ -26,14 +27,25 @@ def test_ensure_source_repo_rejects_symlinked_cache_path_before_git(
 ) -> None:
     real_repo = tmp_path / "real-repo"
     (real_repo / ".git").mkdir(parents=True)
+    (real_repo / "sentinel.txt").write_text("outside\n")
     repo_path = tmp_path / "repo-link"
     repo_path.symlink_to(real_repo, target_is_directory=True)
+    calls: list[tuple[list[str], Path | None]] = []
 
     def git_runner(args, cwd=None):
-        pytest.fail("git runner was called despite source cache symlink")
+        calls.append((list(args), cwd))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
     with pytest.raises(SvError, match="Source repo cache path must not be a symlink"):
         ensure_source_repo("https://example.com/skills.git", repo_path, runner=git_runner)
+
+    assert calls == []
+    assert (real_repo / "sentinel.txt").read_text() == "outside\n"
 
 
 def test_ensure_source_repos_rejects_symlinked_cache_path_before_git(
@@ -46,10 +58,18 @@ def test_ensure_source_repos_rejects_symlinked_cache_path_before_git(
 
     outside_repo = tmp_path / "outside-repo"
     outside_repo.mkdir()
+    (outside_repo / "sentinel.txt").write_text("outside\n")
     repo_path.symlink_to(outside_repo, target_is_directory=True)
+    calls: list[tuple[list[str], Path | None]] = []
 
     def git_runner(args, cwd=None):
-        pytest.fail("git runner was called despite symlinked source cache path")
+        calls.append((list(args), cwd))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
     with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
         ensure_source_repos(
@@ -57,6 +77,9 @@ def test_ensure_source_repos_rejects_symlinked_cache_path_before_git(
             paths,
             runner=git_runner,
         )
+
+    assert calls == []
+    assert (outside_repo / "sentinel.txt").read_text() == "outside\n"
 
 
 def test_ensure_source_repos_rejects_symlinked_cache_ancestor_before_git(
@@ -66,10 +89,18 @@ def test_ensure_source_repos_rejects_symlinked_cache_ancestor_before_git(
     paths.sources_dir.mkdir(parents=True)
     outside_org = tmp_path / "outside-org"
     outside_org.mkdir()
+    (outside_org / "sentinel.txt").write_text("outside\n")
     (paths.sources_dir / "Org").symlink_to(outside_org, target_is_directory=True)
+    calls: list[tuple[list[str], Path | None]] = []
 
     def git_runner(args, cwd=None):
-        pytest.fail("git runner was called despite cache ancestor symlink")
+        calls.append((list(args), cwd))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
     with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
         ensure_source_repos(
@@ -77,6 +108,9 @@ def test_ensure_source_repos_rejects_symlinked_cache_ancestor_before_git(
             paths,
             runner=git_runner,
         )
+
+    assert calls == []
+    assert (outside_org / "sentinel.txt").read_text() == "outside\n"
 
 
 def test_ensure_source_repo_rejects_symlinked_git_metadata_before_git(
@@ -86,13 +120,24 @@ def test_ensure_source_repo_rejects_symlinked_git_metadata_before_git(
     repo_path.mkdir()
     outside_git = tmp_path / "outside-git"
     outside_git.mkdir()
+    (outside_git / "sentinel.txt").write_text("outside\n")
     (repo_path / ".git").symlink_to(outside_git, target_is_directory=True)
+    calls: list[tuple[list[str], Path | None]] = []
 
     def git_runner(args, cwd=None):
-        pytest.fail("git runner was called despite symlinked git metadata")
+        calls.append((list(args), cwd))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
     with pytest.raises(SvError, match="Source Git metadata path must not be a symlink"):
         ensure_source_repo("https://example.com/skills.git", repo_path, runner=git_runner)
+
+    assert calls == []
+    assert (outside_git / "sentinel.txt").read_text() == "outside\n"
 
 
 def test_build_source_catalog_rejects_symlinked_skills_root(
@@ -121,6 +166,7 @@ def test_build_source_catalog_skips_symlinked_skill_directory(tmp_path: Path) ->
     write_source_skill(repo_path, "valid", "Valid skill.", "valid\n")
     outside = tmp_path / "outside-link"
     outside.mkdir()
+    (outside / "sentinel.txt").write_text("outside\n")
     (outside / "SKILL.md").write_text(
         "---\nname: linked\ndescription: Linked skill.\n---\n"
     )
@@ -129,6 +175,7 @@ def test_build_source_catalog_skips_symlinked_skill_directory(tmp_path: Path) ->
     catalog = build_source_catalog([repo], paths)
 
     assert [entry.name for entry in catalog] == ["valid"]
+    assert (outside / "sentinel.txt").read_text() == "outside\n"
 
 
 def test_parse_skill_file_rejects_symlinked_skill_file(tmp_path: Path) -> None:
@@ -166,3 +213,27 @@ def test_add_project_skill_rejects_symlink_inside_source_skill_tree(tmp_path: Pa
 
     assert not (tmp_path / "project" / ".pi" / "skills" / "alpha").exists()
     assert (outside / "secret.txt").read_text() == "outside\n"
+
+
+def test_add_project_skill_rejects_symlinked_source_skill_directory(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    (source / "skills").mkdir(parents=True)
+    outside = tmp_path / "outside-alpha"
+    outside.mkdir()
+    (outside / "sentinel.txt").write_text("outside\n")
+    source_skill = source / "skills" / "alpha"
+    source_skill.symlink_to(outside, target_is_directory=True)
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=source,
+        source_path=source_skill,
+    )
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        add_project_skill(entry, tmp_path / "project" / ".pi" / "skills")
+
+    assert not (tmp_path / "project" / ".pi" / "skills" / "alpha").exists()
+    assert (outside / "sentinel.txt").read_text() == "outside\n"
