@@ -180,3 +180,71 @@ def test_add_qualified_alpha_installs_exact_source(
     ).read_text() == "alpha from b\n"
     assert f"from {repo_ids[1]}" in result.stdout
     assert "Multiple source skills match" not in result.stderr
+
+
+def test_add_interactive_selector_rejects_duplicate_skills_without_copying(
+    tmp_path: Path, run_sv
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    run_git(["rm", "-r", "skills/beta"], source_b)
+    write_source_skill(source_b, "gamma", "Gamma from B.", "gamma from b\n")
+    run_git(["add", "skills/alpha", "skills/gamma"], source_b)
+    run_git(["commit", "-m", "replace beta with gamma"], source_b)
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+
+    def select_alpha_and_beta(entries, **_kwargs):
+        return [entry for entry in entries if entry.name in {"alpha", "beta"}]
+
+    result = run_sv(
+        ["add", "-l"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+        skill_selector=select_alpha_and_beta,
+    )
+
+    assert result.exit_code == 1
+    assert "Select only one source for duplicate skill 'alpha'" in result.stderr
+    assert "repo:skill" in result.stderr
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / "beta").exists()
+    assert not (project / ".pi" / "skills" / "gamma").exists()
+    assert_no_partial_sv_dirs(project / ".pi" / "skills")
+
+
+def test_add_all_rejects_duplicate_source_skills_without_copying(
+    tmp_path: Path, run_sv
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    run_git(["rm", "-r", "skills/beta"], source_b)
+    write_source_skill(source_b, "gamma", "Gamma from B.", "gamma from b\n")
+    run_git(["add", "skills/alpha", "skills/gamma"], source_b)
+    run_git(["commit", "-m", "replace beta with gamma"], source_b)
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+
+    result = run_sv(
+        ["add", "--all"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Duplicate source skill 'alpha'" in result.stderr
+    assert "Use qualified skill references" in result.stderr
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / "beta").exists()
+    assert not (project / ".pi" / "skills" / "gamma").exists()
+    assert_no_partial_sv_dirs(project / ".pi" / "skills")
