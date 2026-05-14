@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T039: split oversized CLI source-command coverage by moving add/list scenarios into focused contract files and removing duplicate sync/update/list/add cases already covered elsewhere.
 - Completed T038: added a parametrized CLI error contract matrix covering malformed configs/manifests, missing or invalid skills, git and Pi launch failures, and unsafe symlink paths without tracebacks or raw control characters.
 - Completed T037: added a local-git end-to-end smoke test covering repo add/list, list, add, source update, sync, remove, and `sv run` with a fake Pi process runner.
 - Completed T036: expanded catalog tests for missing/invalid source contents, hidden skill directories, ordering, and `SourceSkill` display metadata.
