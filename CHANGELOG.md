@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added docs integrity tests verifying local README documentation links and top-level headings in `docs/*.md` files.
 - Added CLI help smoke tests for documented top-level and nested commands (`--help` output for `sv`, `add`, `remove`, `repo*`, `run`, `sync`, and `update`) without filesystem side effects.
 - Added package smoke tests for import/version checks, console-script wiring, and distribution metadata version consistency.
 - Added shared CLI test helpers (`parse_sv`, `run_sv`) for consistent parser and command execution assertions in tests.
