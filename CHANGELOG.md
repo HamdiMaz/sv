@@ -4,6 +4,7 @@
 
 - Completed T015: added `tests/test_security_paths.py` with security-path traversal coverage for hostile skill names and repo IDs, validating SvError behavior and no filesystem mutation on validation failures.
 - Completed T016: added `tests/test_security_project_symlinks.py` with project-side symlink safety coverage for add/remove/list/sync and run paths, including symlinked `.pi`, `.pi/skills`, and project skill directories.
+- Completed T017: added `tests/test_security_source_symlinks.py` with source-side symlink coverage for source cache paths, source cache ancestors, git metadata paths, skills roots, skill folders, SKILL.md files, and symlinked source tree entries across `ensure_source_repo`, `ensure_source_repos`, `build_source_catalog`, `parse_skill_file`, and `add_project_skill`.
 - Expanded project symlink security coverage to assert symlinked `.pi` handling for `sync_project_skills` and `sv run` through symlinked `project/.pi` and `project/.pi/skills` paths, with sentinel files proving no outside mutation.
 - Completed T014: verified alias-preservation regression coverage for config rewrites and legacy-qualified `repo:skill` lookup in `tests/test_regressions_source_identity.py`.
 - Added source identity regression coverage to ensure equivalent GitHub source forms (`owner/repo`, HTTPS, and SSH variants) normalize consistently and coalesce catalog entries while preserving aliases.
