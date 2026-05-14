@@ -61,6 +61,17 @@ def test_parse_skill_file_escapes_description_control_characters(tmp_path: Path)
     )
 
 
+def test_parse_skill_file_escapes_description_tabs(tmp_path: Path):
+    skill_file = write_skill(
+        tmp_path,
+        "---\nname: alpha\ndescription: Alpha\tskill.\n---\n",
+    )
+
+    metadata = parse_skill_file(skill_file, expected_folder="alpha")
+
+    assert metadata == SkillMetadata(name="alpha", description="Alpha\\x09skill.")
+
+
 def test_parse_skill_file_requires_file(tmp_path: Path):
     with pytest.raises(SvError, match="missing SKILL.md"):
         parse_skill_file(tmp_path / "alpha" / "SKILL.md", expected_folder="alpha")

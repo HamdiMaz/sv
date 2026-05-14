@@ -25,3 +25,48 @@ def test_format_table_handles_no_rows():
         "Repo  URL",
         "----  ---",
     ]
+
+
+def test_format_table_wraps_long_cells_without_repeating_leading_columns():
+    output = format_table(
+        ["Skill", "Repo", "Description"],
+        [["alpha", "Org/A", "This description wraps cleanly for narrow terminals."]],
+        max_widths={"Description": 24},
+    )
+
+    assert output.splitlines() == [
+        "Skill  Repo   Description",
+        "-----  -----  ------------------------",
+        "alpha  Org/A  This description wraps",
+        "              cleanly for narrow",
+        "              terminals.",
+    ]
+
+
+def test_format_table_escapes_control_characters_before_measuring_columns():
+    output = format_table(
+        ["Skill", "Description"],
+        [["alpha", "Line one\nline two\x1b[2J"]],
+    )
+
+    assert output.splitlines() == [
+        "Skill  Description",
+        "-----  ---------------------------",
+        "alpha  Line one\\x0aline two\\x1b[2J",
+    ]
+
+
+def test_format_table_breaks_long_words_to_honor_configured_widths():
+    output = format_table(
+        ["URL"],
+        [["abcdefghijklmnop"]],
+        max_widths={"URL": 6},
+    )
+
+    assert output.splitlines() == [
+        "URL",
+        "------",
+        "abcdef",
+        "ghijkl",
+        "mnop",
+    ]

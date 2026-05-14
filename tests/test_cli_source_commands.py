@@ -339,6 +339,64 @@ def test_add_duplicate_skill_without_tty_reports_error(tmp_path: Path, capsys):
     assert "Use a qualified skill reference" in error
 
 
+def test_list_shows_qualified_references_for_duplicate_skill_names(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    repo_ids = [repo.id for repo in load_config(SvPaths.from_home(home)).repos]
+    capsys.readouterr()
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Add as" in output
+    assert f"{repo_ids[0]}:alpha" in output
+    assert f"{repo_ids[1]}:alpha" in output
+    assert "Tip: duplicate skill names are available" in output
+
+
+def test_add_interactive_rejects_selected_duplicate_skill_names_without_copying(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+
+    def select_both_alpha(skills, **kwargs):
+        return [skill for skill in skills if skill.name == "alpha"]
+
+    exit_code = handle(
+        parse(["add", "-l"]),
+        cwd=project,
+        home=home,
+        skill_selector=select_both_alpha,
+    )
+
+    assert exit_code == 1
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    error = capsys.readouterr().err
+    assert "Select only one source for duplicate skill 'alpha'" in error
+    assert "repo:skill" in error
+
+
 def test_add_all_reports_duplicate_source_skills_without_copying(
     tmp_path: Path, capsys
 ):

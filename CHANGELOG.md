@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Improved `sv list` output with qualified `Add as` references, duplicate-name guidance, wrapped table cells, and safer control-character escaping.
+- Fixed `sv add -l` to reject selections containing multiple sources for the same skill before copying any project files.
+- Documented the daily CLI workflow, duplicate skill handling, table columns, and update behavior in `docs/usage.md` and linked it from the README.
 - Fixed qualified `sv add repo:skill` and missing `sv repo remove` error messages to escape control characters from user input before printing.
 - Fixed manifest writes to refuse symlinked temporary manifest files before writing metadata.
 - Fixed `sv run` to refuse symlinked project skill paths before launching Pi.

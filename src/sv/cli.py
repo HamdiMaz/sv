@@ -246,7 +246,13 @@ def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:
             [repo.id, repo.url, str(paths.source_repo_for(repo.id))]
             for repo in config.repos
         ]
-        print(format_table(["Repo", "URL", "Cache"], rows))
+        print(
+            format_table(
+                ["Repo", "URL", "Cache"],
+                rows,
+                max_widths={"Repo": 32, "URL": 64, "Cache": 72},
+            )
+        )
         return 0
 
     raise SvError(f"Unknown repo command: {args.repo_command}")
@@ -286,7 +292,20 @@ def _handle_list(catalog: Sequence[SourceSkill]) -> int:
         print("No valid skills found in configured source repos.")
         return 0
 
-    print(format_table(["Skill", "Repo", "Description"], _source_skill_rows(catalog)))
+    print(
+        format_table(
+            ["Skill", "Repo", "Add as", "Description"],
+            _source_skill_rows(catalog),
+            max_widths={"Skill": 28, "Repo": 32, "Add as": 48, "Description": 72},
+        )
+    )
+    duplicates = _duplicate_skill_names(catalog)
+    if duplicates:
+        duplicate_list = ", ".join(duplicates)
+        print(
+            f"\nTip: duplicate skill names are available ({duplicate_list}). "
+            "Use the 'Add as' repo:skill value to choose a source explicitly."
+        )
     return 0
 
 
@@ -323,10 +342,22 @@ def _handle_add(
 
     print(f"Multiple source skills match '{skill_reference}':")
     rows = [
-        [str(index), entry.name, entry.repo_id, entry.description]
+        [
+            str(index),
+            entry.name,
+            entry.repo_id,
+            _source_skill_reference(entry),
+            entry.description,
+        ]
         for index, entry in enumerate(matches, start=1)
     ]
-    print(format_table(["#", "Skill", "Repo", "Description"], rows))
+    print(
+        format_table(
+            ["#", "Skill", "Repo", "Add as", "Description"],
+            rows,
+            max_widths={"Skill": 28, "Repo": 32, "Add as": 48, "Description": 72},
+        )
+    )
     chosen = skill_chooser(matches)
     if chosen is None:
         print(
@@ -368,6 +399,8 @@ def _handle_add_interactive(
     if not selected_skills:
         print("No skills selected.")
         return 0
+
+    _raise_on_selected_duplicate_source_skills(selected_skills)
 
     for entry in selected_skills:
         result = add_project_skill(entry, adapter.project_skill_dir(cwd))
@@ -471,6 +504,23 @@ def _raise_on_duplicate_source_skills(catalog: Sequence[SourceSkill]) -> None:
         seen[entry.name] = entry
 
 
+def _raise_on_selected_duplicate_source_skills(
+    selected_skills: Sequence[SourceSkill],
+) -> None:
+    by_name: dict[str, list[SourceSkill]] = {}
+    for entry in selected_skills:
+        by_name.setdefault(entry.name, []).append(entry)
+
+    for skill_name, entries in by_name.items():
+        if len(entries) < 2:
+            continue
+        choices = ", ".join(_source_skill_reference(entry) for entry in entries)
+        raise SvError(
+            f"Select only one source for duplicate skill '{skill_name}': {choices}. "
+            "Use repo:skill with 'sv add' when you need a specific source."
+        )
+
+
 def _can_prompt_for_skill_choice() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -484,11 +534,25 @@ def _ambiguous_skill_error(skill_reference: str, matches: Sequence[SourceSkill])
 
 
 def _source_skill_rows(catalog: Sequence[SourceSkill]) -> list[list[str]]:
-    return [[entry.name, entry.repo_id, entry.description] for entry in catalog]
+    return [
+        [entry.name, entry.repo_id, _source_skill_reference(entry), entry.description]
+        for entry in catalog
+    ]
+
+
+def _duplicate_skill_names(catalog: Sequence[SourceSkill]) -> list[str]:
+    counts: dict[str, int] = {}
+    for entry in catalog:
+        counts[entry.name] = counts.get(entry.name, 0) + 1
+    return sorted(name for name, count in counts.items() if count > 1)
+
+
+def _source_skill_reference(entry: SourceSkill) -> str:
+    return f"{entry.repo_id}:{entry.name}"
 
 
 def _source_skill_label(entry: SourceSkill) -> str:
-    return f"{entry.name}  {entry.repo_id}  {entry.description}"
+    return f"{entry.name}  {_source_skill_reference(entry)}  {entry.description}"
 
 
 def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:

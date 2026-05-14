@@ -101,7 +101,7 @@ def _escape_control_characters(value: str) -> str:
     escaped: list[str] = []
     for char in value:
         codepoint = ord(char)
-        if (codepoint < 0x20 and char != "\t") or 0x7F <= codepoint < 0xA0:
+        if codepoint < 0x20 or 0x7F <= codepoint < 0xA0:
             escaped.append(f"\\x{codepoint:02x}")
         else:
             escaped.append(char)
