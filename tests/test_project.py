@@ -126,6 +126,7 @@ def test_add_project_skill_wraps_copy_failures_and_cleans_temp(
 ):
     entry = make_source_skill(tmp_path / "source", "alpha")
     project_skills = tmp_path / "project" / ".pi" / "skills"
+    temp_dir = project_skills / ".alpha.sv-add-tmp"
 
     def fail_copytree(source, target):
         target.mkdir(parents=True)
@@ -138,8 +139,29 @@ def test_add_project_skill_wraps_copy_failures_and_cleans_temp(
         add_project_skill(entry, project_skills)
 
     assert not (project_skills / "alpha").exists()
+    assert not temp_dir.exists()
     assert_no_partial_sv_dirs(project_skills)
     assert load_manifest(project_skills) == {}
+
+
+def test_add_project_skill_cleans_stale_add_temp_directory_before_copy(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    temp_dir = project_skills / ".alpha.sv-add-tmp"
+    temp_dir.mkdir(parents=True)
+    (temp_dir / "stale.txt").write_text("stale\n")
+
+    result = add_project_skill(entry, project_skills)
+
+    assert result.status == "added"
+    assert result.skill == "alpha"
+    assert not temp_dir.exists()
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha remote\n"
+    manifest = load_manifest(project_skills)
+    assert manifest["alpha"].repo_id == "Org/Skills"
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_add_project_skill_missing_source_skill_raises_error(tmp_path: Path):
@@ -204,6 +226,7 @@ def test_add_project_skill_rolls_back_copy_when_manifest_update_fails(
 ):
     entry = make_source_skill(tmp_path / "source", "alpha")
     project_skills = tmp_path / "project" / ".pi" / "skills"
+    temp_dir = project_skills / ".alpha.sv-add-tmp"
 
     def fail_upsert(project_skills_dir, manifest_entry):
         raise SvError("manifest write failed")
@@ -214,6 +237,8 @@ def test_add_project_skill_rolls_back_copy_when_manifest_update_fails(
         add_project_skill(entry, project_skills)
 
     assert not (project_skills / "alpha").exists()
+    assert not temp_dir.exists()
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_add_project_skill_reports_manifest_failure_rollback_failure(
@@ -221,6 +246,7 @@ def test_add_project_skill_reports_manifest_failure_rollback_failure(
 ):
     entry = make_source_skill(tmp_path / "source", "alpha")
     project_skills = tmp_path / "project" / ".pi" / "skills"
+    temp_dir = project_skills / ".alpha.sv-add-tmp"
     original_rmtree = shutil.rmtree
 
     def fail_upsert(project_skills_dir, manifest_entry):
@@ -238,6 +264,8 @@ def test_add_project_skill_reports_manifest_failure_rollback_failure(
         add_project_skill(entry, project_skills)
 
     assert (project_skills / "alpha").exists()
+    assert not temp_dir.exists()
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
