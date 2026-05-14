@@ -48,6 +48,34 @@ def test_ensure_source_repo_rejects_symlinked_cache_path_before_git(
     assert (real_repo / "sentinel.txt").read_text() == "outside\n"
 
 
+def test_ensure_source_repo_rejects_symlinked_cache_ancestor_before_git(
+    tmp_path: Path,
+) -> None:
+    outside_sources = tmp_path / "outside-sources"
+    outside_sources.mkdir()
+    (outside_sources / "sentinel.txt").write_text("outside\n")
+    symlinked_sources = tmp_path / "sources-link"
+    symlinked_sources.symlink_to(outside_sources, target_is_directory=True)
+    repo_path = symlinked_sources / "Org" / "Skills" / "repo"
+
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def git_runner(args, cwd=None):
+        calls.append((list(args), cwd))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=git_runner)
+
+    assert calls == []
+    assert (outside_sources / "sentinel.txt").read_text() == "outside\n"
+
+
 def test_ensure_source_repos_rejects_symlinked_cache_path_before_git(
     tmp_path: Path,
 ) -> None:
