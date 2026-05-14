@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import shlex
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -91,12 +92,53 @@ def _parse_sv_command(command: str) -> None:
     parse_sv(args)
 
 
+def _clean_markdown_link_target(raw_target: str) -> str:
+    target = raw_target.strip()
+    target = target.split(" ", 1)[0]
+    if target.startswith("<") and target.endswith(">"):
+        target = target[1:-1]
+    return target
+
+
 def _normalize_markdown_link_target(raw_target: str) -> str:
     """Return a local path target normalized for deterministic link checks."""
 
-    target = raw_target.strip()
-    target = target.split(" ", 1)[0]
-    return target.split("#", 1)[0]
+    return urlsplit(_clean_markdown_link_target(raw_target)).path
+
+
+def _markdown_link_targets(line: str) -> list[str]:
+    targets = re.findall(r"\[[^\]]+\]\(([^)]+)\)", line)
+    reference_definition = re.match(r"\s*\[[^\]]+\]:\s+(\S+)", line)
+    if reference_definition:
+        targets.append(reference_definition.group(1))
+    return targets
+
+
+def _local_markdown_links() -> list[tuple[str, int, str]]:
+    links: list[tuple[str, int, str]] = []
+
+    for path in _documented_paths():
+        relative_document = str(path.relative_to(_PROJECT_ROOT))
+        in_code_block = False
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if line.strip().startswith("```"):
+                in_code_block = not in_code_block
+                continue
+            if in_code_block:
+                continue
+            for raw_target in _markdown_link_targets(line):
+                cleaned_target = _clean_markdown_link_target(raw_target)
+                parsed = urlsplit(cleaned_target)
+                target = parsed.path
+                if not target or cleaned_target.startswith("#"):
+                    continue
+                if parsed.scheme or parsed.netloc:
+                    continue
+                links.append((relative_document, line_number, target))
+
+    return links
 
 
 @pytest.mark.parametrize(
@@ -123,6 +165,25 @@ def test_no_documented_removed_command_parses(capsys):
         parse_sv(["config", "show"])
 
     assert "invalid choice" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("document_path", "line_number", "link_target"),
+    _local_markdown_links(),
+)
+def test_documented_local_markdown_links_exist(
+    document_path: str, line_number: int, link_target: str
+):
+    source_path = _PROJECT_ROOT / document_path
+    target_path = (source_path.parent / link_target).resolve()
+
+    assert target_path.is_relative_to(_PROJECT_ROOT), (
+        f"{document_path}:{line_number} links outside the project: '{link_target}'."
+    )
+    assert target_path.is_file(), (
+        f"{document_path}:{line_number} links to missing local file "
+        f"'{link_target}' resolved as '{target_path}'."
+    )
 
 
 def test_readme_links_to_expected_local_docs():
