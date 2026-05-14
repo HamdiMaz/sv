@@ -78,6 +78,22 @@ def test_add_invalid_skill_name_does_not_touch_source_repo(tmp_path: Path, capsy
     assert "Invalid skill name" in capsys.readouterr().err
 
 
+def test_malformed_config_reports_cli_error(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    config = home / ".sv" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("repos = [\n")
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "error: Failed to read sv config" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_remove_interactive_removes_selected_project_skills_without_source_repo(
     tmp_path: Path, capsys
 ):

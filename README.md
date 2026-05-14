@@ -7,8 +7,13 @@
 `sv` is a Python CLI package and requires Python 3.14 or newer. Install it with your preferred Python package tool, then run it from the root of the project whose Pi skills you want to manage.
 
 ```bash
+# After publication:
 uv tool install sv
-# or, from a checkout:
+
+# From the Git repository:
+uv tool install git+https://github.com/HamdiMaz/sv.git
+
+# From a checkout:
 uv tool install .
 ```
 
@@ -39,6 +44,17 @@ Project Pi skills live under:
 ```text
 .pi/skills/
 ```
+
+## Source repo configuration
+
+`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, `sv` uses the default `HamdiMaz/Skills` repo. After you run `sv repo add`, only repos recorded in the config are used. To use the default repo plus a team repo, add both explicitly:
+
+```bash
+sv repo add HamdiMaz/Skills
+sv repo add SomeOrg/TeamSkills
+```
+
+Removing the last repo writes an explicit empty repo list, so no default repo is restored until the config file is removed or a repo is added again.
 
 ## Quick start
 
@@ -89,17 +105,18 @@ sv add -l
 Use ↑/↓ to move, ←/→ to page through skills, Space to select, Enter to add,
 and `q` to cancel. The picker renders inline, shows 5 skills at a time, and
 scrolls as you move. When a source repo is already cached, `sv add -l` reads the
-cache without pulling first so the picker opens quickly; run `sv list` or
-`sv update` when you want to refresh the cache before choosing skills.
+cache without pulling first so the picker opens quickly. Run `sv list` when you
+want to refresh source caches without changing project skills; use `sv update`
+only when you also want to sync installed project skills.
 
-Add every valid skill from every configured source repo:
+Add every valid, non-conflicting skill from configured source repos:
 
 ```bash
 sv add all
 sv add --all
 ```
 
-If a skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged.
+If multiple repos provide the same skill folder name, `sv add all` stops before copying anything and asks you to choose sources explicitly with `repo_id:skill` references. If a skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged.
 
 Remove a skill from the current project:
 
@@ -119,11 +136,15 @@ Update project skills from their recorded source repos:
 sv sync
 ```
 
+`sv sync` pulls configured source repos, then replaces matching project skill folders with the source copy. Local edits inside synced skill folders are overwritten. Legacy skills without manifest entries are adopted and overwritten only when exactly one configured repo provides that skill name; ambiguous or local-only skills are skipped with a clear message.
+
 Update source repo caches and then sync project skills:
 
 ```bash
 sv update
 ```
+
+Use `sv update` when you want both operations. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
 
 Run Pi with global skill discovery disabled and only project skills enabled:
 
@@ -152,7 +173,7 @@ description: Use when creating or publishing GitHub releases.
 ---
 ```
 
-The frontmatter `name` must match the folder name, and `description` must be non-empty. Invalid skill folders are skipped by `sv list`, `sv add`, `sv add all`, `sv sync`, and `sv update`.
+The frontmatter `name` must match the folder name, and `description` must be non-empty. Skill folders with missing or malformed metadata are skipped by `sv list`, `sv add`, `sv add all`, `sv sync`, and `sv update`. Unreadable or non-UTF-8 `SKILL.md` files stop the command with a clear error so source repository problems are not missed.
 
 ## Project manifest
 

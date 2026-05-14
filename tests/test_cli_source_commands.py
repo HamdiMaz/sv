@@ -317,6 +317,51 @@ def test_add_duplicate_skill_uses_choice_callback(tmp_path: Path, capsys):
     assert "Alpha from B." in output
 
 
+def test_add_duplicate_skill_without_tty_reports_error(tmp_path: Path, capsys):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "alpha"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    error = capsys.readouterr().err
+    assert "Multiple source skills match 'alpha'" in error
+    assert "Use a qualified skill reference" in error
+
+
+def test_add_all_reports_duplicate_source_skills_without_copying(tmp_path: Path, capsys):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "--all"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / "beta").exists()
+    error = capsys.readouterr().err
+    assert "Duplicate source skill 'alpha'" in error
+    assert "Use qualified skill references" in error
+
+
 def test_invalid_skill_is_not_listed_or_added_by_all(tmp_path: Path, capsys):
     source = make_source_repo(tmp_path)
     invalid = source / "skills" / "invalid"

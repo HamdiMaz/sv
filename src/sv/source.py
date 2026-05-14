@@ -57,7 +57,13 @@ def ensure_source_repo(
             )
         return
 
-    repo_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SvError(
+            f"Failed to prepare source cache directory {repo_path.parent}: {exc}"
+        ) from exc
+
     _run_git(
         ["clone", repo_url, str(repo_path)],
         cwd=None,

@@ -4,7 +4,22 @@ version = "0.1.0"
 description = "Project-local AI agent skill manager"
 readme = "README.md"
 requires-python = ">=3.14"
+keywords = ["ai", "agents", "cli", "pi", "skills"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/HamdiMaz/sv"
+Issues = "https://github.com/HamdiMaz/sv/issues"
+Changelog = "https://github.com/HamdiMaz/sv/blob/master/CHANGELOG.md"
 
 [project.scripts]
 sv = "sv.cli:main"

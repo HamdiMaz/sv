@@ -41,6 +41,16 @@ def test_parse_skill_file_requires_file(tmp_path: Path):
         parse_skill_file(tmp_path / "alpha" / "SKILL.md", expected_folder="alpha")
 
 
+def test_parse_skill_file_reports_unreadable_text_as_sv_error(tmp_path: Path):
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir(parents=True)
+    skill_file = skill_dir / "SKILL.md"
+    skill_file.write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(SvError, match="Failed to read SKILL.md"):
+        parse_skill_file(skill_file, expected_folder="alpha")
+
+
 def test_parse_skill_file_requires_frontmatter_at_top(tmp_path: Path):
     skill_file = write_skill(tmp_path, "# Alpha\n---\nname: alpha\n---\n")
 

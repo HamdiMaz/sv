@@ -13,6 +13,7 @@ from sv.config import (
     normalize_repo,
     remove_repo,
 )
+from sv.errors import SvError
 
 
 def test_normalize_repo_accepts_github_shorthand():
@@ -88,6 +89,79 @@ def test_load_config_reads_old_single_repo_config(tmp_path: Path):
             ),
         )
     )
+
+
+def test_load_config_reports_malformed_toml_as_sv_error(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text("repos = [\n")
+
+    with pytest.raises(SvError, match="Failed to read sv config"):
+        load_config(paths)
+
+
+def test_load_config_reports_invalid_repo_entries_as_sv_error(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text('[[repos]]\nid = "Org/Skills"\n')
+
+    with pytest.raises(SvError, match="Invalid sv config"):
+        load_config(paths)
+
+
+def test_load_config_rejects_non_string_repo_value(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text("repo = 123\n")
+
+    with pytest.raises(SvError, match="repo must be a string"):
+        load_config(paths)
+
+
+def test_load_config_rejects_non_string_repo_entry_fields(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text('[[repos]]\nid = []\nurl = "https://example.com/skills.git"\n')
+
+    with pytest.raises(SvError, match="repo entry 1 field 'id' must be a string"):
+        load_config(paths)
+
+
+def test_load_config_rejects_unsafe_repo_id(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "../../outside"\nurl = "https://example.com/skills.git"\n'
+    )
+
+    with pytest.raises(SvError, match="repo entry 1 field 'id' contains unsafe path components"):
+        load_config(paths)
+
+
+def test_add_repo_reports_config_write_failures(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.sv_home.write_text("not a directory\n")
+
+    with pytest.raises(SvError, match="Failed to write sv config"):
+        add_repo(paths, "Org/Skills")
+
+
+def test_add_repo_rejects_unsafe_github_shorthand(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+
+    with pytest.raises(SvError, match="repo id contains unsafe path components"):
+        add_repo(paths, "../Skills")
+
+    assert not paths.config_file.exists()
+
+
+def test_add_repo_writes_escaped_control_characters(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+
+    add_repo(paths, "https://example.com/skills\nrepo.git")
+
+    assert "\\n" in paths.config_file.read_text()
+    assert load_config(paths).repos[0].url == "https://example.com/skills\nrepo.git"
 
 
 def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):

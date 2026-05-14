@@ -1,7 +1,10 @@
 from pathlib import Path
 
+import pytest
+
 from sv.catalog import SourceSkill, build_source_catalog
 from sv.config import RepoConfig, SvPaths
+from sv.errors import SvError
 
 
 def make_skill(repo_path: Path, name: str, description: str) -> None:
@@ -68,3 +71,36 @@ def test_build_source_catalog_skips_invalid_skills(tmp_path: Path):
     catalog = build_source_catalog([repo], paths)
 
     assert [entry.name for entry in catalog] == ["valid"]
+
+
+def test_build_source_catalog_reports_unreadable_skill_files(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    unreadable = repo_path / "skills" / "broken"
+    unreadable.mkdir(parents=True)
+    (unreadable / "SKILL.md").write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(SvError, match="Failed to read SKILL.md"):
+        build_source_catalog([repo], paths)
+
+
+def test_build_source_catalog_reports_skill_directory_listing_failures(
+    tmp_path: Path, monkeypatch
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    skills_root = paths.source_repo_for(repo.id) / "skills"
+    skills_root.mkdir(parents=True)
+
+    original_iterdir = Path.iterdir
+
+    def fail_iterdir(path):
+        if path == skills_root:
+            raise OSError("cannot list")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", fail_iterdir)
+
+    with pytest.raises(SvError, match="Failed to list source skills"):
+        build_source_catalog([repo], paths)

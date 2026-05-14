@@ -7,6 +7,10 @@ from sv.errors import SvError
 from sv.project import normalize_skill_name
 
 
+class InvalidSkillError(SvError):
+    """Raised when a source skill exists but does not match sv's skill format."""
+
+
 @dataclass(frozen=True)
 class SkillMetadata:
     name: str
@@ -15,15 +19,19 @@ class SkillMetadata:
 
 def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata:
     if not skill_file.is_file():
-        raise SvError(f"Skill folder '{expected_folder}' is missing SKILL.md.")
+        raise InvalidSkillError(f"Skill folder '{expected_folder}' is missing SKILL.md.")
 
-    text = skill_file.read_text(encoding="utf-8")
+    try:
+        text = skill_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SvError(f"Failed to read SKILL.md for skill '{expected_folder}': {exc}") from exc
+
     if not text.startswith("---\n"):
-        raise SvError(f"Skill '{expected_folder}' must start with frontmatter.")
+        raise InvalidSkillError(f"Skill '{expected_folder}' must start with frontmatter.")
 
     frontmatter_end = text.find("\n---", 4)
     if frontmatter_end == -1:
-        raise SvError(f"Skill '{expected_folder}' has malformed frontmatter.")
+        raise InvalidSkillError(f"Skill '{expected_folder}' has malformed frontmatter.")
 
     frontmatter = text[4:frontmatter_end]
     fields = _parse_frontmatter(frontmatter)
@@ -31,13 +39,18 @@ def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata
     description = fields.get("description", "").strip()
 
     if not name:
-        raise SvError(f"Skill '{expected_folder}' frontmatter is missing name.")
+        raise InvalidSkillError(f"Skill '{expected_folder}' frontmatter is missing name.")
     if not description:
-        raise SvError(f"Skill '{expected_folder}' frontmatter is missing description.")
+        raise InvalidSkillError(
+            f"Skill '{expected_folder}' frontmatter is missing description."
+        )
 
-    normalized_name = normalize_skill_name(name)
+    try:
+        normalized_name = normalize_skill_name(name)
+    except SvError as exc:
+        raise InvalidSkillError(str(exc)) from exc
     if normalized_name != expected_folder:
-        raise SvError(
+        raise InvalidSkillError(
             f"Skill frontmatter name '{normalized_name}' does not match folder '{expected_folder}'."
         )
 

@@ -132,6 +132,21 @@ def test_ensure_source_repo_reports_non_git_existing_path(tmp_path: Path):
         ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
 
 
+def test_ensure_source_repo_reports_cache_directory_creation_failures(tmp_path: Path):
+    repo_path = tmp_path / ".sv" / "sources" / "Org" / "Skills" / "repo"
+    blocker = tmp_path / ".sv" / "sources"
+    blocker.parent.mkdir(parents=True)
+    blocker.write_text("not a directory\n")
+    runner = FakeRunner(
+        [
+            completed(["git", "--version"], stdout="git version 2.0\n"),
+        ]
+    )
+
+    with pytest.raises(SvError, match="Failed to prepare source cache directory"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+
 def test_list_source_skills_lists_immediate_skill_folders_only(tmp_path: Path):
     repo_path = tmp_path / "repo"
     (repo_path / "skills" / "alpha").mkdir(parents=True)

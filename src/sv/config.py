@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 import hashlib
 import re
 import tomllib
+
+from sv.errors import SvError
 
 DEFAULT_REPO = "https://github.com/HamdiMaz/Skills.git"
 
@@ -51,6 +54,7 @@ class SvPaths:
         return self.source_repo_for(derive_repo_id(DEFAULT_REPO))
 
     def source_repo_for(self, repo_id: str) -> Path:
+        _validate_repo_id(repo_id, "repo id")
         return self.sources_dir.joinpath(*repo_id.split("/"), "repo")
 
 
@@ -96,24 +100,32 @@ def load_config(paths: SvPaths) -> SvConfig:
     if not paths.config_file.exists():
         return SvConfig()
 
-    with paths.config_file.open("rb") as file:
-        data = tomllib.load(file)
+    try:
+        with paths.config_file.open("rb") as file:
+            data = tomllib.load(file)
+    except tomllib.TOMLDecodeError as exc:
+        raise SvError(f"Failed to read sv config at {paths.config_file}: {exc}") from exc
+    except OSError as exc:
+        raise SvError(f"Failed to read sv config at {paths.config_file}: {exc}") from exc
 
-    if "repos" in data:
-        repos = tuple(
-            RepoConfig(id=str(item["id"]), url=str(item["url"]))
-            for item in data.get("repos", [])
-        )
-        return SvConfig(repos=repos)
+    try:
+        if "repos" in data:
+            return SvConfig(repos=_parse_repo_entries(data["repos"], paths))
 
-    repo = str(data.get("repo", DEFAULT_REPO))
-    normalized = normalize_repo(repo)
-    return SvConfig(repos=(RepoConfig(id=derive_repo_id(repo), url=normalized),))
+        repo = _expect_string(data.get("repo", DEFAULT_REPO), "repo", paths)
+        normalized = normalize_repo(repo)
+    except (TypeError, ValueError) as exc:
+        raise SvError(f"Invalid sv config at {paths.config_file}: {exc}") from exc
+
+    repo_id = derive_repo_id(repo)
+    _validate_repo_id(repo_id, "repo")
+    return SvConfig(repos=(RepoConfig(id=repo_id, url=normalized),))
 
 
 def add_repo(paths: SvPaths, repo: str) -> RepoChangeResult:
     normalized = normalize_repo(repo)
     repo_config = RepoConfig(id=derive_repo_id(repo), url=normalized)
+    _validate_repo_id(repo_config.id, "repo id")
     config = load_config(paths)
     if not paths.config_file.exists():
         config = SvConfig(repos=())
@@ -137,20 +149,69 @@ def remove_repo(paths: SvPaths, repo_id: str) -> RepoConfig:
     return removed
 
 
-def _save_config(paths: SvPaths, config: SvConfig) -> None:
-    paths.config_file.parent.mkdir(parents=True, exist_ok=True)
-    if not config.repos:
-        paths.config_file.write_text("repos = []\n")
-        return
+def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...]:
+    if not isinstance(raw_repos, list):
+        raise SvError(f"Invalid sv config at {paths.config_file}: repos must be a list.")
 
-    lines: list[str] = []
-    for index, repo in enumerate(config.repos):
-        if index:
-            lines.append("")
-        lines.append("[[repos]]")
-        lines.append(f'id = "{_toml_escape(repo.id)}"')
-        lines.append(f'url = "{_toml_escape(repo.url)}"')
-    paths.config_file.write_text("\n".join(lines) + "\n")
+    repos: list[RepoConfig] = []
+    for index, item in enumerate(raw_repos, start=1):
+        if not isinstance(item, dict):
+            raise SvError(
+                f"Invalid sv config at {paths.config_file}: repos[{index}] must be a table."
+            )
+        repo_item = cast("dict[str, Any]", item)
+        try:
+            repo_id = _expect_string(
+                repo_item["id"], f"repo entry {index} field 'id'", paths
+            )
+            repo_url = _expect_string(
+                repo_item["url"], f"repo entry {index} field 'url'", paths
+            )
+        except KeyError as exc:
+            raise SvError(
+                f"Invalid sv config at {paths.config_file}: repo entry {index} is missing {exc.args[0]!r}."
+            ) from exc
+        _validate_repo_id(repo_id, f"repo entry {index} field 'id'")
+        repos.append(RepoConfig(id=repo_id, url=repo_url))
+    return tuple(repos)
+
+
+def _expect_string(value: Any, field: str, paths: SvPaths) -> str:
+    if not isinstance(value, str):
+        raise SvError(
+            f"Invalid sv config at {paths.config_file}: {field} must be a string."
+        )
+    return value
+
+
+def _save_config(paths: SvPaths, config: SvConfig) -> None:
+    try:
+        paths.config_file.parent.mkdir(parents=True, exist_ok=True)
+        if not config.repos:
+            paths.config_file.write_text("repos = []\n")
+            return
+
+        lines: list[str] = []
+        for index, repo in enumerate(config.repos):
+            if index:
+                lines.append("")
+            lines.append("[[repos]]")
+            lines.append(f'id = "{_toml_escape(repo.id)}"')
+            lines.append(f'url = "{_toml_escape(repo.url)}"')
+        paths.config_file.write_text("\n".join(lines) + "\n")
+    except OSError as exc:
+        raise SvError(f"Failed to write sv config at {paths.config_file}: {exc}") from exc
+
+
+def _validate_repo_id(repo_id: str, field: str) -> None:
+    parts = repo_id.split("/")
+    if (
+        not repo_id
+        or repo_id.startswith(("/", "\\"))
+        or "\\" in repo_id
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        raise SvError(f"Invalid sv config: {field} contains unsafe path components.")
 
 
 def _fallback_repo_id(value: str) -> str:
@@ -163,4 +224,14 @@ def _fallback_repo_id(value: str) -> str:
 
 
 def _toml_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped: list[str] = []
+    replacements = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    for char in value:
+        replacement = replacements.get(char)
+        if replacement is not None:
+            escaped.append(replacement)
+        elif ord(char) < 0x20:
+            escaped.append(f"\\u{ord(char):04x}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)

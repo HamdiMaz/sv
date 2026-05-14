@@ -290,6 +290,9 @@ def _handle_add(
         _print_add_result(result)
         return 0
 
+    if skill_chooser is _choose_skill and not _can_prompt_for_skill_choice():
+        raise SvError(_ambiguous_skill_error(skill_reference, matches))
+
     print(f"Multiple source skills match '{skill_reference}':")
     rows = [
         [str(index), entry.name, entry.repo_id, entry.description]
@@ -312,6 +315,7 @@ def _handle_add(
 def _handle_add_all(
     catalog: Sequence[SourceSkill], cwd: Path, adapter: PiAdapter
 ) -> int:
+    _raise_on_duplicate_source_skills(catalog)
     result = add_all_project_skills(catalog, adapter.project_skill_dir(cwd))
     if not result.results:
         print("No valid skills found in configured source repos.")
@@ -424,6 +428,31 @@ def _print_sync_result(result: SyncResult) -> None:
             )
         else:
             print(f"Skipped local Pi skill '{skip.skill}'.")
+
+
+def _raise_on_duplicate_source_skills(catalog: Sequence[SourceSkill]) -> None:
+    seen: dict[str, SourceSkill] = {}
+    for entry in catalog:
+        existing = seen.get(entry.name)
+        if existing is not None:
+            raise SvError(
+                f"Duplicate source skill '{entry.name}' found in multiple repos: "
+                f"{existing.repo_id}, {entry.repo_id}. "
+                "Use qualified skill references like repo:skill to choose one source."
+            )
+        seen[entry.name] = entry
+
+
+def _can_prompt_for_skill_choice() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _ambiguous_skill_error(skill_reference: str, matches: Sequence[SourceSkill]) -> str:
+    choices = ", ".join(f"{entry.repo_id}:{entry.name}" for entry in matches)
+    return (
+        f"Multiple source skills match '{skill_reference}'. "
+        f"Use a qualified skill reference: {choices}."
+    )
 
 
 def _source_skill_rows(catalog: Sequence[SourceSkill]) -> list[list[str]]:

@@ -7,7 +7,7 @@ from pathlib import Path
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 from sv.project import normalize_skill_name
-from sv.skills import parse_skill_file
+from sv.skills import InvalidSkillError, parse_skill_file
 
 
 @dataclass(frozen=True)
@@ -35,14 +35,19 @@ def build_source_catalog(repos: Iterable[RepoConfig], paths: SvPaths) -> list[So
         skills_root = repo_path / "skills"
         if not skills_root.is_dir():
             continue
-        for skill_dir in sorted(skills_root.iterdir(), key=lambda path: path.name):
+        try:
+            skill_dirs = sorted(skills_root.iterdir(), key=lambda path: path.name)
+        except OSError as exc:
+            raise SvError(f"Failed to list source skills in {skills_root}: {exc}") from exc
+
+        for skill_dir in skill_dirs:
             if not skill_dir.is_dir():
                 continue
             try:
                 metadata = parse_skill_file(
                     skill_dir / "SKILL.md", expected_folder=skill_dir.name
                 )
-            except SvError:
+            except InvalidSkillError:
                 continue
             entries.append(
                 SourceSkill(

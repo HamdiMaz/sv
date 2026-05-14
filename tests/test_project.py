@@ -95,6 +95,51 @@ def test_add_project_skill_existing_skill_does_not_write_manifest(tmp_path: Path
     assert (existing / "notes.md").read_text() == "local\n"
 
 
+def test_add_project_skill_existing_file_raises_error(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    blocker = project_skills / "alpha"
+    blocker.parent.mkdir(parents=True)
+    blocker.write_text("not a directory\n")
+
+    with pytest.raises(SvError, match="non-directory path already exists"):
+        add_project_skill(entry, project_skills)
+
+    assert blocker.read_text() == "not a directory\n"
+    assert load_manifest(project_skills) == {}
+
+
+def test_add_project_skill_reports_project_directory_creation_failures(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    project_skills.parent.parent.mkdir(parents=True)
+    project_skills.parent.write_text("not a directory\n")
+
+    with pytest.raises(SvError, match="Failed to prepare Pi skills directory"):
+        add_project_skill(entry, project_skills)
+
+
+def test_add_project_skill_wraps_copy_failures_and_cleans_temp(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+
+    def fail_copytree(source, target):
+        target.mkdir(parents=True)
+        (target / "partial.txt").write_text("partial\n")
+        raise OSError("copy failed")
+
+    monkeypatch.setattr(shutil, "copytree", fail_copytree)
+
+    with pytest.raises(SvError, match="Failed to add Pi skill 'alpha'"):
+        add_project_skill(entry, project_skills)
+
+    assert not (project_skills / "alpha").exists()
+    assert not (project_skills / ".alpha.sv-add-tmp").exists()
+    assert load_manifest(project_skills) == {}
+
+
 def test_add_project_skill_missing_source_skill_raises_error(tmp_path: Path):
     entry = SourceSkill(
         name="missing",
@@ -107,6 +152,59 @@ def test_add_project_skill_missing_source_skill_raises_error(tmp_path: Path):
 
     with pytest.raises(SvError, match="Skill 'missing' was not found"):
         add_project_skill(entry, tmp_path / "project" / ".pi" / "skills")
+
+
+def test_add_project_skill_malformed_manifest_prevents_copy(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    (project_skills / ".sv-manifest.toml").write_text("skills = [\n")
+
+    with pytest.raises(SvError, match="Failed to read sv manifest"):
+        add_project_skill(entry, project_skills)
+
+    assert not (project_skills / "alpha").exists()
+
+
+def test_add_project_skill_rolls_back_copy_when_manifest_update_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+
+    def fail_upsert(project_skills_dir, manifest_entry):
+        raise SvError("manifest write failed")
+
+    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+
+    with pytest.raises(SvError, match="manifest write failed"):
+        add_project_skill(entry, project_skills)
+
+    assert not (project_skills / "alpha").exists()
+
+
+def test_add_project_skill_reports_manifest_failure_rollback_failure(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    original_rmtree = shutil.rmtree
+
+    def fail_upsert(project_skills_dir, manifest_entry):
+        raise SvError("manifest write failed")
+
+    def fail_rmtree(path, *args, **kwargs):
+        if path.name == "alpha":
+            raise OSError("rollback failed")
+        return original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+    monkeypatch.setattr(shutil, "rmtree", fail_rmtree)
+
+    with pytest.raises(SvError, match="rollback failed"):
+        add_project_skill(entry, project_skills)
+
+    assert (project_skills / "alpha").exists()
 
 
 def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
@@ -128,7 +226,8 @@ def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
 
 
 @pytest.mark.parametrize(
-    "skill", ["", "   ", ".", "..", "../alpha", "alpha/beta", r"alpha\\beta"]
+    "skill",
+    ["", "   ", ".", "..", ".alpha", "../alpha", "alpha/beta", r"alpha\\beta", "repo:skill"],
 )
 def test_normalize_skill_name_rejects_path_like_skill_names(skill: str):
     with pytest.raises(SvError, match="Invalid skill name"):
@@ -139,6 +238,7 @@ def test_list_project_skills_returns_sorted_skill_directories(tmp_path: Path):
     project_skills = tmp_path / "project" / ".pi" / "skills"
     (project_skills / "beta").mkdir(parents=True)
     (project_skills / "alpha").mkdir()
+    (project_skills / ".sv-sync-tmp").mkdir()
     (project_skills / "README.md").write_text("not a skill directory\n")
 
     assert list_project_skills(project_skills) == ["alpha", "beta"]
@@ -192,6 +292,19 @@ def test_remove_project_skill_missing_skill_keeps_manifest(tmp_path: Path):
         remove_project_skill("alpha", project_skills)
 
     assert sorted(load_manifest(project_skills)) == ["alpha"]
+
+
+def test_remove_project_skill_malformed_manifest_keeps_skill_directory(tmp_path: Path):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    skill = project_skills / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "notes.md").write_text("alpha\n")
+    (project_skills / ".sv-manifest.toml").write_text("skills = [\n")
+
+    with pytest.raises(SvError, match="Failed to read sv manifest"):
+        remove_project_skill("alpha", project_skills)
+
+    assert (skill / "notes.md").read_text() == "alpha\n"
 
 
 def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
@@ -269,6 +382,50 @@ def test_sync_project_skills_preserves_local_skill_when_copy_fails(
         sync_project_skills([entry], project_skills)
 
     assert (managed_local / "notes.md").read_text() == "local v1\n"
+
+
+def test_sync_project_skills_restores_local_skill_when_replace_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("local v1\n")
+    original_rename = Path.rename
+
+    def fail_temp_rename(path, target):
+        if path.name == ".managed.sv-sync-tmp":
+            raise OSError("rename failed")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_temp_rename)
+
+    with pytest.raises(SvError, match="Failed to sync skill 'managed'"):
+        sync_project_skills([entry], project_skills)
+
+    assert (managed_local / "notes.md").read_text() == "local v1\n"
+
+
+def test_sync_project_skills_restores_local_skill_when_manifest_update_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("local v1\n")
+
+    def fail_upsert(project_skills_dir, manifest_entry):
+        raise SvError("manifest write failed")
+
+    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+
+    with pytest.raises(SvError, match="manifest write failed"):
+        sync_project_skills([entry], project_skills)
+
+    assert (managed_local / "notes.md").read_text() == "local v1\n"
+    assert load_manifest(project_skills) == {}
 
 
 def test_sync_project_skills_reports_no_skills_dir(tmp_path: Path):
