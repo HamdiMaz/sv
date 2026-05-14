@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from sv.cli import build_parser, handle
+from sv.cli import _print_wrapped, build_parser, handle
 
 
 def parse(argv):
@@ -413,6 +413,16 @@ def test_add_help_explains_skill_argument(capsys):
     help_text = capsys.readouterr().out
     assert "Skill name or repo:skill reference" in help_text
     assert "choose a source" in help_text
+
+
+def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(
+    capsys, monkeypatch
+):
+    monkeypatch.setenv("COLUMNS", "4")
+
+    _print_wrapped("one two three")
+
+    assert all(len(line) <= 4 for line in capsys.readouterr().out.splitlines())
 
 
 def test_config_command_is_removed_from_parser():

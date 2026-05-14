@@ -33,7 +33,17 @@ def build_source_catalog(
     repos: Iterable[RepoConfig], paths: SvPaths
 ) -> list[SourceSkill]:
     entries: list[SourceSkill] = []
+    seen_repos: dict[str, str] = {}
     for repo in repos:
+        existing_url = seen_repos.get(repo.id)
+        if existing_url is not None:
+            if existing_url == repo.url:
+                continue
+            raise SvError(
+                f"Configured source repo id {repo.id!r} is listed more than once with different URLs."
+            )
+        seen_repos[repo.id] = repo.url
+
         repo_path = paths.source_repo_for(repo.id)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         skills_root = repo_path / "skills"

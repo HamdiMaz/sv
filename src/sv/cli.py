@@ -31,7 +31,7 @@ from sv.project import (
 )
 from sv.selector import select_skills
 from sv.source import default_runner, ensure_source_repos
-from sv.table import format_table
+from sv.table import CellWidths, format_table
 
 SkillSelector = Callable[..., list[Any]]
 SkillChooser = Callable[[Sequence[SourceSkill]], SourceSkill | None]
@@ -252,11 +252,13 @@ def _table_width() -> int:
 def _print_wrapped(message: str, *, leading_blank_line: bool = False) -> None:
     if leading_blank_line:
         print()
+    width = _table_width()
+    indent = "     " if width > 5 else ""
     print(
         textwrap.fill(
             message,
-            width=_table_width(),
-            subsequent_indent="     ",
+            width=width,
+            subsequent_indent=indent,
             break_long_words=True,
             break_on_hyphens=False,
         )
@@ -337,16 +339,17 @@ def _handle_list(catalog: Sequence[SourceSkill]) -> int:
         print("No valid skills found in configured source repos.")
         return 0
 
+    duplicates = _duplicate_skill_names(catalog)
+    include_references = bool(duplicates)
     print(
         format_table(
-            ["Skill", "Repo", "Add as", "Description"],
-            _source_skill_rows(catalog),
-            max_widths={"Skill": 28, "Repo": 32, "Add as": 48, "Description": 72},
-            min_widths={"Skill": 10, "Repo": 12, "Add as": 16, "Description": 24},
+            _source_skill_headers(include_references=include_references),
+            _source_skill_rows(catalog, include_references=include_references),
+            max_widths=_source_skill_max_widths(include_references=include_references),
+            min_widths=_source_skill_min_widths(include_references=include_references),
             max_table_width=_table_width(),
         )
     )
-    duplicates = _duplicate_skill_names(catalog)
     if duplicates:
         duplicate_list = ", ".join(duplicates)
         _print_wrapped(
@@ -583,11 +586,40 @@ def _ambiguous_skill_error(skill_reference: str, matches: Sequence[SourceSkill])
     )
 
 
-def _source_skill_rows(catalog: Sequence[SourceSkill]) -> list[list[str]]:
-    return [
-        [entry.name, entry.repo_id, _source_skill_reference(entry), entry.description]
-        for entry in catalog
-    ]
+def _source_skill_headers(*, include_references: bool) -> list[str]:
+    if include_references:
+        return ["Skill", "Repo", "Add as", "Description"]
+    return ["Skill", "Repo", "Description"]
+
+
+def _source_skill_max_widths(*, include_references: bool) -> CellWidths:
+    widths: dict[str | int, int] = {"Skill": 28, "Repo": 32, "Description": 72}
+    if include_references:
+        widths["Add as"] = 48
+    return widths
+
+
+def _source_skill_min_widths(*, include_references: bool) -> CellWidths:
+    widths: dict[str | int, int] = {"Skill": 10, "Repo": 12, "Description": 24}
+    if include_references:
+        widths["Add as"] = 16
+    return widths
+
+
+def _source_skill_rows(
+    catalog: Sequence[SourceSkill], *, include_references: bool
+) -> list[list[str]]:
+    if include_references:
+        return [
+            [
+                entry.name,
+                entry.repo_id,
+                _source_skill_reference(entry),
+                entry.description,
+            ]
+            for entry in catalog
+        ]
+    return [[entry.name, entry.repo_id, entry.description] for entry in catalog]
 
 
 def _duplicate_skill_names(catalog: Sequence[SourceSkill]) -> list[str]:

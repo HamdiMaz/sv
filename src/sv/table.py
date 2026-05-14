@@ -25,6 +25,7 @@ def format_table(
         min_widths,
         max_table_width,
     )
+    separator = _column_separator(widths, max_table_width)
 
     def format_physical_row(row: Sequence[str]) -> list[str]:
         wrapped_cells = [
@@ -38,13 +39,17 @@ def format_table(
             for column_index, cell_lines in enumerate(wrapped_cells):
                 value = cell_lines[line_index] if line_index < len(cell_lines) else ""
                 parts.append(value.ljust(widths[column_index]))
-            output_lines.append("  ".join(parts).rstrip())
+            output_lines.extend(
+                _hard_wrap_output_line(separator.join(parts).rstrip(), max_table_width)
+            )
         return output_lines
 
     header_lines = format_physical_row(normalized_headers)
-    underline = "  ".join("-" * width for width in widths).rstrip()
+    underline = _hard_wrap_output_line(
+        separator.join("-" * width for width in widths).rstrip(), max_table_width
+    )
     body = [line for row in normalized_rows for line in format_physical_row(row)]
-    return "\n".join([*header_lines, underline, *body])
+    return "\n".join([*header_lines, *underline, *body])
 
 
 def _column_widths(
@@ -77,6 +82,28 @@ def _column_widths(
     )
 
 
+def _hard_wrap_output_line(line: str, max_table_width: int | None) -> list[str]:
+    if max_table_width is None or max_table_width < 1 or len(line) <= max_table_width:
+        return [line]
+    return textwrap.wrap(
+        line,
+        width=max_table_width,
+        break_long_words=True,
+        break_on_hyphens=False,
+        drop_whitespace=False,
+    ) or [line]
+
+
+def _column_separator(widths: Sequence[int], max_table_width: int | None) -> str:
+    if max_table_width is None or len(widths) < 2:
+        return "  "
+    if sum(widths) + 2 * (len(widths) - 1) <= max_table_width:
+        return "  "
+    if sum(widths) + len(widths) - 1 <= max_table_width:
+        return " "
+    return ""
+
+
 def _fit_table_width(
     widths: list[int],
     preferred_minimums: Sequence[int],
@@ -86,37 +113,20 @@ def _fit_table_width(
     if max_table_width is None or max_table_width < 1 or not widths:
         return widths
 
-    fitted = list(widths)
-    separator_width = 2 * (len(fitted) - 1)
-    _shrink_widths_to_fit(
-        fitted,
-        max_table_width=max_table_width,
-        separator_width=separator_width,
-        minimums=preferred_minimums,
-    )
-    if sum(fitted) + separator_width <= max_table_width:
-        return fitted
+    for minimums in (preferred_minimums, hard_minimums, [1] * len(widths)):
+        for separator_cell_width in (2, 1, 0):
+            fitted = list(widths)
+            separator_width = separator_cell_width * (len(fitted) - 1)
+            _shrink_widths_to_fit(
+                fitted,
+                max_table_width=max_table_width,
+                separator_width=separator_width,
+                minimums=minimums,
+            )
+            if sum(fitted) + separator_width <= max_table_width:
+                return fitted
 
-    # Configured minimums are readability preferences, not a hard promise. On very
-    # narrow terminals, keep shrinking to header widths so output still respects
-    # terminal width instead of spilling sideways.
-    _shrink_widths_to_fit(
-        fitted,
-        max_table_width=max_table_width,
-        separator_width=separator_width,
-        minimums=hard_minimums,
-    )
-    if sum(fitted) + separator_width <= max_table_width:
-        return fitted
-
-    # If the terminal is narrower than the headers themselves, wrap headers too.
-    _shrink_widths_to_fit(
-        fitted,
-        max_table_width=max_table_width,
-        separator_width=separator_width,
-        minimums=[1] * len(fitted),
-    )
-    return fitted
+    return [1] * len(widths)
 
 
 def _shrink_widths_to_fit(

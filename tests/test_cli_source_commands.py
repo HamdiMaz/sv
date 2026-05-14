@@ -62,10 +62,13 @@ def test_list_and_add_from_local_git_source(tmp_path: Path, capsys):
     assert "Skill" in header
     assert "Repo" in header
     assert "Description" in header
+    assert "Add as" not in header
     assert "alpha" in output
     assert "Alpha skill." in output
     assert "beta" in output
     assert "Beta skill." in output
+    repo_id = load_config(SvPaths.from_home(home)).repos[0].id
+    assert f"{repo_id}:alpha" not in output
 
     exit_code = handle(parse(["add", "alpha"]), cwd=project, home=home)
 

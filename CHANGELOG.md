@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Simplified `sv list` UX by hiding the duplicate-looking `Add as` column until duplicate skill names require qualified references.
+- Made source catalog loading resilient to exact repeated repo entries so duplicate repo inputs cannot duplicate skill rows.
+- Added `docs/commands.md` as a compact command reference and updated docs to explain the compact vs duplicate-aware `sv list` tables.
+- Improved very narrow table rendering by compacting column separators and hard-wrapping as a last resort to keep output within terminal width.
+- Fixed wrapped guidance messages to avoid over-wide continuation indents in ultra-narrow terminals.
 - Improved table rendering to fit the current terminal width, including wrapped duplicate-name guidance for narrow terminals and CI logs.
 - Fixed repeated identical repo entries in `~/.sv/config.toml` from causing duplicated skills in `sv list` output.
 - Improved `sv add --help` with clearer positional argument guidance and examples for plain, qualified, interactive, and all-skill adds.

@@ -60,6 +60,18 @@ def test_build_source_catalog_sorts_by_skill_name_then_repo_id(tmp_path: Path):
     ]
 
 
+def test_build_source_catalog_ignores_exact_repeated_repo_entries(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    make_skill(paths.source_repo_for(repo.id), "alpha", "Alpha skill.")
+
+    catalog = build_source_catalog([repo, repo], paths)
+
+    assert [(entry.name, entry.repo_id) for entry in catalog] == [
+        ("alpha", "Org/Skills")
+    ]
+
+
 def test_build_source_catalog_skips_invalid_skills(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")

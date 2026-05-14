@@ -28,16 +28,15 @@ Run commands from the project root where `.pi/skills` should be managed.
 
 ## Reading `sv list`
 
-`sv list` prints four columns:
+`sv list` prints a compact table for unique skill names:
 
 | Column | Meaning |
 | --- | --- |
 | `Skill` | The folder name copied into `.pi/skills`. |
 | `Repo` | The configured source repo ID. |
-| `Add as` | The qualified `repo:skill` reference to use when you need an exact source. |
 | `Description` | The description parsed from the skill's `SKILL.md` frontmatter. |
 
-When two repos contain the same skill name, `sv list` keeps both rows visible and prints a duplicate-name tip. Use the `Add as` value to install the intended source. If the same repo is accidentally listed twice in `~/.sv/config.toml`, `sv` coalesces that repeated config entry so the same skill source does not appear twice.
+When two repos contain the same skill name, `sv list` keeps both rows visible, adds an `Add as` column, and prints a duplicate-name tip. Use the `Add as` value to install the intended source. If the same repo is accidentally listed twice in `~/.sv/config.toml`, `sv` coalesces that repeated config entry so the same skill source does not appear twice.
 
 ## Adding skills without surprises
 
@@ -65,4 +64,4 @@ Synced skill folders are replaced with the source version. Local edits inside ma
 
 ## Output and table behavior
 
-Tables are plain text so they work in terminals, logs, and CI. Long descriptions, URLs, and cache paths wrap within the current terminal width instead of pushing important columns off screen. Duplicate-name guidance wraps as well, so narrow terminals and CI logs stay readable. Terminal control characters from source metadata are escaped before display.
+Tables are plain text so they work in terminals, logs, and CI. Long descriptions, URLs, and cache paths wrap within the current terminal width instead of pushing important columns off screen. Very narrow terminals use tighter column spacing and last-resort hard wrapping when necessary. Duplicate-name guidance wraps as well, so narrow terminals and CI logs stay readable. Terminal control characters from source metadata are escaped before display.

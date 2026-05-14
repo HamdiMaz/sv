@@ -104,3 +104,41 @@ def test_format_table_shrinks_columns_to_fit_total_width():
         "alpha  Org/A  This description wraps to",
         "              fit a narrow terminal.",
     ]
+
+
+def test_format_table_uses_compact_separators_before_wrapping_headers():
+    output = format_table(
+        ["Skill", "Repo", "Description"],
+        [["alpha", "Org", "Short"]],
+        max_table_width=22,
+    )
+
+    assert output.splitlines()[0] == "Skill Repo Description"
+
+
+def test_format_table_uses_compact_separators_for_very_narrow_widths():
+    output = format_table(
+        ["A", "B", "C"],
+        [["alpha", "beta", "gamma"]],
+        max_table_width=5,
+    )
+
+    assert output.splitlines() == [
+        "A B C",
+        "- - -",
+        "a b g",
+        "l e a",
+        "p t m",
+        "h a m",
+        "a   a",
+    ]
+
+
+def test_format_table_hard_wraps_when_width_is_narrower_than_column_count():
+    output = format_table(
+        ["A", "B", "C"],
+        [["alpha", "beta", "gamma"]],
+        max_table_width=2,
+    )
+
+    assert all(len(line) <= 2 for line in output.splitlines())
