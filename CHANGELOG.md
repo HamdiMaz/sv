@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T036: expanded catalog tests for missing/invalid source contents, hidden skill directories, ordering, and `SourceSkill` display metadata.
 - Completed T035: expanded `SKILL.md` frontmatter parser coverage for comments, whitespace, colon-containing descriptions, duplicate keys, body delimiters, and empty metadata rejection.
 - Completed `T032`: added selector interaction-loop tests with fake TTY streams and `_read_key` injection for first/third selection, cancel, and empty enter, including cursor restoration verification on normal and failure paths.
 - Completed T033: expanded repo normalization and repo-id parser matrix tests in `tests/test_config.py` to cover local absolute/missing path resolution and shared invalid-input behavior for `normalize_repo` and `derive_repo_id`.

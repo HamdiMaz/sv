@@ -49,14 +49,18 @@ def test_build_source_catalog_sorts_by_skill_name_then_repo_id(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     alpha = RepoConfig(id="A/Skills", url="https://github.com/A/Skills.git")
     beta = RepoConfig(id="B/Skills", url="https://github.com/B/Skills.git")
-    make_skill(paths.source_repo_for(beta.id), "same", "B skill.")
+    make_skill(paths.source_repo_for(beta.id), "zeta", "B zeta.")
+    make_skill(paths.source_repo_for(beta.id), "alpha", "B alpha.")
     make_skill(paths.source_repo_for(alpha.id), "same", "A skill.")
+    make_skill(paths.source_repo_for(beta.id), "same", "B skill.")
 
     catalog = build_source_catalog([beta, alpha], paths)
 
     assert [(entry.name, entry.repo_id) for entry in catalog] == [
+        ("alpha", "B/Skills"),
         ("same", "A/Skills"),
         ("same", "B/Skills"),
+        ("zeta", "B/Skills"),
     ]
 
 
@@ -118,6 +122,20 @@ def test_find_qualified_catalog_entry_matches_repo_alias(tmp_path: Path):
     assert find_qualified_catalog_entry([entry], "Mirror/Skills:alpha") is entry
 
 
+def test_source_skill_exposes_relative_path_and_display_label(tmp_path: Path):
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "skills" / "alpha",
+    )
+
+    assert entry.source_relative_path == "skills/alpha"
+    assert entry.display_label == "alpha  Org/Skills  Alpha skill."
+
+
 def test_build_source_catalog_skips_invalid_skills(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
@@ -130,6 +148,71 @@ def test_build_source_catalog_skips_invalid_skills(tmp_path: Path):
     catalog = build_source_catalog([repo], paths)
 
     assert [entry.name for entry in catalog] == ["valid"]
+
+
+def test_build_source_catalog_skips_missing_skills_root(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Empty", url="https://github.com/Org/Empty.git")
+    paths.source_repo_for(repo.id).mkdir(parents=True)
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert catalog == []
+
+
+def test_build_source_catalog_skips_non_directories_in_skills_root(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill(repo_path, "valid", "Valid skill.")
+    skills_root = repo_path / "skills"
+    (skills_root / "README.md").write_text("# not a skill\n")
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [entry.name for entry in catalog] == ["valid"]
+
+
+def test_build_source_catalog_skips_hidden_skill_directories(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill(repo_path, "valid", "Valid skill.")
+    hidden = repo_path / "skills" / ".hidden"
+    hidden.mkdir(parents=True)
+    (hidden / "SKILL.md").write_text(
+        "---\nname: .hidden\ndescription: Hidden skill.\n---\n"
+    )
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [entry.name for entry in catalog] == ["valid"]
+
+
+def test_build_source_catalog_skips_multiple_invalid_skills_without_hiding_valid_ones(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill(repo_path, "zeta", "Zeta skill.")
+    make_skill(repo_path, "alpha", "Alpha skill.")
+    missing_metadata = repo_path / "skills" / "missing-metadata"
+    missing_metadata.mkdir(parents=True)
+    mismatched = repo_path / "skills" / "mismatched"
+    mismatched.mkdir()
+    (mismatched / "SKILL.md").write_text(
+        "---\nname: other\ndescription: Wrong folder.\n---\n"
+    )
+    empty_description = repo_path / "skills" / "empty-description"
+    empty_description.mkdir()
+    (empty_description / "SKILL.md").write_text(
+        "---\nname: empty-description\ndescription:   \n---\n"
+    )
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [entry.name for entry in catalog] == ["alpha", "zeta"]
 
 
 def test_build_source_catalog_skips_symlinked_skill_directories(tmp_path: Path):
