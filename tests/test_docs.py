@@ -23,7 +23,14 @@ EXPECTED_DOC_LINKS = {
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 README_PATH = _PROJECT_ROOT / "README.md"
 DOCS_DIR = _PROJECT_ROOT / "docs"
+WORKFLOW_PATH = _PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
 
+FULL_RELEASE_COMMANDS = [
+    "uv run ruff check .",
+    "uv run ty check src tests",
+    "uv run pytest --cov=sv --cov-report=term-missing",
+    "uv build",
+]
 
 COMMON_DOC_COMMAND_EXAMPLES = [
     "sv list",
@@ -90,6 +97,57 @@ def _parse_sv_command(command: str) -> None:
     if args[0] == "sv":
         args = args[1:]
     parse_sv(args)
+
+
+def _fenced_code_block_after_heading(path: Path, heading: str) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    heading_line = f"## {heading}"
+
+    try:
+        heading_index = lines.index(heading_line)
+    except ValueError:
+        pytest.fail(f"{path.relative_to(_PROJECT_ROOT)} is missing '{heading_line}'.")
+
+    block_start = None
+    for index in range(heading_index + 1, len(lines)):
+        if lines[index].strip().startswith("```"):
+            block_start = index + 1
+            break
+
+    if block_start is None:
+        pytest.fail(
+            f"{path.relative_to(_PROJECT_ROOT)} is missing a fenced code block after"
+            f" '{heading_line}'."
+        )
+
+    for index in range(block_start, len(lines)):
+        if lines[index].strip().startswith("```"):
+            return lines[block_start:index]
+
+    pytest.fail(
+        f"{path.relative_to(_PROJECT_ROOT)} has an unterminated fenced code block"
+        f" after '{heading_line}'."
+    )
+
+
+def _workflow_release_run_commands() -> list[str]:
+    release_commands: list[str] = []
+    current_step_name = ""
+
+    for line in WORKFLOW_PATH.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- name:"):
+            current_step_name = stripped.removeprefix("- name:").strip()
+            continue
+        if not stripped.startswith("run:"):
+            continue
+
+        normalized_name = current_step_name.lower()
+        if normalized_name.startswith("set up") or "install" in normalized_name:
+            continue
+        release_commands.append(stripped.removeprefix("run:").strip())
+
+    return release_commands
 
 
 def _clean_markdown_link_target(raw_target: str) -> str:
@@ -165,6 +223,24 @@ def test_no_documented_removed_command_parses(capsys):
         parse_sv(["config", "show"])
 
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_testing_guide_full_release_commands_match_ci():
+    documented_commands = [
+        line.strip()
+        for line in _fenced_code_block_after_heading(
+            DOCS_DIR / "testing.md", "Full release verification"
+        )
+        if line.strip()
+    ]
+    workflow_release_commands = _workflow_release_run_commands()
+
+    assert documented_commands == FULL_RELEASE_COMMANDS
+    assert workflow_release_commands == documented_commands, (
+        "Release commands in docs/testing.md should exactly match the GitHub"
+        " Actions run-step sequence after setup/install commands. Saw"
+        f" {workflow_release_commands!r}."
+    )
 
 
 @pytest.mark.parametrize(

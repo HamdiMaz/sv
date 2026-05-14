@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Polished docs tests to keep the testing guide's full release verification commands aligned with the GitHub Actions release-readiness workflow.
 - Polished docs tests to validate every local Markdown link in README/docs points to an existing in-project file.
 - Polished test coverage startup by lazy-loading shared CLI helper imports and suppressing the known benign `module-not-measured` warning from collection-time package imports.
 - Added a CLI-level `sv run` regression test proving symlinked project `.pi` directories are rejected before launching Pi.
