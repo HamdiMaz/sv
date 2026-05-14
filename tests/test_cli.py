@@ -46,6 +46,93 @@ def test_run_reports_missing_pi_binary(tmp_path: Path, capsys):
     assert "Unable to run 'pi'" in capsys.readouterr().err
 
 
+def test_run_reports_process_launch_os_errors_without_traceback(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def process_runner(command):
+        raise PermissionError("denied")
+
+    exit_code = handle(
+        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+    )
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "error: Unable to run 'pi': denied" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_run_escapes_control_characters_in_launch_errors(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def process_runner(command):
+        raise PermissionError("denied\x1b[2J")
+
+    exit_code = handle(
+        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+    )
+
+    assert exit_code == 1
+    message = capsys.readouterr().err
+    assert "denied\\x1b[2J" in message
+    assert "\x1b" not in message
+
+
+def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    outside_skills = tmp_path / "outside-skills"
+    outside_skills.mkdir()
+    (project / ".pi").mkdir(parents=True)
+    (project / ".pi" / "skills").symlink_to(
+        outside_skills, target_is_directory=True
+    )
+    calls = []
+
+    def process_runner(command):
+        calls.append(command)
+        return 0
+
+    exit_code = handle(
+        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+    )
+
+    assert exit_code == 1
+    assert calls == []
+    assert "Refusing to use symlinked Pi skills path" in capsys.readouterr().err
+
+
+def test_run_rejects_symlinked_project_skill_directory(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    outside_skill = tmp_path / "outside-alpha"
+    outside_skill.mkdir()
+    project_skills = project / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    (project_skills / "alpha").symlink_to(outside_skill, target_is_directory=True)
+    calls = []
+
+    def process_runner(command):
+        calls.append(command)
+        return 0
+
+    exit_code = handle(
+        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+    )
+
+    assert exit_code == 1
+    assert calls == []
+    assert "Refusing to manage symlinked Pi skill 'alpha'" in capsys.readouterr().err
+
+
 def test_add_interactive_with_skill_does_not_touch_source_repo(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -219,6 +306,23 @@ def test_repo_add_reports_existing_repo(tmp_path: Path, capsys):
 
     assert exit_code == 0
     assert "already configured" in capsys.readouterr().out
+
+
+def test_repo_add_reports_unresolvable_home_without_traceback(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = handle(
+        parse(["repo", "add", "~definitely-not-an-sv-user/Skills"]),
+        cwd=project,
+        home=home,
+    )
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "error: Could not resolve home directory" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_repo_remove_updates_config_without_deleting_project_skills(

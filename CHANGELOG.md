@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-- Fixed project and source symlink handling so `sv add`, `sv remove`, `sv sync`, and catalog loading refuse paths that could redirect file operations outside expected skill directories.
+- Fixed manifest writes to refuse symlinked temporary manifest files before writing metadata.
+- Fixed `sv run` to refuse symlinked project skill paths before launching Pi.
+- Fixed source cache handling to reject symlinked cache ancestors and symlinked `.git` metadata paths before running Git.
+- Fixed Git and Pi process launch `OSError`s to report user-facing errors instead of tracebacks.
+- Fixed Git failure, Git remote URL, and Pi launch error output with terminal control characters to render escaped text instead of raw escape sequences.
+- Fixed GitHub `ssh://git@github.com/...` source URLs to derive the same `owner/repo` IDs as HTTPS and scp-style SSH URLs.
+- Fixed local repo configuration so relative paths and `~` paths are saved as absolute paths, keeping `sv` commands independent of the current working directory.
+- Fixed project and source symlink handling so `sv add`, `sv remove`, and `sv sync` refuse unsafe paths, while catalog loading rejects symlinked source roots and skips symlinked source skill directories.
 - Fixed repo URL validation and `git clone` invocation to reject option-like/control-character repo values before calling Git.
 - Fixed source skill descriptions with terminal control characters to render escaped text instead of raw escape sequences.
 - Documented repo input formats, non-interactive duplicate-skill selection, `sv sync`/`sv update` behavior, Pi runtime requirements, and symlink safety rules.

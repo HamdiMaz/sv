@@ -72,6 +72,38 @@ def test_ensure_source_repo_rejects_symlinked_cache_path(tmp_path: Path):
     assert runner.calls == []
 
 
+def test_ensure_source_repo_rejects_symlinked_git_dir(tmp_path: Path):
+    if not hasattr(Path, "symlink_to"):
+        pytest.skip("symlink support is required")
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    outside_git = tmp_path / "outside-git"
+    outside_git.mkdir()
+    (repo_path / ".git").symlink_to(outside_git, target_is_directory=True)
+    runner = FakeRunner([])
+
+    with pytest.raises(SvError, match="Source Git metadata path must not be a symlink"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+    assert runner.calls == []
+
+
+def test_ensure_source_repo_rejects_symlinked_cache_ancestor(tmp_path: Path):
+    if not hasattr(Path, "symlink_to"):
+        pytest.skip("symlink support is required")
+    outside_sources = tmp_path / "outside-sources"
+    outside_sources.mkdir()
+    sources_link = tmp_path / "sources-link"
+    sources_link.symlink_to(outside_sources, target_is_directory=True)
+    repo_path = sources_link / "Org" / "Skills" / "repo"
+    runner = FakeRunner([])
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+    assert runner.calls == []
+
+
 def test_ensure_source_repo_pulls_existing_clone(tmp_path: Path):
     repo_path = tmp_path / "repo"
     (repo_path / ".git").mkdir(parents=True)
@@ -135,6 +167,29 @@ def test_ensure_source_repo_reports_remote_mismatch(tmp_path: Path):
         ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
 
 
+def test_ensure_source_repo_escapes_control_characters_in_remote_mismatch(
+    tmp_path: Path,
+):
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    runner = FakeRunner(
+        [
+            completed(["git", "--version"], stdout="git version 2.0\n"),
+            completed(
+                ["git", "remote", "get-url", "origin"],
+                stdout="https://example.com/other.git\x1b[2J\n",
+            ),
+        ]
+    )
+
+    with pytest.raises(SvError) as exc_info:
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+    message = str(exc_info.value)
+    assert "https://example.com/other.git\\x1b[2J" in message
+    assert "\x1b" not in message
+
+
 def test_ensure_source_repo_reports_git_failure(tmp_path: Path):
     repo_path = tmp_path / "repo"
     runner = FakeRunner(
@@ -144,6 +199,38 @@ def test_ensure_source_repo_reports_git_failure(tmp_path: Path):
     )
 
     with pytest.raises(SvError, match="Checking Git availability failed"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+
+def test_ensure_source_repo_escapes_control_characters_in_git_failure(
+    tmp_path: Path,
+):
+    repo_path = tmp_path / "repo"
+    runner = FakeRunner(
+        [
+            completed(
+                ["git", "--version"],
+                returncode=1,
+                stderr="bad\x1b[2J output\n",
+            ),
+        ]
+    )
+
+    with pytest.raises(SvError) as exc_info:
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+    message = str(exc_info.value)
+    assert "bad\\x1b[2J output" in message
+    assert "\x1b" not in message
+
+
+def test_ensure_source_repo_reports_runner_os_errors(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+
+    def runner(args, cwd=None):
+        raise PermissionError("denied")
+
+    with pytest.raises(SvError, match="Checking Git availability failed: denied"):
         ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
 
 

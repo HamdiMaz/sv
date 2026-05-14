@@ -4,6 +4,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+import os
 import tomllib
 
 from sv.errors import SvError
@@ -98,7 +99,7 @@ def save_manifest(project_skills_dir: Path, entries: dict[str, ManifestEntry]) -
             lines.append(f'repo_url = "{_toml_escape(entry.repo_url)}"')
             lines.append(f'source_path = "{_toml_escape(entry.source_path)}"')
             lines.append(f'description = "{_toml_escape(entry.description)}"')
-        temp_path.write_text("\n".join(lines) + "\n")
+        _write_manifest_temp_file(temp_path, "\n".join(lines) + "\n")
         temp_path.replace(path)
     except OSError as exc:
         with suppress(OSError):
@@ -122,6 +123,26 @@ def remove_manifest_entry(project_skills_dir: Path, skill_name: str) -> None:
 
     del entries[skill_name]
     save_manifest(project_skills_dir, entries)
+
+
+def _write_manifest_temp_file(path: Path, text: str) -> None:
+    if path.is_symlink():
+        raise SvError(f"Refusing to use symlinked temporary manifest path at {path}.")
+    if path.exists():
+        path.unlink()
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(text)
+    except Exception:
+        with suppress(OSError):
+            path.unlink(missing_ok=True)
+        raise
 
 
 def _toml_escape(value: str) -> str:

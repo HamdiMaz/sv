@@ -37,6 +37,17 @@ def test_parse_skill_file_accepts_quoted_values(tmp_path: Path):
     assert metadata == SkillMetadata(name="alpha", description="Alpha: skill")
 
 
+def test_parse_skill_file_accepts_crlf_frontmatter(tmp_path: Path):
+    skill_file = write_skill(
+        tmp_path,
+        "---\r\nname: alpha\r\ndescription: Alpha skill.\r\n---\r\n",
+    )
+
+    metadata = parse_skill_file(skill_file, expected_folder="alpha")
+
+    assert metadata == SkillMetadata(name="alpha", description="Alpha skill.")
+
+
 def test_parse_skill_file_escapes_description_control_characters(tmp_path: Path):
     skill_file = write_skill(
         tmp_path,

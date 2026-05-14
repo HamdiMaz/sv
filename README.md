@@ -47,7 +47,7 @@ Project Pi skills live under:
 
 ## Source repo configuration
 
-`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, `sv` uses the default `HamdiMaz/Skills` repo. After you run `sv repo add`, only repos recorded in the config are used. `sv repo add` accepts GitHub shorthand such as `owner/repo`, GitHub HTTPS/SSH URLs, and local Git repository paths. Use `sv repo list` to see the derived repo ID used by qualified skill references and `sv repo remove`.
+`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, `sv` uses the default `HamdiMaz/Skills` repo. After you run `sv repo add`, only repos recorded in the config are used. `sv repo add` accepts GitHub shorthand such as `owner/repo`, GitHub HTTPS/SSH URLs, and local Git repository paths. Existing bare relative paths, and paths starting with `./`, `../`, `/`, or `~`, are resolved to absolute paths before they are saved, so global configuration keeps working no matter which project directory you run `sv` from later. If a local path looks like GitHub shorthand, use an explicit path prefix such as `./owner/repo` or `../repo`. Use `sv repo list` to see the derived repo ID used by qualified skill references and `sv repo remove`.
 
 To use the default repo plus a team repo, add both explicitly:
 
@@ -198,7 +198,7 @@ Existing project skills without manifest entries are backfilled during sync when
 
 Hidden directories matching `.<skill>.sv-*` inside `.pi/skills` are sv internals for in-progress or rolled-back file operations and should not be edited by hand.
 
-For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlinked project skill directories, symlinked source cache paths, symlinked source `skills/` roots, and symlinks inside source skill folders. Symlinked source skill directories are skipped during catalog loading. This prevents a project or source repo from redirecting add, remove, or sync operations outside the expected directories.
+For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlinked project skill directories, symlinked source cache paths, symlinked source `skills/` roots, and symlinks inside source skill folders. Symlinked source skill directories are skipped during catalog loading. Manifest writes also refuse symlinked temporary manifest files. These checks prevent a project or source repo from redirecting add, remove, sync, or run operations outside the expected directories.
 
 ## Pi isolation
 

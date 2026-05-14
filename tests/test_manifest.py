@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from sv import manifest as manifest_module
 from sv.errors import SvError
 from sv.manifest import (
     ManifestEntry,
@@ -103,6 +104,33 @@ def test_save_manifest_reports_write_failures(tmp_path: Path):
         save_manifest(project_skills, {})
 
 
+def test_save_manifest_refuses_symlinked_temp_file_without_writing_target(
+    tmp_path: Path,
+):
+    project_skills = tmp_path / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("do not overwrite\n")
+    (project_skills / ".sv-manifest.toml.tmp").symlink_to(outside)
+
+    with pytest.raises(SvError, match="temporary manifest path"):
+        save_manifest(
+            project_skills,
+            {
+                "alpha": ManifestEntry(
+                    name="alpha",
+                    repo_id="Org/A",
+                    repo_url="https://github.com/Org/A.git",
+                    source_path="skills/alpha",
+                    description="Alpha skill.",
+                )
+            },
+        )
+
+    assert outside.read_text() == "do not overwrite\n"
+    assert not (project_skills / ".sv-manifest.toml").exists()
+
+
 def test_save_manifest_preserves_existing_manifest_when_temp_write_fails(
     tmp_path: Path, monkeypatch
 ):
@@ -118,15 +146,11 @@ def test_save_manifest_preserves_existing_manifest_when_temp_write_fails(
     }
     save_manifest(project_skills, original)
     original_text = (project_skills / ".sv-manifest.toml").read_text()
-    real_write_text = Path.write_text
+    def fail_temp_write(path, text):
+        path.write_text("partial\n")
+        raise OSError("write failed")
 
-    def fail_temp_write(path, text, *args, **kwargs):
-        if path.name == ".sv-manifest.toml.tmp":
-            real_write_text(path, "partial\n", *args, **kwargs)
-            raise OSError("write failed")
-        return real_write_text(path, text, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "write_text", fail_temp_write)
+    monkeypatch.setattr(manifest_module, "_write_manifest_temp_file", fail_temp_write)
 
     with pytest.raises(SvError, match="Failed to write sv manifest"):
         save_manifest(

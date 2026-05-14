@@ -30,6 +30,43 @@ def test_normalize_repo_keeps_ssh_url():
     assert normalize_repo(url) == url
 
 
+def test_derive_repo_id_uses_owner_repo_for_github_ssh_url():
+    assert derive_repo_id("ssh://git@github.com/HamdiMaz/Skills.git") == "HamdiMaz/Skills"
+
+
+def test_normalize_repo_reports_unresolvable_user_home():
+    with pytest.raises(ValueError, match="Could not resolve home directory"):
+        normalize_repo("~definitely-not-an-sv-user/Skills")
+
+
+def test_normalize_repo_resolves_relative_local_paths(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "skill-source"
+    repo.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    assert normalize_repo("skill-source") == str(repo)
+
+
+def test_normalize_repo_resolves_parent_relative_local_paths(
+    tmp_path: Path, monkeypatch
+):
+    repo = tmp_path / "skill-source"
+    repo.mkdir()
+    child = tmp_path / "project"
+    child.mkdir()
+    monkeypatch.chdir(child)
+
+    assert normalize_repo("../skill-source") == str(repo)
+
+
+def test_normalize_repo_expands_user_local_paths(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "skill-source"
+    repo.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert normalize_repo("~/skill-source") == str(repo)
+
+
 def test_normalize_repo_rejects_empty_value():
     with pytest.raises(ValueError, match="repo cannot be empty"):
         normalize_repo("   ")
@@ -49,6 +86,7 @@ def test_derive_repo_id_uses_owner_repo_for_github_forms():
     assert derive_repo_id("HamdiMaz/Skills") == "HamdiMaz/Skills"
     assert derive_repo_id("https://github.com/HamdiMaz/Skills.git") == "HamdiMaz/Skills"
     assert derive_repo_id("git@github.com:HamdiMaz/Skills.git") == "HamdiMaz/Skills"
+    assert derive_repo_id("ssh://git@github.com/HamdiMaz/Skills.git") == "HamdiMaz/Skills"
 
 
 def test_derive_repo_id_uses_safe_hashed_id_for_local_paths(tmp_path: Path):
@@ -160,11 +198,32 @@ def test_add_repo_reports_config_write_failures(tmp_path: Path):
         add_repo(paths, "Org/Skills")
 
 
+def test_add_repo_resolves_parent_relative_local_paths(
+    tmp_path: Path, monkeypatch
+):
+    paths = SvPaths.from_home(tmp_path / "home")
+    repo = tmp_path / "Skills"
+    repo.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    result = add_repo(paths, "../Skills")
+    other_project = tmp_path / "other-project"
+    other_project.mkdir()
+    monkeypatch.chdir(other_project)
+
+    assert result.repo.url == str(repo)
+    assert result.repo.id.startswith("local-Skills-")
+    assert f'url = "{repo}"' in paths.config_file.read_text()
+    assert load_config(paths).repos == (result.repo,)
+
+
 def test_add_repo_rejects_unsafe_github_shorthand(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
 
     with pytest.raises(SvError, match="repo id contains unsafe path components"):
-        add_repo(paths, "../Skills")
+        add_repo(paths, "Org/..")
 
     assert not paths.config_file.exists()
 

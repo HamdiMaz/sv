@@ -30,6 +30,8 @@ def ensure_source_repo(
 ) -> None:
     _validate_repo_url(repo_url)
     _reject_symlinked_source_path(repo_path, "Source repo cache path")
+    _reject_symlinked_source_cache_ancestors(repo_path)
+    _reject_symlinked_source_path(repo_path / ".git", "Source Git metadata path")
     _run_git(["--version"], cwd=None, runner=runner, action="Checking Git availability")
 
     if repo_path.exists():
@@ -45,8 +47,9 @@ def ensure_source_repo(
             action="Reading source repo remote",
         )
         if current_remote != repo_url:
+            safe_current_remote = _escape_control_characters(current_remote)
             raise SvError(
-                f"Configured source repo is {repo_url}, but existing source clone uses {current_remote}. "
+                f"Configured source repo is {repo_url}, but existing source clone uses {safe_current_remote}. "
                 f"Remove {repo_path} and rerun sv."
             )
 
@@ -111,6 +114,17 @@ def _validate_repo_url(repo_url: str) -> None:
         raise SvError("Invalid source repo: repo cannot contain control characters.")
 
 
+def _reject_symlinked_source_cache_ancestors(repo_path: Path) -> None:
+    for ancestor in reversed(repo_path.parents):
+        try:
+            if ancestor.is_symlink():
+                raise SvError(
+                    f"Source cache path must not contain symlinks: {ancestor}."
+                )
+        except OSError as exc:
+            raise SvError(f"Failed to inspect source path {ancestor}: {exc}") from exc
+
+
 def reject_symlinked_source_cache_path(repo_path: Path, sources_dir: Path) -> None:
     try:
         relative_parts = repo_path.relative_to(sources_dir).parts
@@ -144,11 +158,26 @@ def _run_git(args: Sequence[str], cwd: Path | None, runner: Runner, action: str)
         result = runner(command, cwd)
     except FileNotFoundError as exc:
         raise SvError("Git is required but was not found on PATH.") from exc
+    except OSError as exc:
+        raise SvError(f"{action} failed: {_escape_control_characters(str(exc))}") from exc
 
     if result.returncode != 0:
-        details = (result.stderr or result.stdout or "").strip()
+        details = _escape_control_characters(
+            (result.stderr or result.stdout or "").strip()
+        )
         if details:
             raise SvError(f"{action} failed: {details}")
         raise SvError(f"{action} failed with exit code {result.returncode}.")
 
     return (result.stdout or "").strip()
+
+
+def _escape_control_characters(value: str) -> str:
+    escaped: list[str] = []
+    for char in value:
+        codepoint = ord(char)
+        if codepoint < 0x20 or 0x7F <= codepoint < 0xA0:
+            escaped.append(f"\\x{codepoint:02x}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)

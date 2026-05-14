@@ -120,7 +120,7 @@ def handle(
 
         if args.command == "run":
             return _handle_run(
-                args.pi_args, adapter=adapter, process_runner=process_runner
+                args.pi_args, cwd=cwd, adapter=adapter, process_runner=process_runner
             )
 
         if args.command == "add":
@@ -242,8 +242,11 @@ def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:
     raise SvError(f"Unknown repo command: {args.repo_command}")
 
 
-def _handle_run(args: Sequence[str], adapter: PiAdapter, process_runner) -> int:
-    """Run Pi and turn a missing executable into a user-facing error."""
+def _handle_run(
+    args: Sequence[str], cwd: Path, adapter: PiAdapter, process_runner
+) -> int:
+    """Run Pi and turn launch failures into user-facing errors."""
+    list_project_skills(adapter.project_skill_dir(cwd))
     command = adapter.run_command(_strip_arg_separator(args))
     try:
         return process_runner(command)
@@ -251,6 +254,21 @@ def _handle_run(args: Sequence[str], adapter: PiAdapter, process_runner) -> int:
         raise SvError(
             f"Unable to run '{command[0]}'. Make sure it is installed and on PATH."
         ) from exc
+    except OSError as exc:
+        raise SvError(
+            f"Unable to run '{command[0]}': {_escape_control_characters(str(exc))}"
+        ) from exc
+
+
+def _escape_control_characters(value: str) -> str:
+    escaped: list[str] = []
+    for char in value:
+        codepoint = ord(char)
+        if codepoint < 0x20 or 0x7F <= codepoint < 0xA0:
+            escaped.append(f"\\x{codepoint:02x}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
 
 
 def _handle_list(catalog: Sequence[SourceSkill]) -> int:

@@ -18,6 +18,9 @@ _GITHUB_HTTPS = re.compile(
 _GITHUB_SSH = re.compile(
     r"^git@github\.com:(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?$"
 )
+_GITHUB_SSH_URL = re.compile(
+    r"^ssh://git@github\.com/(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
+)
 _SAFE_ID_PART = re.compile(r"[^A-Za-z0-9_.-]+")
 _REPO_ID_ALLOWED = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 
@@ -82,18 +85,23 @@ def normalize_repo(repo: str) -> str:
         raise ValueError("repo cannot contain control characters")
     if value.startswith(("https://", "http://", "git@", "ssh://", "file://")):
         return value
+    local_path = _resolve_local_repo_path(value)
+    if local_path is not None and _looks_like_local_path(value):
+        return str(local_path)
     if _GITHUB_SHORTHAND.fullmatch(value):
         return f"https://github.com/{value}.git"
+    if local_path is not None:
+        return str(local_path)
     return value
 
 
 def derive_repo_id(repo: str) -> str:
     value = repo.strip()
-    if _GITHUB_SHORTHAND.fullmatch(value):
+    if _GITHUB_SHORTHAND.fullmatch(value) and not _looks_like_local_path(value):
         return value
 
     normalized = normalize_repo(value)
-    for pattern in (_GITHUB_HTTPS, _GITHUB_SSH):
+    for pattern in (_GITHUB_HTTPS, _GITHUB_SSH, _GITHUB_SSH_URL):
         match = pattern.fullmatch(normalized)
         if match:
             return f"{match.group('owner')}/{match.group('repo')}"
@@ -126,14 +134,14 @@ def load_config(paths: SvPaths) -> SvConfig:
     except (TypeError, ValueError) as exc:
         raise SvError(f"Invalid sv config at {paths.config_file}: {exc}") from exc
 
-    repo_id = derive_repo_id(repo)
+    repo_id = derive_repo_id(normalized)
     _validate_repo_id(repo_id, "repo")
     return SvConfig(repos=(RepoConfig(id=repo_id, url=normalized),))
 
 
 def add_repo(paths: SvPaths, repo: str) -> RepoChangeResult:
     normalized = normalize_repo(repo)
-    repo_config = RepoConfig(id=derive_repo_id(repo), url=normalized)
+    repo_config = RepoConfig(id=derive_repo_id(normalized), url=normalized)
     _validate_repo_id(repo_config.id, "repo id")
     config = load_config(paths)
     if not paths.config_file.exists():
@@ -233,6 +241,20 @@ def _validate_repo_id(repo_id: str, field: str) -> None:
 
 def _contains_control_character(value: str) -> bool:
     return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
+
+
+def _looks_like_local_path(value: str) -> bool:
+    return value.startswith((".", "~", "/"))
+
+
+def _resolve_local_repo_path(value: str) -> Path | None:
+    try:
+        expanded = Path(value).expanduser()
+    except RuntimeError as exc:
+        raise ValueError(f"Could not resolve home directory in repo path {value!r}") from exc
+    if expanded.exists() or _looks_like_local_path(value):
+        return expanded.resolve()
+    return None
 
 
 def _fallback_repo_id(value: str) -> str:
