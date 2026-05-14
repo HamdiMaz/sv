@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Completed T026: added `tests/test_cli_remove_contracts.py` to lock remove command validation, interactive behavior, and manifest updates.
+
 - Completed T024: added `tests/test_cli_add_contracts.py` to lock `sv add` validation failure behavior for missing skills, invalid skill names, control-character references, and invalid flag combinations.
 - Completed T025: added `sv add` existing-origin contract tests for same-origin reuse, cross-origin conflict guidance, and unknown-origin replacement-safe messaging in `tests/test_cli_add_contracts.py`.
 - Completed T023: added `tests/test_cli_list_contracts.py` to lock `sv list` empty-config, empty-catalog, invalid/unreadable skill, and terminal-width contract behavior.
