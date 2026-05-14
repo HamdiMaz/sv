@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added package smoke tests for import/version checks, console-script wiring, and distribution metadata version consistency.
 - Added shared CLI test helpers (`parse_sv`, `run_sv`) for consistent parser and command execution assertions in tests.
 - Centralized git/source helper utilities in `tests/helpers.py` and switched `tests/test_cli_source_commands.py` to use shared helpers for local source/repo test setup.
 - Added shared output and filesystem assertion helpers (`assert_no_traceback`, `assert_no_raw_control_characters`, `assert_no_partial_sv_dirs`) and migrated existing CLI/project tests to use them.
