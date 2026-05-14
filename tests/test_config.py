@@ -1,4 +1,5 @@
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -7,6 +8,7 @@ from sv.config import (
     RepoConfig,
     SvConfig,
     SvPaths,
+    _save_config,
     add_repo,
     derive_repo_id,
     load_config,
@@ -238,6 +240,87 @@ def test_load_config_reports_invalid_repo_entries_as_sv_error(tmp_path: Path):
         load_config(paths)
 
 
+def test_load_config_rejects_repos_not_a_list(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text('repos = "not-a-list"\n')
+
+    with pytest.raises(SvError, match="Invalid sv config"):
+        load_config(paths)
+
+
+def test_load_config_rejects_repo_entries_that_are_not_tables(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text('repos = [1]\n')
+
+    with pytest.raises(SvError, match="Invalid sv config"):
+        load_config(paths)
+
+
+def test_load_config_rejects_aliases_not_a_list(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://example.com/skills.git"\n'
+        'aliases = "Mirror/Skills"\n'
+    )
+
+    with pytest.raises(SvError, match="repo entry 1 field 'aliases' must be a list"):
+        load_config(paths)
+
+
+def test_load_config_rejects_non_string_aliases(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'aliases = [123]\n'
+    )
+
+    with pytest.raises(SvError, match="repo entry 1 alias 1 must be a string"):
+        load_config(paths)
+
+
+def test_load_config_deduplicates_duplicate_aliases(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'aliases = ["Mirror/Skills", "Mirror/Skills", "Mirror/Second"]\n'
+    )
+
+    config = load_config(paths)
+
+    assert config.repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            aliases=("Mirror/Skills", "Mirror/Second"),
+        ),
+    )
+
+
+def test_load_config_rejects_unsafe_aliases(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'aliases = ["../../outside", "Org/Skills"]\n'
+    )
+
+    with pytest.raises(SvError, match="contains unsafe path components"):
+        load_config(paths)
+
+
 def test_load_config_rejects_non_string_repo_value(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
@@ -331,6 +414,44 @@ def test_load_config_rejects_option_like_repo_entry_url(tmp_path: Path):
 
     with pytest.raises(SvError, match="repo cannot start with '-'"):
         load_config(paths)
+
+
+def test_save_config_escapes_toml_special_characters(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    special_url = (
+        "https://example.com/skills\"quoted\" path\\with\\backslashes\n"
+        "with\r\tcontrol\n"
+    )
+    aliases = (
+        'mirror/"one',
+        "mirror\\two",
+        "mirror\nthree",
+        "mirror\rfour",
+        "mirror\tfive",
+    )
+    _save_config(
+        paths,
+        SvConfig(
+            repos=(
+                RepoConfig(
+                    id="Org/Skills",
+                    url=special_url,
+                    aliases=aliases,
+                ),
+            )
+        ),
+    )
+
+    saved = paths.config_file.read_text()
+    assert '\\"' in saved
+    assert "\\\\" in saved
+    assert "\\n" in saved
+    assert "\\r" in saved
+    assert "\\t" in saved
+
+    parsed = tomllib.loads(saved)
+    assert parsed["repos"][0]["url"] == special_url
+    assert parsed["repos"][0]["aliases"] == list(aliases)
 
 
 def test_load_config_coalesces_identical_duplicate_repo_entries(tmp_path: Path):
