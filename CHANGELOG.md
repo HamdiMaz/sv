@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Polished wrapped CLI output tests for one-column terminals containing overwide Unicode characters and combining marks.
 - Polished security-path tests for invalid `sv repo add` inputs, ensuring they fail without mutating existing config or project files.
 - Polished catalog tests for duplicate repo IDs that use equivalent or conflicting source URLs.
 - Polished source-cache safety tests for filesystem inspection failures before any Git process can run.
