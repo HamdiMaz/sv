@@ -36,6 +36,29 @@ def test_ensure_source_repo_rejects_symlinked_cache_path_before_git(
         ensure_source_repo("https://example.com/skills.git", repo_path, runner=git_runner)
 
 
+def test_ensure_source_repos_rejects_symlinked_cache_path_before_git(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    paths.sources_dir.mkdir(parents=True)
+    repo_path = paths.source_repo_for("Org/Skills")
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
+
+    outside_repo = tmp_path / "outside-repo"
+    outside_repo.mkdir()
+    repo_path.symlink_to(outside_repo, target_is_directory=True)
+
+    def git_runner(args, cwd=None):
+        pytest.fail("git runner was called despite symlinked source cache path")
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        ensure_source_repos(
+            [RepoConfig(id="Org/Skills", url="https://example.com/skills.git")],
+            paths,
+            runner=git_runner,
+        )
+
+
 def test_ensure_source_repos_rejects_symlinked_cache_ancestor_before_git(
     tmp_path: Path,
 ) -> None:
@@ -83,7 +106,7 @@ def test_build_source_catalog_rejects_symlinked_skills_root(
     outside.mkdir()
     (outside / "sentinel.md").write_text("outside\n")
     (outside / "alpha").mkdir(exist_ok=True)
-    os.symlink(outside, repo_path / "skills")
+    os.symlink(outside, repo_path / "skills", target_is_directory=True)
 
     with pytest.raises(SvError, match="Source skills path must not be a symlink"):
         build_source_catalog([repo], paths)
@@ -101,7 +124,7 @@ def test_build_source_catalog_skips_symlinked_skill_directory(tmp_path: Path) ->
     (outside / "SKILL.md").write_text(
         "---\nname: linked\ndescription: Linked skill.\n---\n"
     )
-    os.symlink(outside, repo_path / "skills" / "linked")
+    os.symlink(outside, repo_path / "skills" / "linked", target_is_directory=True)
 
     catalog = build_source_catalog([repo], paths)
 
@@ -114,7 +137,7 @@ def test_parse_skill_file_rejects_symlinked_skill_file(tmp_path: Path) -> None:
     outside = tmp_path / "outside-skill-file"
     outside.write_text("outside\n")
     skill_file = skill_dir / "SKILL.md"
-    os.symlink(outside, skill_file)
+    os.symlink(outside, skill_file, target_is_directory=False)
 
     with pytest.raises(SvError, match="must not be a symlink"):
         parse_skill_file(skill_file, expected_folder="alpha")
