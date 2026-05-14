@@ -1,4 +1,5 @@
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -41,6 +42,63 @@ def test_save_and_load_manifest_entries(tmp_path: Path):
         'description = "Alpha skill."\n'
     )
     assert load_manifest(project_skills) == entries
+
+
+def test_save_manifest_removes_manifest_when_entries_empty(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    save_manifest(
+        project_skills,
+        {
+            "alpha": ManifestEntry(
+                name="alpha",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/alpha",
+                description="Alpha skill.",
+            )
+        },
+    )
+
+    save_manifest(project_skills, {})
+
+    assert not (project_skills / ".sv-manifest.toml").exists()
+
+
+def test_save_manifest_orders_entries_deterministically(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    save_manifest(
+        project_skills,
+        {
+            "zeta": ManifestEntry(
+                name="zeta",
+                repo_id="Org/Z",
+                repo_url="https://github.com/Org/Z.git",
+                source_path="skills/zeta",
+                description="Zeta skill.",
+            ),
+            "alpha": ManifestEntry(
+                name="alpha",
+                repo_id="Org/A",
+                repo_url="https://github.com/Org/A.git",
+                source_path="skills/alpha",
+                description="Alpha skill.",
+            ),
+            "beta": ManifestEntry(
+                name="beta",
+                repo_id="Org/B",
+                repo_url="https://github.com/Org/B.git",
+                source_path="skills/beta",
+                description="Beta skill.",
+            ),
+        },
+    )
+
+    manifest_data = tomllib.loads((project_skills / ".sv-manifest.toml").read_text())
+    assert [entry["name"] for entry in manifest_data["skills"]] == [
+        "alpha",
+        "beta",
+        "zeta",
+    ]
 
 
 def test_save_manifest_escapes_control_characters(tmp_path: Path):
@@ -129,6 +187,74 @@ def test_save_manifest_refuses_symlinked_temp_file_without_writing_target(
 
     assert outside.read_text() == "do not overwrite\n"
     assert not (project_skills / ".sv-manifest.toml").exists()
+
+
+def test_save_manifest_empty_does_not_remove_manifest_when_delete_fails(
+    tmp_path: Path, monkeypatch
+):
+    project_skills = tmp_path / ".pi" / "skills"
+    save_manifest(
+        project_skills,
+        {
+            "alpha": ManifestEntry(
+                name="alpha",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/alpha",
+                description="Alpha skill.",
+            )
+        },
+    )
+    manifest_path = manifest_module.manifest_path(project_skills)
+    original_manifest = manifest_path.read_text()
+
+    original_unlink = manifest_module.Path.unlink
+
+    def fail_unlink(path: Path, missing_ok: bool = False) -> None:
+        if path == manifest_path:
+            raise OSError("delete failed")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(manifest_module.Path, "unlink", fail_unlink)
+
+    with pytest.raises(SvError, match="Failed to write sv manifest"):
+        save_manifest(project_skills, {})
+
+    assert manifest_path.read_text() == original_manifest
+    assert not (project_skills / ".sv-manifest.toml.tmp").exists()
+
+
+def test_save_manifest_empty_fails_for_invalid_parent_path(
+    tmp_path: Path, monkeypatch
+):
+    project_skills = tmp_path / ".pi" / "skills"
+    save_manifest(
+        project_skills,
+        {
+            "alpha": ManifestEntry(
+                name="alpha",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/alpha",
+                description="Alpha skill.",
+            )
+        },
+    )
+
+    expected_manifest = manifest_module.manifest_path(project_skills)
+    original_manifest_text = expected_manifest.read_text()
+    invalid_parent = tmp_path / "invalid-parent"
+    invalid_parent.write_text("not a directory\n")
+    invalid_manifest_path = invalid_parent / ".sv-manifest.toml"
+
+    with monkeypatch.context() as m:
+        m.setattr(manifest_module, "manifest_path", lambda _path: invalid_manifest_path)
+        with pytest.raises(SvError, match="Failed to write sv manifest"):
+            save_manifest(project_skills, {})
+
+    assert expected_manifest.read_text() == original_manifest_text
+    assert not (project_skills / ".sv-manifest.toml.tmp").exists()
+    assert not invalid_parent.joinpath(".sv-manifest.toml.tmp").exists()
 
 
 def test_save_manifest_preserves_existing_manifest_when_temp_write_fails(

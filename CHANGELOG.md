@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T019: added manifest atomic-write regression coverage for deterministic ordering, empty-save cleanup, empty-save deletion failures, and invalid-parent path failures in `tests/test_manifest.py`.
 - Completed T015: added `tests/test_security_paths.py` with security-path traversal coverage for hostile skill names and repo IDs, validating SvError behavior and no filesystem mutation on validation failures.
 - Completed T016: added `tests/test_security_project_symlinks.py` with project-side symlink safety coverage for add/remove/list/sync and run paths, including symlinked `.pi`, `.pi/skills`, and project skill directories.
 - Completed T017: expanded `tests/test_security_source_symlinks.py` with stronger source-side symlink coverage, including explicit assertions that symlinked cache and git paths fail before any git runner calls and do not mutate linked outside sentinel files. Coverage still includes repo cache paths and ancestors, git metadata paths, skills roots, skill directories, SKILL.md files, and symlinked source tree entries via `ensure_source_repo`, `ensure_source_repos`, `build_source_catalog`, `parse_skill_file`, and `add_project_skill`. Added a follow-up multi-repo batch-guard test that `ensure_source_repos` halts before any git calls when any configured cache ancestor is symlinked.
