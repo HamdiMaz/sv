@@ -113,6 +113,76 @@ def test_reject_symlinked_source_cache_path_handles_paths_outside_cache(tmp_path
     reject_symlinked_source_cache_path(repo_path, sources_dir)
 
 
+def test_reject_symlinked_source_cache_path_reports_inspection_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sources_dir = tmp_path / "sources"
+    repo_path = sources_dir / "Org" / "Skills"
+    blocked_path = sources_dir / "Org"
+    original_is_symlink = Path.is_symlink
+
+    def fail_for_blocked_path(path: Path) -> bool:
+        if path == blocked_path:
+            raise OSError("permission denied")
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fail_for_blocked_path)
+
+    with pytest.raises(SvError) as exc_info:
+        reject_symlinked_source_cache_path(repo_path, sources_dir)
+
+    assert str(exc_info.value) == (
+        f"Failed to inspect source path {blocked_path}: permission denied"
+    )
+
+
+def test_ensure_source_repo_reports_cache_path_inspection_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    runner = FakeRunner([])
+    original_is_symlink = Path.is_symlink
+
+    def fail_for_repo_path(path: Path) -> bool:
+        if path == repo_path:
+            raise OSError("permission denied")
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fail_for_repo_path)
+
+    with pytest.raises(SvError) as exc_info:
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+    assert str(exc_info.value) == (
+        f"Failed to inspect source path {repo_path}: permission denied"
+    )
+    assert runner.calls == []
+
+
+def test_ensure_source_repo_reports_cache_ancestor_inspection_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    blocked_path = tmp_path / "blocked"
+    repo_path = blocked_path / "repo"
+    runner = FakeRunner([])
+    original_is_symlink = Path.is_symlink
+
+    def fail_for_blocked_path(path: Path) -> bool:
+        if path == blocked_path:
+            raise OSError("permission denied")
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fail_for_blocked_path)
+
+    with pytest.raises(SvError) as exc_info:
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+    assert str(exc_info.value) == (
+        f"Failed to inspect source path {blocked_path}: permission denied"
+    )
+    assert runner.calls == []
+
+
 def test_ensure_source_repo_rejects_option_like_repo_url(tmp_path: Path):
     repo_path = tmp_path / ".sv" / "sources" / "default" / "repo"
     runner = FakeRunner([])
