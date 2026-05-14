@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Completed `T032`: added selector interaction-loop tests with fake TTY streams and `_read_key` injection for first/third selection, cancel, and empty enter, including cursor restoration verification on normal and failure paths.
-- Completed T033: added parametrized repo normalization/derivation coverage in `tests/test_config.py` for HTTPS/HTTP/SSH/file/local path inputs, explicit local path resolution, and invalid control/option inputs.
+- Completed T033: expanded repo normalization and repo-id parser matrix tests in `tests/test_config.py` to cover local absolute/missing path resolution and shared invalid-input behavior for `normalize_repo` and `derive_repo_id`.
 - Added `tests/test_selector.py` key-decoding coverage for all supported navigation, selection, cancel, EOF, and malformed-escape inputs (`T031`).
 - Completed T030: expanded `tests/test_table.py` with additional table-rendering edge-case coverage for multi-wide symbols, sparse/extra rows under tight widths, and zero/negative width behavior with Unicode content.
 - Completed T029: added `tests/test_cli_run_contracts.py` to lock `sv run` command contracts (argument forwarding, launch failures, and unsafe path rejection).
