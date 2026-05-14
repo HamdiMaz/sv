@@ -339,7 +339,9 @@ def test_add_duplicate_skill_without_tty_reports_error(tmp_path: Path, capsys):
     assert "Use a qualified skill reference" in error
 
 
-def test_add_all_reports_duplicate_source_skills_without_copying(tmp_path: Path, capsys):
+def test_add_all_reports_duplicate_source_skills_without_copying(
+    tmp_path: Path, capsys
+):
     source_a = make_source_repo(tmp_path, "source-a")
     source_b = make_source_repo(tmp_path, "source-b")
     write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")

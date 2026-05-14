@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 
 import pytest
@@ -154,6 +155,37 @@ def test_add_project_skill_missing_source_skill_raises_error(tmp_path: Path):
         add_project_skill(entry, tmp_path / "project" / ".pi" / "skills")
 
 
+def test_add_project_skill_rejects_symlinks_inside_source_skill(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("secret\n")
+    os.symlink(secret, entry.source_path / "secret-link.txt")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        add_project_skill(entry, project_skills)
+
+    assert not (project_skills / "alpha").exists()
+
+
+def test_add_project_skill_rejects_symlinked_project_skills_dir(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project = tmp_path / "project"
+    outside = tmp_path / "outside-skills"
+    outside.mkdir()
+    (project / ".pi").mkdir(parents=True)
+    os.symlink(outside, project / ".pi" / "skills")
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Pi skills path"):
+        add_project_skill(entry, project / ".pi" / "skills")
+
+    assert not (outside / "alpha").exists()
+
+
 def test_add_project_skill_malformed_manifest_prevents_copy(tmp_path: Path):
     entry = make_source_skill(tmp_path / "source", "alpha")
     project_skills = tmp_path / "project" / ".pi" / "skills"
@@ -227,7 +259,18 @@ def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
 
 @pytest.mark.parametrize(
     "skill",
-    ["", "   ", ".", "..", ".alpha", "../alpha", "alpha/beta", r"alpha\\beta", "repo:skill"],
+    [
+        "",
+        "   ",
+        ".",
+        "..",
+        ".alpha",
+        "../alpha",
+        "alpha/beta",
+        r"alpha\\beta",
+        "repo:skill",
+        "bad\x1bname",
+    ],
 )
 def test_normalize_skill_name_rejects_path_like_skill_names(skill: str):
     with pytest.raises(SvError, match="Invalid skill name"):
@@ -242,6 +285,14 @@ def test_list_project_skills_returns_sorted_skill_directories(tmp_path: Path):
     (project_skills / "README.md").write_text("not a skill directory\n")
 
     assert list_project_skills(project_skills) == ["alpha", "beta"]
+
+
+def test_list_project_skills_rejects_control_character_skill_names(tmp_path: Path):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    (project_skills / "bad\x1bname").mkdir(parents=True)
+
+    with pytest.raises(SvError, match="Invalid Pi skill directory"):
+        list_project_skills(project_skills)
 
 
 def test_remove_project_skill_deletes_local_skill_directory(tmp_path: Path):
@@ -332,6 +383,39 @@ def test_remove_project_skill_restores_skill_when_manifest_update_fails(
 def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
     with pytest.raises(SvError, match="Pi skill 'missing' was not found"):
         remove_project_skill("missing", tmp_path / "project" / ".pi" / "skills")
+
+
+def test_remove_project_skill_rejects_symlinked_local_skill(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    outside = tmp_path / "outside-alpha"
+    outside.mkdir(parents=True)
+    (outside / "notes.md").write_text("outside\n")
+    project_skills.mkdir(parents=True)
+    os.symlink(outside, project_skills / "alpha")
+
+    with pytest.raises(SvError, match="Refusing to manage symlinked Pi skill"):
+        remove_project_skill("alpha", project_skills)
+
+    assert (outside / "notes.md").read_text() == "outside\n"
+
+
+def test_remove_project_skill_rejects_symlinked_pi_dir(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    project = tmp_path / "project"
+    project.mkdir()
+    outside_pi = tmp_path / "outside-pi"
+    outside_skill = outside_pi / "skills" / "alpha"
+    outside_skill.mkdir(parents=True)
+    (outside_skill / "notes.md").write_text("outside\n")
+    os.symlink(outside_pi, project / ".pi")
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Pi skills path"):
+        remove_project_skill("alpha", project / ".pi" / "skills")
+
+    assert (outside_skill / "notes.md").read_text() == "outside\n"
 
 
 def test_sync_project_skills_updates_manifest_tracked_origin(tmp_path: Path):
@@ -448,6 +532,33 @@ def test_sync_project_skills_restores_local_skill_when_manifest_update_fails(
 
     assert (managed_local / "notes.md").read_text() == "local v1\n"
     assert load_manifest(project_skills) == {}
+
+
+def test_sync_project_skills_rejects_symlinked_project_skills_dir(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project = tmp_path / "project"
+    outside = tmp_path / "outside-skills"
+    outside_alpha = outside / "alpha"
+    outside_alpha.mkdir(parents=True)
+    (outside_alpha / "notes.md").write_text("outside\n")
+    (project / ".pi").mkdir(parents=True)
+    os.symlink(outside, project / ".pi" / "skills")
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Pi skills path"):
+        sync_project_skills([entry], project / ".pi" / "skills")
+
+    assert (outside_alpha / "notes.md").read_text() == "outside\n"
+
+
+def test_sync_project_skills_rejects_control_character_skill_names(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    (project_skills / "bad\x1bname").mkdir(parents=True)
+
+    with pytest.raises(SvError, match="Invalid Pi skill directory"):
+        sync_project_skills([entry], project_skills)
 
 
 def test_sync_project_skills_reports_no_skills_dir(tmp_path: Path):

@@ -183,8 +183,13 @@ def test_repo_add_and_list_use_multi_repo_config(tmp_path: Path, capsys):
     project = tmp_path / "project"
     project.mkdir()
 
-    assert handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
-    assert handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home) == 0
+    assert (
+        handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
+    )
+    assert (
+        handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home)
+        == 0
+    )
     capsys.readouterr()
 
     exit_code = handle(parse(["repo", "list"]), cwd=project, home=home)
@@ -204,24 +209,35 @@ def test_repo_add_reports_existing_repo(tmp_path: Path, capsys):
     project = tmp_path / "project"
     project.mkdir()
 
-    assert handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
+    assert (
+        handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
+    )
     capsys.readouterr()
-    exit_code = handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home)
+    exit_code = handle(
+        parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home
+    )
 
     assert exit_code == 0
     assert "already configured" in capsys.readouterr().out
 
 
-def test_repo_remove_updates_config_without_deleting_project_skills(tmp_path: Path, capsys):
+def test_repo_remove_updates_config_without_deleting_project_skills(
+    tmp_path: Path, capsys
+):
     home = tmp_path / "home"
     project = tmp_path / "project"
     skill = project / ".pi" / "skills" / "alpha"
     skill.mkdir(parents=True)
 
-    assert handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home) == 0
+    assert (
+        handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home)
+        == 0
+    )
     capsys.readouterr()
 
-    exit_code = handle(parse(["repo", "remove", "SomeOrg/TeamSkills"]), cwd=project, home=home)
+    exit_code = handle(
+        parse(["repo", "remove", "SomeOrg/TeamSkills"]), cwd=project, home=home
+    )
 
     assert exit_code == 0
     assert skill.is_dir()

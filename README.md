@@ -47,14 +47,16 @@ Project Pi skills live under:
 
 ## Source repo configuration
 
-`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, `sv` uses the default `HamdiMaz/Skills` repo. After you run `sv repo add`, only repos recorded in the config are used. To use the default repo plus a team repo, add both explicitly:
+`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, `sv` uses the default `HamdiMaz/Skills` repo. After you run `sv repo add`, only repos recorded in the config are used. `sv repo add` accepts GitHub shorthand such as `owner/repo`, GitHub HTTPS/SSH URLs, and local Git repository paths. Use `sv repo list` to see the derived repo ID used by qualified skill references and `sv repo remove`.
+
+To use the default repo plus a team repo, add both explicitly:
 
 ```bash
 sv repo add HamdiMaz/Skills
 sv repo add SomeOrg/TeamSkills
 ```
 
-Removing the last repo writes an explicit empty repo list, so no default repo is restored until the config file is removed or a repo is added again.
+Removing the last repo writes `repos = []`. The default repo is used again only if `~/.sv/config.toml` is removed or if you add `HamdiMaz/Skills` explicitly.
 
 ## Quick start
 
@@ -76,6 +78,8 @@ sv repo list
 sv repo remove SomeOrg/TeamSkills
 ```
 
+`sv repo remove` updates global configuration only. It does not delete cached source clones or remove project skills that were already installed from that repo.
+
 List valid skills available in configured source repos:
 
 ```bash
@@ -90,7 +94,7 @@ Add a skill to the current project:
 sv add github-release
 ```
 
-If multiple repos provide the same skill name, `sv` shows matching repos and lets you choose. You can skip the prompt with a qualified name:
+If multiple repos provide the same skill name, `sv` shows matching repos and lets you choose when stdin and stdout are interactive TTYs. In non-interactive use, provide a qualified name:
 
 ```bash
 sv add HamdiMaz/Skills:github-release
@@ -138,19 +142,22 @@ sv sync
 
 `sv sync` pulls configured source repos, then replaces matching project skill folders with the source copy. Local edits inside synced skill folders are overwritten. Legacy skills without manifest entries are adopted and overwritten only when exactly one configured repo provides that skill name; ambiguous or local-only skills are skipped with a clear message.
 
-Update source repo caches and then sync project skills:
+Update source repo caches and then sync project skills with explicit progress messages:
 
 ```bash
 sv update
 ```
 
-Use `sv update` when you want both operations. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
+`sv sync` and `sv update` both refresh configured source repos before syncing project skills. Use `sv update` when you want the refresh-and-sync operation to be explicit in command output. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
 
 Run Pi with global skill discovery disabled and only project skills enabled:
 
 ```bash
 sv run -- <pi args>
+sv run -- --model fast
 ```
+
+`sv run` requires the `pi` executable on your `PATH`. Use `--` before Pi options so they are forwarded to Pi instead of parsed by `sv`.
 
 ## Source repo layout
 
@@ -189,7 +196,9 @@ Existing project skills without manifest entries are backfilled during sync when
 
 `sv sync` replaces managed skills from their recorded source repo. It copies the source skill first and keeps a temporary backup of the local skill so the previous version can be restored if replacement or manifest update fails.
 
-Hidden `.sv-*` directories inside `.pi/skills` are sv internals for in-progress or rolled-back file operations and should not be edited by hand.
+Hidden directories matching `.<skill>.sv-*` inside `.pi/skills` are sv internals for in-progress or rolled-back file operations and should not be edited by hand.
+
+For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlinked project skill directories, symlinked source cache paths, symlinked source `skills/` roots, and symlinks inside source skill folders. Symlinked source skill directories are skipped during catalog loading. This prevents a project or source repo from redirecting add, remove, or sync operations outside the expected directories.
 
 ## Pi isolation
 
@@ -207,3 +216,4 @@ Start Pi through `sv run` when you want to use only project-local skills.
 - **`Source path ... exists but is not a Git clone.`** Remove the reported cache directory and rerun the command.
 - **`Configured source repo is ..., but existing source clone uses ...`.** The configured repo ID points at a cache cloned from a different remote. Remove the reported cache directory or update your repo config.
 - **Interactive selection requires a TTY.** Run `sv add -l` or `sv remove -l` in an interactive terminal, or use non-interactive commands such as `sv add <skill>` and `sv remove <skill>`.
+- **`Unable to run 'pi'.`** Install Pi and make sure the `pi` executable is available on your `PATH`.

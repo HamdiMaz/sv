@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import pytest
 
@@ -67,6 +68,66 @@ def test_build_source_catalog_skips_invalid_skills(tmp_path: Path):
     invalid = repo_path / "skills" / "invalid"
     invalid.mkdir(parents=True)
     (invalid / "SKILL.md").write_text("---\nname: other\ndescription: Bad.\n---\n")
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [entry.name for entry in catalog] == ["valid"]
+
+
+def test_build_source_catalog_skips_symlinked_skill_directories(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill(repo_path, "valid", "Valid skill.")
+    outside = tmp_path / "outside-skill"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(
+        "---\nname: linked\ndescription: Linked skill.\n---\n"
+    )
+    os.symlink(outside, repo_path / "skills" / "linked")
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [entry.name for entry in catalog] == ["valid"]
+
+
+def test_build_source_catalog_rejects_symlinked_skills_root(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    repo_path.mkdir(parents=True)
+    outside_skills = tmp_path / "outside-skills"
+    outside_skills.mkdir()
+    os.symlink(outside_skills, repo_path / "skills")
+
+    with pytest.raises(SvError, match="Source skills path must not be a symlink"):
+        build_source_catalog([repo], paths)
+
+
+def test_build_source_catalog_rejects_symlinked_cache_ancestor(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    outside_org = tmp_path / "outside-org"
+    outside_org.mkdir()
+    paths.sources_dir.mkdir(parents=True)
+    os.symlink(outside_org, paths.sources_dir / "Org")
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        build_source_catalog([repo], paths)
+
+
+def test_build_source_catalog_skips_control_character_skill_names(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill(repo_path, "valid", "Valid skill.")
+    make_skill(repo_path, "bad\x1bname", "Bad skill.")
 
     catalog = build_source_catalog([repo], paths)
 

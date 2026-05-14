@@ -8,6 +8,7 @@ from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 from sv.project import normalize_skill_name
 from sv.skills import InvalidSkillError, parse_skill_file
+from sv.source import reject_symlinked_source_cache_path
 
 
 @dataclass(frozen=True)
@@ -28,20 +29,26 @@ class SourceSkill:
         return f"{self.name}  {self.repo_id}  {self.description}"
 
 
-def build_source_catalog(repos: Iterable[RepoConfig], paths: SvPaths) -> list[SourceSkill]:
+def build_source_catalog(
+    repos: Iterable[RepoConfig], paths: SvPaths
+) -> list[SourceSkill]:
     entries: list[SourceSkill] = []
     for repo in repos:
         repo_path = paths.source_repo_for(repo.id)
+        reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         skills_root = repo_path / "skills"
+        _reject_symlinked_source_path(skills_root, "Source skills path")
         if not skills_root.is_dir():
             continue
         try:
             skill_dirs = sorted(skills_root.iterdir(), key=lambda path: path.name)
         except OSError as exc:
-            raise SvError(f"Failed to list source skills in {skills_root}: {exc}") from exc
+            raise SvError(
+                f"Failed to list source skills in {skills_root}: {exc}"
+            ) from exc
 
         for skill_dir in skill_dirs:
-            if not skill_dir.is_dir():
+            if skill_dir.is_symlink() or not skill_dir.is_dir():
                 continue
             try:
                 metadata = parse_skill_file(
@@ -62,7 +69,17 @@ def build_source_catalog(repos: Iterable[RepoConfig], paths: SvPaths) -> list[So
     return sorted(entries, key=lambda entry: (entry.name, entry.repo_id))
 
 
-def find_catalog_matches(catalog: Sequence[SourceSkill], skill: str) -> list[SourceSkill]:
+def _reject_symlinked_source_path(path: Path, label: str) -> None:
+    try:
+        if path.is_symlink():
+            raise SvError(f"{label} must not be a symlink: {path}.")
+    except OSError as exc:
+        raise SvError(f"Failed to inspect source path {path}: {exc}") from exc
+
+
+def find_catalog_matches(
+    catalog: Sequence[SourceSkill], skill: str
+) -> list[SourceSkill]:
     skill_name = normalize_skill_name(skill)
     return [entry for entry in catalog if entry.name == skill_name]
 

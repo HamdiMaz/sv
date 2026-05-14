@@ -39,9 +39,37 @@ def test_ensure_source_repo_clones_when_missing(tmp_path: Path):
 
     assert runner.calls == [
         (["git", "--version"], None),
-        (["git", "clone", "https://example.com/skills.git", str(repo_path)], None),
+        (
+            ["git", "clone", "--", "https://example.com/skills.git", str(repo_path)],
+            None,
+        ),
     ]
     assert repo_path.parent.exists()
+
+
+def test_ensure_source_repo_rejects_option_like_repo_url(tmp_path: Path):
+    repo_path = tmp_path / ".sv" / "sources" / "default" / "repo"
+    runner = FakeRunner([])
+
+    with pytest.raises(SvError, match="repo cannot start with '-'"):
+        ensure_source_repo("--upload-pack=/tmp/fake", repo_path, runner=runner)
+
+    assert runner.calls == []
+
+
+def test_ensure_source_repo_rejects_symlinked_cache_path(tmp_path: Path):
+    if not hasattr(Path, "symlink_to"):
+        pytest.skip("symlink support is required")
+    real_repo = tmp_path / "real-repo"
+    (real_repo / ".git").mkdir(parents=True)
+    repo_path = tmp_path / "repo-link"
+    repo_path.symlink_to(real_repo, target_is_directory=True)
+    runner = FakeRunner([])
+
+    with pytest.raises(SvError, match="Source repo cache path must not be a symlink"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+    assert runner.calls == []
 
 
 def test_ensure_source_repo_pulls_existing_clone(tmp_path: Path):
@@ -161,6 +189,23 @@ def test_list_source_skills_returns_empty_when_skills_dir_missing(tmp_path: Path
     assert list_source_skills(tmp_path / "repo") == []
 
 
+def test_ensure_source_repos_rejects_symlinked_cache_ancestor(tmp_path: Path):
+    if not hasattr(Path, "symlink_to"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    outside_org = tmp_path / "outside-org"
+    outside_org.mkdir()
+    paths.sources_dir.mkdir(parents=True)
+    (paths.sources_dir / "Org").symlink_to(outside_org, target_is_directory=True)
+    repos = [RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")]
+    runner = FakeRunner([])
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        ensure_source_repos(repos, paths, runner=runner)
+
+    assert runner.calls == []
+
+
 def test_ensure_source_repos_clones_each_configured_repo(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     repos = [
@@ -185,12 +230,24 @@ def test_ensure_source_repos_clones_each_configured_repo(tmp_path: Path):
     assert runner.calls == [
         (["git", "--version"], None),
         (
-            ["git", "clone", "https://github.com/Org/A.git", str(paths.source_repo_for("Org/A"))],
+            [
+                "git",
+                "clone",
+                "--",
+                "https://github.com/Org/A.git",
+                str(paths.source_repo_for("Org/A")),
+            ],
             None,
         ),
         (["git", "--version"], None),
         (
-            ["git", "clone", "https://github.com/Org/B.git", str(paths.source_repo_for("Org/B"))],
+            [
+                "git",
+                "clone",
+                "--",
+                "https://github.com/Org/B.git",
+                str(paths.source_repo_for("Org/B")),
+            ],
             None,
         ),
     ]

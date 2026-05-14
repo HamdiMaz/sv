@@ -35,6 +35,16 @@ def test_normalize_repo_rejects_empty_value():
         normalize_repo("   ")
 
 
+def test_normalize_repo_rejects_option_like_values():
+    with pytest.raises(ValueError, match="repo cannot start with '-'"):
+        normalize_repo("--upload-pack=/tmp/fake")
+
+
+def test_normalize_repo_rejects_control_characters():
+    with pytest.raises(ValueError, match="repo cannot contain control characters"):
+        normalize_repo("https://example.com/skills\nrepo.git")
+
+
 def test_derive_repo_id_uses_owner_repo_for_github_forms():
     assert derive_repo_id("HamdiMaz/Skills") == "HamdiMaz/Skills"
     assert derive_repo_id("https://github.com/HamdiMaz/Skills.git") == "HamdiMaz/Skills"
@@ -121,7 +131,9 @@ def test_load_config_rejects_non_string_repo_value(tmp_path: Path):
 def test_load_config_rejects_non_string_repo_entry_fields(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text('[[repos]]\nid = []\nurl = "https://example.com/skills.git"\n')
+    paths.config_file.write_text(
+        '[[repos]]\nid = []\nurl = "https://example.com/skills.git"\n'
+    )
 
     with pytest.raises(SvError, match="repo entry 1 field 'id' must be a string"):
         load_config(paths)
@@ -134,7 +146,9 @@ def test_load_config_rejects_unsafe_repo_id(tmp_path: Path):
         '[[repos]]\nid = "../../outside"\nurl = "https://example.com/skills.git"\n'
     )
 
-    with pytest.raises(SvError, match="repo entry 1 field 'id' contains unsafe path components"):
+    with pytest.raises(
+        SvError, match="repo entry 1 field 'id' contains unsafe path components"
+    ):
         load_config(paths)
 
 
@@ -155,13 +169,28 @@ def test_add_repo_rejects_unsafe_github_shorthand(tmp_path: Path):
     assert not paths.config_file.exists()
 
 
-def test_add_repo_writes_escaped_control_characters(tmp_path: Path):
+def test_load_config_rejects_control_characters_in_repo_id(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/\\u001bSkills"\nurl = "https://example.com/skills.git"\n'
+    )
 
-    add_repo(paths, "https://example.com/skills\nrepo.git")
+    with pytest.raises(
+        SvError, match="repo entry 1 field 'id' contains unsupported characters"
+    ):
+        load_config(paths)
 
-    assert "\\n" in paths.config_file.read_text()
-    assert load_config(paths).repos[0].url == "https://example.com/skills\nrepo.git"
+
+def test_load_config_rejects_option_like_repo_entry_url(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "--upload-pack=/tmp/fake"\n'
+    )
+
+    with pytest.raises(SvError, match="repo cannot start with '-'"):
+        load_config(paths)
 
 
 def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):

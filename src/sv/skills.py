@@ -18,16 +18,26 @@ class SkillMetadata:
 
 
 def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata:
+    if skill_file.is_symlink():
+        raise InvalidSkillError(
+            f"Skill '{expected_folder}' SKILL.md must not be a symlink."
+        )
     if not skill_file.is_file():
-        raise InvalidSkillError(f"Skill folder '{expected_folder}' is missing SKILL.md.")
+        raise InvalidSkillError(
+            f"Skill folder '{expected_folder}' is missing SKILL.md."
+        )
 
     try:
         text = skill_file.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        raise SvError(f"Failed to read SKILL.md for skill '{expected_folder}': {exc}") from exc
+        raise SvError(
+            f"Failed to read SKILL.md for skill '{expected_folder}': {exc}"
+        ) from exc
 
     if not text.startswith("---\n"):
-        raise InvalidSkillError(f"Skill '{expected_folder}' must start with frontmatter.")
+        raise InvalidSkillError(
+            f"Skill '{expected_folder}' must start with frontmatter."
+        )
 
     frontmatter_end = _find_closing_frontmatter_delimiter(text)
     if frontmatter_end == -1:
@@ -36,10 +46,12 @@ def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata
     frontmatter = text[4:frontmatter_end]
     fields = _parse_frontmatter(frontmatter)
     name = fields.get("name", "").strip()
-    description = fields.get("description", "").strip()
+    description = _escape_control_characters(fields.get("description", "").strip())
 
     if not name:
-        raise InvalidSkillError(f"Skill '{expected_folder}' frontmatter is missing name.")
+        raise InvalidSkillError(
+            f"Skill '{expected_folder}' frontmatter is missing name."
+        )
     if not description:
         raise InvalidSkillError(
             f"Skill '{expected_folder}' frontmatter is missing description."
@@ -83,3 +95,14 @@ def _unquote(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
+
+
+def _escape_control_characters(value: str) -> str:
+    escaped: list[str] = []
+    for char in value:
+        codepoint = ord(char)
+        if (codepoint < 0x20 and char != "\t") or 0x7F <= codepoint < 0xA0:
+            escaped.append(f"\\x{codepoint:02x}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)

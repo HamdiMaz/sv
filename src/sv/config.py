@@ -19,6 +19,7 @@ _GITHUB_SSH = re.compile(
     r"^git@github\.com:(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?$"
 )
 _SAFE_ID_PART = re.compile(r"[^A-Za-z0-9_.-]+")
+_REPO_ID_ALLOWED = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,10 @@ def normalize_repo(repo: str) -> str:
     value = repo.strip()
     if not value:
         raise ValueError("repo cannot be empty")
+    if value.startswith("-"):
+        raise ValueError("repo cannot start with '-'")
+    if _contains_control_character(value):
+        raise ValueError("repo cannot contain control characters")
     if value.startswith(("https://", "http://", "git@", "ssh://", "file://")):
         return value
     if _GITHUB_SHORTHAND.fullmatch(value):
@@ -104,9 +109,13 @@ def load_config(paths: SvPaths) -> SvConfig:
         with paths.config_file.open("rb") as file:
             data = tomllib.load(file)
     except tomllib.TOMLDecodeError as exc:
-        raise SvError(f"Failed to read sv config at {paths.config_file}: {exc}") from exc
+        raise SvError(
+            f"Failed to read sv config at {paths.config_file}: {exc}"
+        ) from exc
     except OSError as exc:
-        raise SvError(f"Failed to read sv config at {paths.config_file}: {exc}") from exc
+        raise SvError(
+            f"Failed to read sv config at {paths.config_file}: {exc}"
+        ) from exc
 
     try:
         if "repos" in data:
@@ -151,7 +160,9 @@ def remove_repo(paths: SvPaths, repo_id: str) -> RepoConfig:
 
 def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...]:
     if not isinstance(raw_repos, list):
-        raise SvError(f"Invalid sv config at {paths.config_file}: repos must be a list.")
+        raise SvError(
+            f"Invalid sv config at {paths.config_file}: repos must be a list."
+        )
 
     repos: list[RepoConfig] = []
     for index, item in enumerate(raw_repos, start=1):
@@ -164,8 +175,10 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
             repo_id = _expect_string(
                 repo_item["id"], f"repo entry {index} field 'id'", paths
             )
-            repo_url = _expect_string(
-                repo_item["url"], f"repo entry {index} field 'url'", paths
+            repo_url = normalize_repo(
+                _expect_string(
+                    repo_item["url"], f"repo entry {index} field 'url'", paths
+                )
             )
         except KeyError as exc:
             raise SvError(
@@ -200,7 +213,9 @@ def _save_config(paths: SvPaths, config: SvConfig) -> None:
             lines.append(f'url = "{_toml_escape(repo.url)}"')
         paths.config_file.write_text("\n".join(lines) + "\n")
     except OSError as exc:
-        raise SvError(f"Failed to write sv config at {paths.config_file}: {exc}") from exc
+        raise SvError(
+            f"Failed to write sv config at {paths.config_file}: {exc}"
+        ) from exc
 
 
 def _validate_repo_id(repo_id: str, field: str) -> None:
@@ -212,6 +227,12 @@ def _validate_repo_id(repo_id: str, field: str) -> None:
         or any(part in {"", ".", ".."} for part in parts)
     ):
         raise SvError(f"Invalid sv config: {field} contains unsafe path components.")
+    if _REPO_ID_ALLOWED.fullmatch(repo_id) is None:
+        raise SvError(f"Invalid sv config: {field} contains unsupported characters.")
+
+
+def _contains_control_character(value: str) -> bool:
+    return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
 
 
 def _fallback_repo_id(value: str) -> str:

@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import pytest
 
@@ -36,9 +37,35 @@ def test_parse_skill_file_accepts_quoted_values(tmp_path: Path):
     assert metadata == SkillMetadata(name="alpha", description="Alpha: skill")
 
 
+def test_parse_skill_file_escapes_description_control_characters(tmp_path: Path):
+    skill_file = write_skill(
+        tmp_path,
+        "---\nname: alpha\ndescription: Alpha \x1b]52;bad\x07 skill.\n---\n",
+    )
+
+    metadata = parse_skill_file(skill_file, expected_folder="alpha")
+
+    assert metadata == SkillMetadata(
+        name="alpha", description="Alpha \\x1b]52;bad\\x07 skill."
+    )
+
+
 def test_parse_skill_file_requires_file(tmp_path: Path):
     with pytest.raises(SvError, match="missing SKILL.md"):
         parse_skill_file(tmp_path / "alpha" / "SKILL.md", expected_folder="alpha")
+
+
+def test_parse_skill_file_rejects_symlinked_skill_file(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir(parents=True)
+    real_file = tmp_path / "real-SKILL.md"
+    real_file.write_text("---\nname: alpha\ndescription: Alpha skill.\n---\n")
+    os.symlink(real_file, skill_dir / "SKILL.md")
+
+    with pytest.raises(SvError, match="SKILL.md must not be a symlink"):
+        parse_skill_file(skill_dir / "SKILL.md", expected_folder="alpha")
 
 
 def test_parse_skill_file_reports_unreadable_text_as_sv_error(tmp_path: Path):

@@ -72,7 +72,12 @@ class SyncResult:
 def normalize_skill_name(skill: str) -> str:
     """Return a safe single-folder skill name for source and project paths."""
     name = skill.strip()
-    if not name or name.startswith(".") or any(char in name for char in ("/", "\\", ":")):
+    if (
+        not name
+        or name.startswith(".")
+        or any(char in name for char in ("/", "\\", ":"))
+        or _contains_control_character(name)
+    ):
         raise SvError(
             f"Invalid skill name {skill!r}. Use a single source skill folder name."
         )
@@ -85,6 +90,8 @@ def add_project_skill(
     skill_name = normalize_skill_name(entry.name)
     if not entry.source_path.is_dir():
         raise SvError(f"Skill '{skill_name}' was not found in source skills directory.")
+    _ensure_safe_source_skill_tree(entry.source_path, skill_name)
+    _ensure_safe_project_skills_dir(project_skills_dir)
 
     try:
         project_skills_dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +102,8 @@ def add_project_skill(
 
     load_manifest(project_skills_dir)
     target = project_skills_dir / skill_name
-    if target.exists():
+    if target.exists() or target.is_symlink():
+        _reject_symlinked_project_skill(target)
         if not target.is_dir():
             raise SvError(
                 f"Cannot add Pi skill '{skill_name}': non-directory path already exists at {target}."
@@ -138,21 +146,30 @@ def add_all_project_skills(
 
 def list_project_skills(project_skills_dir: Path) -> list[str]:
     """Return project-local Pi skill directory names in display order."""
+    _ensure_safe_project_skills_dir(project_skills_dir)
     if not project_skills_dir.is_dir():
         return []
     try:
-        return sorted(
-            path.name
-            for path in project_skills_dir.iterdir()
-            if path.is_dir() and not path.name.startswith(".")
-        )
+        skill_names: list[str] = []
+        for path in project_skills_dir.iterdir():
+            if path.name.startswith("."):
+                continue
+            _reject_symlinked_project_skill(path)
+            _validate_project_skill_dir_name(path)
+            if path.is_dir():
+                skill_names.append(path.name)
+        return sorted(skill_names)
     except OSError as exc:
-        raise SvError(f"Failed to list Pi skills in {project_skills_dir}: {exc}") from exc
+        raise SvError(
+            f"Failed to list Pi skills in {project_skills_dir}: {exc}"
+        ) from exc
 
 
 def remove_project_skill(skill: str, project_skills_dir: Path) -> RemoveSkillResult:
     skill_name = normalize_skill_name(skill)
+    _ensure_safe_project_skills_dir(project_skills_dir)
     target = project_skills_dir / skill_name
+    _reject_symlinked_project_skill(target)
     if not target.is_dir():
         raise SvError(f"Pi skill '{skill_name}' was not found in this project.")
 
@@ -203,6 +220,7 @@ def remove_project_skill(skill: str, project_skills_dir: Path) -> RemoveSkillRes
 def sync_project_skills(
     catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
 ) -> SyncResult:
+    _ensure_safe_project_skills_dir(project_skills_dir)
     if not project_skills_dir.is_dir():
         return SyncResult(updated=[], skipped=[], backfilled=[], no_skills_dir=True)
 
@@ -219,10 +237,16 @@ def sync_project_skills(
     try:
         local_skills = sorted(project_skills_dir.iterdir(), key=lambda path: path.name)
     except OSError as exc:
-        raise SvError(f"Failed to list Pi skills in {project_skills_dir}: {exc}") from exc
+        raise SvError(
+            f"Failed to list Pi skills in {project_skills_dir}: {exc}"
+        ) from exc
 
     for local_skill in local_skills:
-        if not local_skill.is_dir() or local_skill.name.startswith("."):
+        if local_skill.name.startswith("."):
+            continue
+        _reject_symlinked_project_skill(local_skill)
+        _validate_project_skill_dir_name(local_skill)
+        if not local_skill.is_dir():
             continue
 
         manifest_entry = manifest.get(local_skill.name)
@@ -266,6 +290,49 @@ def sync_project_skills(
     )
 
 
+def _contains_control_character(value: str) -> bool:
+    return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
+
+
+def _ensure_safe_project_skills_dir(project_skills_dir: Path) -> None:
+    pi_dir = project_skills_dir.parent
+    for path in (pi_dir, project_skills_dir):
+        try:
+            if path.is_symlink():
+                raise SvError(f"Refusing to use symlinked Pi skills path at {path}.")
+        except OSError as exc:
+            raise SvError(f"Failed to inspect Pi skills path {path}: {exc}") from exc
+
+
+def _reject_symlinked_project_skill(path: Path) -> None:
+    try:
+        is_symlink = path.is_symlink()
+    except OSError as exc:
+        raise SvError(f"Failed to inspect Pi skill path {path}: {exc}") from exc
+    if is_symlink:
+        raise SvError(f"Refusing to manage symlinked Pi skill '{path.name}' at {path}.")
+
+
+def _validate_project_skill_dir_name(path: Path) -> None:
+    try:
+        normalize_skill_name(path.name)
+    except SvError as exc:
+        raise SvError(f"Invalid Pi skill directory at {path}: {exc}") from exc
+
+
+def _ensure_safe_source_skill_tree(source: Path, skill_name: str) -> None:
+    if source.is_symlink():
+        raise SvError(f"Source skill '{skill_name}' contains a symlink at {source}.")
+    try:
+        for path in source.rglob("*"):
+            if path.is_symlink():
+                raise SvError(
+                    f"Source skill '{skill_name}' contains a symlink at {path}."
+                )
+    except OSError as exc:
+        raise SvError(f"Failed to inspect source skill '{skill_name}': {exc}") from exc
+
+
 def _copy_tree_for_add(source: Path, target: Path) -> None:
     """Copy source into target without leaving partial target directories behind."""
     temp_target = target.with_name(f".{target.name}.sv-add-tmp")
@@ -284,6 +351,7 @@ def _copy_tree_for_add(source: Path, target: Path) -> None:
 def _replace_tree_and_update_manifest(
     entry: ProjectSourceSkill, target: Path, project_skills_dir: Path
 ) -> None:
+    _ensure_safe_source_skill_tree(entry.source_path, entry.name)
     manifest_entry = _manifest_entry_for(entry)
 
     def update_manifest() -> None:

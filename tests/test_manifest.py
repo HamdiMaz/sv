@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from sv.errors import SvError
-from sv.manifest import ManifestEntry, load_manifest, save_manifest, upsert_manifest_entry
+from sv.manifest import (
+    ManifestEntry,
+    load_manifest,
+    save_manifest,
+    upsert_manifest_entry,
+)
 
 
 def test_load_manifest_returns_empty_when_file_missing(tmp_path: Path):
@@ -27,7 +32,7 @@ def test_save_and_load_manifest_entries(tmp_path: Path):
     save_manifest(project_skills, entries)
 
     assert (project_skills / ".sv-manifest.toml").read_text() == (
-        '[[skills]]\n'
+        "[[skills]]\n"
         'name = "alpha"\n'
         'repo_id = "Org/Skills"\n'
         'repo_url = "https://github.com/Org/Skills.git"\n'
@@ -78,9 +83,9 @@ def test_load_manifest_rejects_non_string_fields(tmp_path: Path):
     project_skills = tmp_path / ".pi" / "skills"
     project_skills.mkdir(parents=True)
     (project_skills / ".sv-manifest.toml").write_text(
-        '[[skills]]\n'
+        "[[skills]]\n"
         'name = "alpha"\n'
-        'repo_id = []\n'
+        "repo_id = []\n"
         'repo_url = "https://github.com/Org/Skills.git"\n'
         'source_path = "skills/alpha"\n'
     )

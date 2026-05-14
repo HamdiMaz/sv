@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed project and source symlink handling so `sv add`, `sv remove`, `sv sync`, and catalog loading refuse paths that could redirect file operations outside expected skill directories.
+- Fixed repo URL validation and `git clone` invocation to reject option-like/control-character repo values before calling Git.
+- Fixed source skill descriptions with terminal control characters to render escaped text instead of raw escape sequences.
+- Documented repo input formats, non-interactive duplicate-skill selection, `sv sync`/`sv update` behavior, Pi runtime requirements, and symlink safety rules.
 - Fixed `sv remove` to restore the skill directory if manifest update fails during removal.
 - Fixed `SKILL.md` parsing to require a real closing frontmatter delimiter line.
 - Fixed ambiguous non-interactive `sv add <skill>` to fail with qualified `repo:skill` guidance instead of silently doing nothing.
@@ -27,7 +31,7 @@
 - Added `sv remove -l` / `sv remove --list` to remove project skills from an interactive list.
 - Added `sv add -l` / `sv add --list` to choose multiple skills from an interactive scrolling list.
 - Added ←/→ pagination in the `sv add -l` picker.
-- Added `sv add all` and `sv add --all` to install every skill from the configured source repo.
+- Added `sv add all` and `sv add --all` to install every non-conflicting skill from configured source repos.
 
 ## v0.1.0
 
