@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T023: added `tests/test_cli_list_contracts.py` to lock `sv list` empty-config, empty-catalog, invalid/unreadable skill, and terminal-width contract behavior.
 - Completed T022: completed sync rollback coverage for stale temp/backup directory cleanup on success and failure paths, and for managed updates followed by local-only skip behavior in `tests/test_project.py`.
 - Completed T021: completed remove rollback coverage with tests for stale `.sv-remove-backup` cleanup on successful removal and restore behavior when backup cleanup fails in `tests/test_project.py`.
 - Completed T020: extended add rollback coverage in `tests/test_project.py` to assert `.sv-add-tmp` cleanup on failures and to verify stale add temp directories are cleaned before successful copy.
