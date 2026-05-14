@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T028: added `tests/test_cli_update_contracts.py` to lock `sv update` progress output and source-refresh failure behavior (including user-facing errors and sync prevention).
 - Added `tests/test_cli_sync_contracts.py` to lock `sv sync` contracts for missing `.pi/skills`, managed updates, source-missing, legacy backfill, ambiguous legacy, and local-only skip behavior.
 - Completed T026: added `tests/test_cli_remove_contracts.py` to lock remove command validation, interactive behavior, and manifest updates.
 
