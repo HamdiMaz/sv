@@ -73,14 +73,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("sync", help="Update local Pi skills from source repos.")
-    subparsers.add_parser("update", help="Update source caches and sync project skills.")
+    subparsers.add_parser(
+        "update", help="Update source caches and sync project skills."
+    )
 
     run_parser = subparsers.add_parser(
         "run", help="Run Pi with only project skills enabled."
     )
     run_parser.add_argument("pi_args", nargs=argparse.REMAINDER)
 
-    repo_parser = subparsers.add_parser("repo", help="Manage global skill source repos.")
+    repo_parser = subparsers.add_parser(
+        "repo", help="Manage global skill source repos."
+    )
     repo_subparsers = repo_parser.add_subparsers(dest="repo_command", required=True)
     repo_add_parser = repo_subparsers.add_parser("add", help="Add a skill source repo.")
     repo_add_parser.add_argument("repo")
@@ -123,7 +127,7 @@ def handle(
             if args.interactive:
                 if args.all or args.skill is not None:
                     raise SvError("Use -l by itself, or provide a skill name/--all.")
-                catalog = _update_sources_and_catalog(paths, git_runner, update=True)
+                catalog = _update_sources_and_catalog(paths, git_runner, update=False)
                 return _handle_add_interactive(
                     catalog,
                     cwd=cwd,

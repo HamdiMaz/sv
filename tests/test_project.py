@@ -6,7 +6,7 @@ import pytest
 from sv.agents import PiAdapter
 from sv.catalog import SourceSkill
 from sv.errors import SvError
-from sv.manifest import load_manifest
+from sv.manifest import ManifestEntry, load_manifest, save_manifest
 from sv.project import (
     add_all_project_skills,
     add_project_skill,
@@ -33,6 +33,16 @@ def make_source_skill(
         repo_url=f"https://github.com/{repo_id}.git",
         repo_path=source_root,
         source_path=skill_dir,
+    )
+
+
+def entry_manifest(entry: SourceSkill) -> ManifestEntry:
+    return ManifestEntry(
+        name=entry.name,
+        repo_id=entry.repo_id,
+        repo_url=entry.repo_url,
+        source_path=entry.source_relative_path,
+        description=entry.description,
     )
 
 
@@ -145,6 +155,43 @@ def test_remove_project_skill_deletes_local_skill_directory(tmp_path: Path):
     assert result.skill == "alpha"
     assert result.target == skill
     assert not skill.exists()
+
+
+def test_remove_project_skill_deletes_manifest_entry(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    assert add_project_skill(entry, project_skills).status == "added"
+
+    result = remove_project_skill("alpha", project_skills)
+
+    assert result.skill == "alpha"
+    assert not (project_skills / "alpha").exists()
+    assert load_manifest(project_skills) == {}
+
+
+def test_remove_project_skill_preserves_other_manifest_entries(tmp_path: Path):
+    alpha = make_source_skill(tmp_path / "source", "alpha")
+    beta = make_source_skill(tmp_path / "source", "beta")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(alpha, project_skills)
+    add_project_skill(beta, project_skills)
+
+    remove_project_skill("alpha", project_skills)
+
+    manifest = load_manifest(project_skills)
+    assert sorted(manifest) == ["beta"]
+    assert manifest["beta"].repo_id == "Org/Skills"
+
+
+def test_remove_project_skill_missing_skill_keeps_manifest(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    save_manifest(project_skills, {"alpha": entry_manifest(entry)})
+
+    with pytest.raises(SvError, match="Pi skill 'alpha' was not found"):
+        remove_project_skill("alpha", project_skills)
+
+    assert sorted(load_manifest(project_skills)) == ["alpha"]
 
 
 def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):

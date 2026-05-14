@@ -41,6 +41,11 @@ def load_manifest(project_skills_dir: Path) -> dict[str, ManifestEntry]:
 
 def save_manifest(project_skills_dir: Path, entries: dict[str, ManifestEntry]) -> None:
     project_skills_dir.mkdir(parents=True, exist_ok=True)
+    path = manifest_path(project_skills_dir)
+    if not entries:
+        path.unlink(missing_ok=True)
+        return
+
     lines: list[str] = []
     for index, entry in enumerate(entries[name] for name in sorted(entries)):
         if index:
@@ -51,12 +56,24 @@ def save_manifest(project_skills_dir: Path, entries: dict[str, ManifestEntry]) -
         lines.append(f'repo_url = "{_toml_escape(entry.repo_url)}"')
         lines.append(f'source_path = "{_toml_escape(entry.source_path)}"')
         lines.append(f'description = "{_toml_escape(entry.description)}"')
-    manifest_path(project_skills_dir).write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n")
 
 
 def upsert_manifest_entry(project_skills_dir: Path, entry: ManifestEntry) -> None:
     entries = load_manifest(project_skills_dir)
     entries[entry.name] = entry
+    save_manifest(project_skills_dir, entries)
+
+
+def remove_manifest_entry(project_skills_dir: Path, skill_name: str) -> None:
+    if not manifest_path(project_skills_dir).is_file():
+        return
+
+    entries = load_manifest(project_skills_dir)
+    if skill_name not in entries:
+        return
+
+    del entries[skill_name]
     save_manifest(project_skills_dir, entries)
 
 

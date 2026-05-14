@@ -112,7 +112,9 @@ def test_add_interactive_adds_selected_skills(tmp_path: Path, capsys):
     selector_calls = []
 
     def skill_selector(skills, **kwargs):
-        selector_calls.append(([(skill.name, skill.repo_id) for skill in skills], kwargs))
+        selector_calls.append(
+            ([(skill.name, skill.repo_id) for skill in skills], kwargs)
+        )
         return [skills[1]]
 
     exit_code = handle(
@@ -147,6 +149,46 @@ def test_add_interactive_reports_no_selection(tmp_path: Path, capsys):
 
     assert exit_code == 0
     assert "No skills selected." in capsys.readouterr().out
+
+
+def test_add_interactive_uses_cached_source_without_pull(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert handle(parse(["list"]), cwd=project, home=home) == 0
+    capsys.readouterr()
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        if args == ["git", "--version"]:
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout="git version 2.0\n"
+            )
+        if args == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout=f"{source}\n"
+            )
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(
+        parse(["add", "-l"]),
+        cwd=project,
+        home=home,
+        git_runner=git_runner,
+        skill_selector=lambda skills, **kwargs: [skills[0]],
+    )
+
+    assert exit_code == 0
+    assert [call[0] for call in git_calls] == [
+        ["git", "--version"],
+        ["git", "remote", "get-url", "origin"],
+    ]
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v1\n"
 
 
 def test_add_all_reports_existing_skills_without_overwrite(tmp_path: Path, capsys):
@@ -233,7 +275,9 @@ def test_add_qualified_skill_selects_repo_when_names_overlap(tmp_path: Path, cap
     exit_code = handle(parse(["add", f"{repo_id_b}:alpha"]), cwd=project, home=home)
 
     assert exit_code == 0
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha from b\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha from b\n"
     assert "Added Pi skill 'alpha'" in capsys.readouterr().out
 
 
@@ -265,7 +309,9 @@ def test_add_duplicate_skill_uses_choice_callback(tmp_path: Path, capsys):
     assert exit_code == 0
     assert len(choices) == 1
     assert choices[0][0][0] == "alpha"
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha from b\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha from b\n"
     output = capsys.readouterr().out
     assert "Multiple source skills match 'alpha'" in output
     assert "Alpha from B." in output
@@ -332,7 +378,9 @@ def test_sync_uses_manifest_origin_when_multiple_repos_have_same_skill(
     exit_code = handle(parse(["sync"]), cwd=project, home=home)
 
     assert exit_code == 0
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha b v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha b v2\n"
     assert "Synced Pi skill 'alpha'." in capsys.readouterr().out
 
 
@@ -391,7 +439,9 @@ def test_update_pulls_sources_then_syncs_project_skills(tmp_path: Path, capsys):
     exit_code = handle(parse(["update"]), cwd=project, home=home)
 
     assert exit_code == 0
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v2\n"
     output = capsys.readouterr().out
     assert "Updating source repos..." in output
     assert "Syncing project skills..." in output

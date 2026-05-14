@@ -2,6 +2,20 @@
 
 `sv` manages project-local AI agent skills for Pi. It copies valid skills from one or more Git-backed source repositories into the current project's `.pi/skills` directory and records where installed skills came from so they can be synced reliably.
 
+## Installation
+
+`sv` is a Python CLI package and requires Python 3.14 or newer. Install it with your preferred Python package tool, then run it from the root of the project whose Pi skills you want to manage.
+
+```bash
+uv tool install sv
+# or, from a checkout:
+uv tool install .
+```
+
+`sv` shells out to `git` to clone and update skill source repositories, so `git` must be available on your `PATH`.
+
+## Where sv stores files
+
 Default skill source when no repo config exists:
 
 ```text
@@ -14,10 +28,25 @@ Global sv files live under:
 ~/.sv/
 ```
 
+Cached source repositories live under:
+
+```text
+~/.sv/sources/
+```
+
 Project Pi skills live under:
 
 ```text
 .pi/skills/
+```
+
+## Quick start
+
+```bash
+sv list
+sv add find-docs
+sv sync
+sv run -- <pi args>
 ```
 
 ## Commands
@@ -59,7 +88,9 @@ sv add -l
 
 Use ↑/↓ to move, ←/→ to page through skills, Space to select, Enter to add,
 and `q` to cancel. The picker renders inline, shows 5 skills at a time, and
-scrolls as you move.
+scrolls as you move. When a source repo is already cached, `sv add -l` reads the
+cache without pulling first so the picker opens quickly; run `sv list` or
+`sv update` when you want to refresh the cache before choosing skills.
 
 Add every valid skill from every configured source repo:
 
@@ -138,3 +169,10 @@ pi --no-skills --skill .pi/skills
 ```
 
 Start Pi through `sv run` when you want to use only project-local skills.
+
+## Troubleshooting
+
+- **`Git is required but was not found on PATH.`** Install Git and make sure the `git` executable is available in your shell.
+- **`Source path ... exists but is not a Git clone.`** Remove the reported cache directory and rerun the command.
+- **`Configured source repo is ..., but existing source clone uses ...`.** The configured repo ID points at a cache cloned from a different remote. Remove the reported cache directory or update your repo config.
+- **Interactive selection requires a TTY.** Run `sv add -l` or `sv remove -l` in an interactive terminal, or use non-interactive commands such as `sv add <skill>` and `sv remove <skill>`.

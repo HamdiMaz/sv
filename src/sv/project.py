@@ -7,7 +7,12 @@ import shutil
 from typing import Protocol
 
 from sv.errors import SvError
-from sv.manifest import ManifestEntry, load_manifest, upsert_manifest_entry
+from sv.manifest import (
+    ManifestEntry,
+    load_manifest,
+    remove_manifest_entry,
+    upsert_manifest_entry,
+)
 
 
 class ProjectSourceSkill(Protocol):
@@ -126,6 +131,7 @@ def remove_project_skill(skill: str, project_skills_dir: Path) -> RemoveSkillRes
     except OSError as exc:
         raise SvError(f"Failed to remove Pi skill '{skill_name}': {exc}") from exc
 
+    remove_manifest_entry(project_skills_dir, skill_name)
     return RemoveSkillResult(skill=skill_name, target=target)
 
 

@@ -61,7 +61,9 @@ class SvConfig:
     )
 
     @property
-    def repo(self) -> str:
+    def repo(self) -> str | None:
+        if not self.repos:
+            return None
         return self.repos[0].url
 
 
@@ -102,7 +104,7 @@ def load_config(paths: SvPaths) -> SvConfig:
             RepoConfig(id=str(item["id"]), url=str(item["url"]))
             for item in data.get("repos", [])
         )
-        return SvConfig(repos=repos or SvConfig().repos)
+        return SvConfig(repos=repos)
 
     repo = str(data.get("repo", DEFAULT_REPO))
     normalized = normalize_repo(repo)
@@ -137,6 +139,10 @@ def remove_repo(paths: SvPaths, repo_id: str) -> RepoConfig:
 
 def _save_config(paths: SvPaths, config: SvConfig) -> None:
     paths.config_file.parent.mkdir(parents=True, exist_ok=True)
+    if not config.repos:
+        paths.config_file.write_text("repos = []\n")
+        return
+
     lines: list[str] = []
     for index, repo in enumerate(config.repos):
         if index:

@@ -69,6 +69,10 @@ def test_load_config_uses_default_repo_when_config_missing(tmp_path: Path):
     )
 
 
+def test_single_repo_compatibility_property_returns_none_for_empty_config():
+    assert SvConfig(repos=()).repo is None
+
+
 def test_load_config_reads_old_single_repo_config(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
@@ -104,11 +108,11 @@ def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):
         ),
     )
     assert paths.config_file.read_text() == (
-        '[[repos]]\n'
+        "[[repos]]\n"
         'id = "HamdiMaz/Skills"\n'
         'url = "https://github.com/HamdiMaz/Skills.git"\n'
         "\n"
-        '[[repos]]\n'
+        "[[repos]]\n"
         'id = "SomeOrg/TeamSkills"\n'
         'url = "https://github.com/SomeOrg/TeamSkills.git"\n'
     )
@@ -128,6 +132,17 @@ def test_remove_repo_writes_remaining_repos(tmp_path: Path):
             url="https://github.com/SomeOrg/TeamSkills.git",
         ),
     )
+
+
+def test_remove_last_repo_preserves_empty_repo_config(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    add_repo(paths, "HamdiMaz/Skills")
+
+    removed = remove_repo(paths, "HamdiMaz/Skills")
+
+    assert removed.id == "HamdiMaz/Skills"
+    assert load_config(paths).repos == ()
+    assert paths.config_file.read_text() == "repos = []\n"
 
 
 def test_remove_repo_reports_missing_repo(tmp_path: Path):
