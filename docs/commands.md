@@ -6,8 +6,8 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 
 | Command | Use when | Notes |
 | --- | --- | --- |
-| `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values. |
-| `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. |
+| `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values, showing each duplicate skill name once per group. |
+| `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
 | `sv add <repo>:<skill>` | Multiple repos provide the same skill name. | Copy the exact value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Use Space to select and Enter to confirm. |
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |

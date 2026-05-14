@@ -493,19 +493,18 @@ def _handle_add(
     rows = [
         [
             str(index),
-            entry.name,
             entry.repo_id,
-            _source_skill_reference(entry),
             entry.description,
+            _source_skill_reference(entry),
         ]
         for index, entry in enumerate(matches, start=1)
     ]
     print(
         format_table(
-            ["#", "Skill", "Repo", "Add as", "Description"],
+            ["#", "Repo", "Description", "Add as"],
             rows,
-            max_widths={"Skill": 28, "Repo": 32, "Add as": 48, "Description": 72},
-            min_widths={"Skill": 10, "Repo": 12, "Add as": 16, "Description": 24},
+            max_widths={"Repo": 32, "Description": 72, "Add as": 48},
+            min_widths={"Repo": 12, "Description": 24, "Add as": 16},
             max_table_width=_table_width(),
         )
     )
@@ -737,11 +736,17 @@ def _source_skill_rows(catalog: Sequence[SourceSkill]) -> list[list[str]]:
 def _duplicate_source_skill_rows(
     catalog: Sequence[SourceSkill], *, duplicate_names: set[str]
 ) -> list[list[str]]:
-    return [
-        [entry.name, entry.repo_id, entry.description, _source_skill_reference(entry)]
-        for entry in catalog
-        if entry.name in duplicate_names
-    ]
+    rows: list[list[str]] = []
+    visible_names: set[str] = set()
+    for entry in catalog:
+        if entry.name not in duplicate_names:
+            continue
+        skill_name = entry.name if entry.name not in visible_names else ""
+        visible_names.add(entry.name)
+        rows.append(
+            [skill_name, entry.repo_id, entry.description, _source_skill_reference(entry)]
+        )
+    return rows
 
 
 def _source_skills_by_name(

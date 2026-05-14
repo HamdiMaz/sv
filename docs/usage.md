@@ -38,11 +38,11 @@ If no source repos are configured, `sv list` tells you to add one with `sv repo 
 | `Source` | The configured source repo ID, or `N sources` when multiple repos provide that skill name. |
 | `Description` | The description parsed from `SKILL.md`, or a prompt to choose from the duplicate section. |
 
-When two repos contain the same skill name, `sv list` groups the name into one `N sources` row in the main table, then prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value. Use the `Add as` value to install the intended source. Keeping duplicate rows and qualified references out of the main table makes the list easier to scan while preserving every source choice below it. If the same repo is accidentally listed twice in `~/.sv/config.toml` (including the same or equivalent GitHub URL under different IDs), `sv` coalesces that repeated source so the same skill does not appear twice.
+When two repos contain the same skill name, `sv list` groups the name into one `N sources` row in the main table, then prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value. Each duplicate group shows the skill name once and leaves continuation rows blank in that column, so the section is easy to scan without hiding any source choices. Use the `Add as` value to install the intended source. Keeping duplicate rows and qualified references out of the main table makes the list easier to scan while preserving every source choice below it. If the same repo is accidentally listed twice in `~/.sv/config.toml` (including the same or equivalent GitHub URL under different IDs), `sv` coalesces that repeated source so the same skill does not appear twice.
 
 ## Adding skills without surprises
 
-- `sv add <skill>` installs the skill when exactly one configured repo provides that name.
+- `sv add <skill>` installs the skill when exactly one configured repo provides that name. When multiple repos match in an interactive terminal, it shows a compact source-choice table with repo, description, and `Add as` columns before asking you to pick one.
 - `sv add <repo>:<skill>` installs from one exact source.
 - `sv add -l` opens an interactive picker. The picker labels each row with its source repo ID so duplicate names are easy to distinguish without repeating the skill name twice. A help line keeps the controls visible while you move through the list. Long labels and the help line are shortened to your terminal width, and control characters in source metadata are printed as escaped text so the inline picker does not jump or clear the screen.
 - `sv add --all` installs every valid skill only when there are no duplicate skill names across configured repos.

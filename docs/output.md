@@ -24,10 +24,10 @@ Duplicate skill names:
 Skill      Repo             Description           Add as
 ---------  ---------------  --------------------  ----------------------------
 find-docs  HamdiMaz/Skills  Retrieves docs.       HamdiMaz/Skills:find-docs
-find-docs  Team/Skills      Team-specific docs.   Team/Skills:find-docs
+           Team/Skills      Team-specific docs.   Team/Skills:find-docs
 ```
 
-Copy the `Add as` value for the source you want:
+The duplicate section shows the skill name once, then leaves that cell blank for the remaining sources in the same group. Copy the `Add as` value for the source you want:
 
 ```bash
 sv add HamdiMaz/Skills:find-docs
@@ -56,7 +56,7 @@ Terminal control characters from repo metadata or skill descriptions are escaped
 
 ## Duplicate-name guidance
 
-When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the duplicate section. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` shows the matching sources and asks you to choose one.
+When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the duplicate section. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` shows a source-choice table with repo, description, and `Add as` columns, then asks you to choose one.
 
 `sv add --all` is intentionally strict: it stops before copying anything if duplicate skill names exist. Add those skills explicitly with `repo:skill` so one source cannot overwrite another by accident.
 

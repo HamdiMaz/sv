@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reduced visual repetition in duplicate-skill UIs by showing each duplicate skill name only once in `sv list`'s duplicate section and removing the redundant skill column from the `sv add <skill>` source-choice table.
 - Grouped duplicate skill names into a single `N sources` row in the main `sv list` table and added descriptions to the duplicate-source section so source choices are clearer without visually repeating skills.
 - Kept `sv list` compact when duplicate skill names exist by moving qualified `Add as` values into a separate duplicate-name section.
 - Added copy-paste examples for common `sv` workflows and updated docs to explain the duplicate-name list output.

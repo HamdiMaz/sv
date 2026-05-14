@@ -88,7 +88,7 @@ List valid skills available in configured source repos:
 sv list
 ```
 
-`sv list` shows the skill name, source, and parsed description from `SKILL.md`. The main list always stays compact with `Skill`, `Source`, and `Description` columns. When duplicate skill names exist across repos, the main list groups that name into one `N sources` row and prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value to copy. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. See [reading sv output](docs/output.md) for examples.
+`sv list` shows the skill name, source, and parsed description from `SKILL.md`. The main list always stays compact with `Skill`, `Source`, and `Description` columns. When duplicate skill names exist across repos, the main list groups that name into one `N sources` row and prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value to copy; each duplicate group shows the skill name once to keep the choices easy to scan. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. See [reading sv output](docs/output.md) for examples.
 
 Add a skill to the current project:
 
@@ -96,7 +96,7 @@ Add a skill to the current project:
 sv add github-release
 ```
 
-If multiple repos provide the same skill name, `sv` shows matching repos with their qualified `Add as` values and lets you choose when stdin and stdout are interactive TTYs. In non-interactive use, provide a qualified name:
+If multiple repos provide the same skill name, `sv` shows a compact source-choice table with repo, description, and qualified `Add as` values, then lets you choose when stdin and stdout are interactive TTYs. In non-interactive use, provide a qualified name:
 
 ```bash
 sv add HamdiMaz/Skills:github-release

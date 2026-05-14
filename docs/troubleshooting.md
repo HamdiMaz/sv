@@ -16,7 +16,7 @@ sv repo add SomeOrg/TeamSkills
 
 ## Duplicate skill names
 
-A Pi project can only contain one `.pi/skills/<name>` directory. If two source repos provide the same skill name, `sv list` keeps the main skill table compact with one `N sources` row and adds a separate `Duplicate skill names` section with each repo, description, and qualified `Add as` value. Copy the `Add as` value for the source you want.
+A Pi project can only contain one `.pi/skills/<name>` directory. If two source repos provide the same skill name, `sv list` keeps the main skill table compact with one `N sources` row and adds a separate `Duplicate skill names` section with each repo, description, and qualified `Add as` value. The duplicate section shows each skill name once and leaves continuation rows blank in that column, which is expected. Copy the `Add as` value for the source you want.
 
 Install the exact source you want:
 

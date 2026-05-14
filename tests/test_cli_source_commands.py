@@ -589,6 +589,66 @@ def test_list_groups_duplicate_skill_names_in_main_table(
     assert "Description" in duplicate_section
     assert "Alpha skill." in duplicate_section
     assert "Alpha from B." in duplicate_section
+    duplicate_alpha_rows = [
+        line for line in duplicate_section.splitlines() if line.startswith("alpha")
+    ]
+    assert len(duplicate_alpha_rows) == 1
+
+
+def test_list_shows_skill_name_once_per_duplicate_group(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    duplicate_section = capsys.readouterr().out.split("Duplicate skill names:", maxsplit=1)[1]
+    duplicate_alpha_rows = [
+        line for line in duplicate_section.splitlines() if line.startswith("alpha")
+    ]
+    assert len(duplicate_alpha_rows) == 1
+    assert "Alpha skill." in duplicate_section
+    assert "Alpha from B." in duplicate_section
+
+
+def test_add_duplicate_skill_choice_table_does_not_repeat_skill_name(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(
+        parse(["add", "alpha"]),
+        cwd=project,
+        home=home,
+        skill_chooser=lambda matches: matches[0],
+    )
+
+    assert exit_code == 0
+    choice_output = capsys.readouterr().out.split("Added Pi skill", maxsplit=1)[0]
+    assert "Skill" not in choice_output.splitlines()[1]
+    table_lines = choice_output.splitlines()[3:]
+    assert not any("  alpha  " in line for line in table_lines)
 
 
 def test_list_shows_duplicate_references_without_widening_main_skill_table(
