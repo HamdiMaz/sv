@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed `sv remove` to restore the skill directory if manifest update fails during removal.
+- Fixed `SKILL.md` parsing to require a real closing frontmatter delimiter line.
 - Fixed ambiguous non-interactive `sv add <skill>` to fail with qualified `repo:skill` guidance instead of silently doing nothing.
 - Fixed malformed `~/.sv/config.toml` and `.pi/skills/.sv-manifest.toml` files to report user-facing errors instead of tracebacks.
 - Fixed unsafe repo IDs in config and `sv repo add` input to be rejected before they can escape the `~/.sv/sources` cache directory.

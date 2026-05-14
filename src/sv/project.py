@@ -11,6 +11,7 @@ from sv.manifest import (
     ManifestEntry,
     load_manifest,
     remove_manifest_entry,
+    save_manifest,
     upsert_manifest_entry,
 )
 
@@ -155,13 +156,47 @@ def remove_project_skill(skill: str, project_skills_dir: Path) -> RemoveSkillRes
     if not target.is_dir():
         raise SvError(f"Pi skill '{skill_name}' was not found in this project.")
 
-    load_manifest(project_skills_dir)
+    original_manifest = load_manifest(project_skills_dir)
+    backup_target = target.with_name(f".{target.name}.sv-remove-backup")
+    if backup_target.exists():
+        try:
+            shutil.rmtree(backup_target)
+        except OSError as exc:
+            raise SvError(
+                f"Failed to remove stale sv backup for Pi skill '{skill_name}': {exc}"
+            ) from exc
+
     try:
-        shutil.rmtree(target)
+        target.rename(backup_target)
     except OSError as exc:
         raise SvError(f"Failed to remove Pi skill '{skill_name}': {exc}") from exc
 
-    remove_manifest_entry(project_skills_dir, skill_name)
+    try:
+        remove_manifest_entry(project_skills_dir, skill_name)
+    except SvError as exc:
+        try:
+            backup_target.rename(target)
+        except OSError as rollback_exc:
+            raise SvError(
+                f"Failed to remove Pi skill '{skill_name}': manifest update failed "
+                f"({exc}) and rollback failed: {rollback_exc}"
+            ) from rollback_exc
+        raise
+
+    try:
+        shutil.rmtree(backup_target)
+    except OSError as exc:
+        try:
+            if not target.exists():
+                backup_target.rename(target)
+            save_manifest(project_skills_dir, original_manifest)
+        except (OSError, SvError) as rollback_exc:
+            raise SvError(
+                f"Failed to remove Pi skill '{skill_name}': cleanup failed "
+                f"({exc}) and rollback failed: {rollback_exc}"
+            ) from rollback_exc
+        raise SvError(f"Failed to remove Pi skill '{skill_name}': {exc}") from exc
+
     return RemoveSkillResult(skill=skill_name, target=target)
 
 

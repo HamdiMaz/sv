@@ -65,6 +65,16 @@ def test_parse_skill_file_requires_name_and_description(tmp_path: Path):
         parse_skill_file(skill_file, expected_folder="alpha")
 
 
+def test_parse_skill_file_requires_closing_frontmatter_delimiter_line(tmp_path: Path):
+    skill_file = write_skill(
+        tmp_path,
+        "---\nname: alpha\ndescription: Alpha skill.\n---not-a-delimiter\n",
+    )
+
+    with pytest.raises(SvError, match="malformed frontmatter"):
+        parse_skill_file(skill_file, expected_folder="alpha")
+
+
 def test_parse_skill_file_rejects_folder_name_mismatch(tmp_path: Path):
     skill_file = write_skill(
         tmp_path,

@@ -307,6 +307,28 @@ def test_remove_project_skill_malformed_manifest_keeps_skill_directory(tmp_path:
     assert (skill / "notes.md").read_text() == "alpha\n"
 
 
+def test_remove_project_skill_restores_skill_when_manifest_update_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    assert add_project_skill(entry, project_skills).status == "added"
+    skill = project_skills / "alpha"
+    original_notes = skill / "notes.md"
+    assert original_notes.read_text() == "alpha remote\n"
+
+    def fail_remove_manifest_entry(project_skills_dir, skill_name):
+        raise SvError("manifest write failed")
+
+    monkeypatch.setattr("sv.project.remove_manifest_entry", fail_remove_manifest_entry)
+
+    with pytest.raises(SvError, match="manifest write failed"):
+        remove_project_skill("alpha", project_skills)
+
+    assert (skill / "notes.md").read_text() == "alpha remote\n"
+    assert load_manifest(project_skills)["alpha"].repo_id == "Org/Skills"
+
+
 def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
     with pytest.raises(SvError, match="Pi skill 'missing' was not found"):
         remove_project_skill("missing", tmp_path / "project" / ".pi" / "skills")

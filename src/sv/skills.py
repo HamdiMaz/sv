@@ -29,7 +29,7 @@ def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata
     if not text.startswith("---\n"):
         raise InvalidSkillError(f"Skill '{expected_folder}' must start with frontmatter.")
 
-    frontmatter_end = text.find("\n---", 4)
+    frontmatter_end = _find_closing_frontmatter_delimiter(text)
     if frontmatter_end == -1:
         raise InvalidSkillError(f"Skill '{expected_folder}' has malformed frontmatter.")
 
@@ -55,6 +55,15 @@ def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata
         )
 
     return SkillMetadata(name=normalized_name, description=description)
+
+
+def _find_closing_frontmatter_delimiter(text: str) -> int:
+    offset = 4
+    for line in text[4:].splitlines(keepends=True):
+        if line.rstrip("\r\n").strip() == "---":
+            return offset
+        offset += len(line)
+    return -1
 
 
 def _parse_frontmatter(frontmatter: str) -> dict[str, str]:

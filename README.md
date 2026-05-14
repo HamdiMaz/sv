@@ -181,6 +181,16 @@ When `sv` installs or syncs a skill, it records the source repo in `.pi/skills/.
 
 Existing project skills without manifest entries are backfilled during sync when exactly one configured repo provides a valid skill with that name. Ambiguous or local-only skills are skipped with a clear message.
 
+## Safety and failure behavior
+
+`sv add` does not overwrite an existing project skill. It copies into a temporary sibling directory first, then records the installed skill in the project manifest. If the copy or manifest update fails, `sv` removes temporary files and reports a user-facing error.
+
+`sv remove` validates the project manifest before changing files. If manifest cleanup fails during removal, `sv` restores the local skill directory so the project is not left with a missing skill and stale metadata.
+
+`sv sync` replaces managed skills from their recorded source repo. It copies the source skill first and keeps a temporary backup of the local skill so the previous version can be restored if replacement or manifest update fails.
+
+Hidden `.sv-*` directories inside `.pi/skills` are sv internals for in-progress or rolled-back file operations and should not be edited by hand.
+
 ## Pi isolation
 
 `sv run` launches Pi like this:
