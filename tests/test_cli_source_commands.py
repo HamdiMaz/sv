@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from sv.cli import build_parser, handle
-from sv.config import SvPaths, load_config
+from sv.config import SvPaths, derive_repo_id, load_config
 
 
 def parse(argv):
@@ -281,7 +281,7 @@ def test_add_qualified_skill_selects_repo_when_names_overlap(tmp_path: Path, cap
     assert "Added Pi skill 'alpha'" in capsys.readouterr().out
 
 
-def test_add_duplicate_skill_uses_choice_callback(tmp_path: Path, capsys):
+def test_add_duplicate_skill_uses_choice_callback(tmp_path: Path, capsys, monkeypatch):
     source_a = make_source_repo(tmp_path, "source-a")
     source_b = make_source_repo(tmp_path, "source-b")
     write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
@@ -293,6 +293,7 @@ def test_add_duplicate_skill_uses_choice_callback(tmp_path: Path, capsys):
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
     capsys.readouterr()
+    monkeypatch.setenv("COLUMNS", "40")
     choices = []
 
     def choose_skill(matches):
@@ -314,7 +315,10 @@ def test_add_duplicate_skill_uses_choice_callback(tmp_path: Path, capsys):
     ).read_text() == "alpha from b\n"
     output = capsys.readouterr().out
     assert "Multiple source skills match 'alpha'" in output
-    assert "Alpha from B." in output
+    assert "Alpha from" in output
+    assert "B." in output
+    choice_table_output = output.split("Added Pi skill", maxsplit=1)[0]
+    assert all(len(line) <= 40 for line in choice_table_output.splitlines())
 
 
 def test_add_duplicate_skill_without_tty_reports_error(tmp_path: Path, capsys):
@@ -337,6 +341,76 @@ def test_add_duplicate_skill_without_tty_reports_error(tmp_path: Path, capsys):
     error = capsys.readouterr().err
     assert "Multiple source skills match 'alpha'" in error
     assert "Use a qualified skill reference" in error
+
+
+def test_list_table_fits_terminal_width(tmp_path: Path, capsys, monkeypatch):
+    source = make_source_repo(tmp_path)
+    write_source_skill(
+        source,
+        "alpha",
+        "Alpha description with enough details to wrap cleanly in a narrow terminal.",
+        "alpha v2\n",
+    )
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "lengthen alpha description"], source)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+    monkeypatch.setenv("COLUMNS", "40")
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert all(len(line) <= 40 for line in lines)
+
+
+def test_list_coalesces_repeated_repo_config_entries(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    paths = SvPaths.from_home(home)
+    repo_id = derive_repo_id(str(source))
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        "[[repos]]\n"
+        f'id = "{repo_id}"\n'
+        f'url = "{source}"\n'
+        "\n"
+        "[[repos]]\n"
+        f'id = "{repo_id}"\n'
+        f'url = "{source}"\n'
+    )
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    rows = [line for line in capsys.readouterr().out.splitlines() if line.startswith("alpha  ")]
+    assert len(rows) == 1
+
+
+def test_list_wraps_duplicate_guidance_to_terminal_width(
+    tmp_path: Path, capsys, monkeypatch
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+    monkeypatch.setenv("COLUMNS", "40")
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any(line.startswith("Tip: duplicate skill names") for line in lines)
+    assert all(len(line) <= 40 for line in lines)
 
 
 def test_list_shows_qualified_references_for_duplicate_skill_names(

@@ -252,6 +252,31 @@ def test_load_config_rejects_option_like_repo_entry_url(tmp_path: Path):
         load_config(paths)
 
 
+def test_load_config_coalesces_identical_duplicate_repo_entries(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n'
+    )
+
+    assert load_config(paths).repos == (
+        RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git"),
+    )
+
+
+def test_load_config_rejects_duplicate_repo_id_with_different_urls(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Other/Skills.git"\n'
+    )
+
+    with pytest.raises(SvError, match="listed more than once with different URLs"):
+        load_config(paths)
+
+
 def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
 

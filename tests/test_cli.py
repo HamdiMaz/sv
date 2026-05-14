@@ -288,6 +288,23 @@ def test_remove_interactive_with_skill_does_not_touch_source_repo(
     assert "Use -l by itself" in capsys.readouterr().err
 
 
+def test_repo_list_table_fits_terminal_width(tmp_path: Path, capsys, monkeypatch):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    source = tmp_path / "very-long-local-skill-source-name"
+    source.mkdir()
+
+    assert handle(parse(["repo", "add", str(source)]), cwd=project, home=home) == 0
+    capsys.readouterr()
+    monkeypatch.setenv("COLUMNS", "40")
+
+    exit_code = handle(parse(["repo", "list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert all(len(line) <= 40 for line in capsys.readouterr().out.splitlines())
+
+
 def test_repo_add_and_list_use_multi_repo_config(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -386,6 +403,16 @@ def test_repo_remove_updates_config_without_deleting_project_skills(
     assert exit_code == 0
     assert skill.is_dir()
     assert "Removed repo SomeOrg/TeamSkills" in capsys.readouterr().out
+
+
+def test_add_help_explains_skill_argument(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        parse(["add", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "Skill name or repo:skill reference" in help_text
+    assert "choose a source" in help_text
 
 
 def test_config_command_is_removed_from_parser():

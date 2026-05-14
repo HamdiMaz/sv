@@ -173,6 +173,7 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
         )
 
     repos: list[RepoConfig] = []
+    seen_by_id: dict[str, RepoConfig] = {}
     for index, item in enumerate(raw_repos, start=1):
         if not isinstance(item, dict):
             raise SvError(
@@ -193,7 +194,16 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
                 f"Invalid sv config at {paths.config_file}: repo entry {index} is missing {exc.args[0]!r}."
             ) from exc
         _validate_repo_id(repo_id, f"repo entry {index} field 'id'")
-        repos.append(RepoConfig(id=repo_id, url=repo_url))
+        repo_config = RepoConfig(id=repo_id, url=repo_url)
+        existing = seen_by_id.get(repo_id)
+        if existing is not None:
+            if existing.url == repo_url:
+                continue
+            raise SvError(
+                f"Invalid sv config at {paths.config_file}: repo id {repo_id!r} is listed more than once with different URLs."
+            )
+        seen_by_id[repo_id] = repo_config
+        repos.append(repo_config)
     return tuple(repos)
 
 

@@ -2,7 +2,7 @@
 
 `sv` manages project-local AI agent skills for Pi. It copies valid skills from one or more Git-backed source repositories into the current project's `.pi/skills` directory and records where installed skills came from so they can be synced reliably.
 
-For a command-focused walkthrough, see the [usage guide](docs/usage.md).
+For a command-focused walkthrough, see the [usage guide](docs/usage.md). For table columns, wrapping behavior, and duplicate-name guidance, see [reading sv output](docs/output.md).
 
 ## Installation
 
@@ -88,7 +88,7 @@ List valid skills available in configured source repos:
 sv list
 ```
 
-`sv list` shows the skill name, source repo, qualified `repo:skill` value to use with `sv add`, and parsed description from `SKILL.md`. Long cells wrap to keep the table readable. When duplicate skill names exist across repos, `sv list` prints a tip telling you to use the qualified `Add as` value.
+`sv list` shows the skill name, source repo, qualified `repo:skill` value to use with `sv add`, and parsed description from `SKILL.md`. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable. If a config accidentally repeats the exact same repo entry, `sv` coalesces it while reading the config so the same source skill is not listed twice. When duplicate skill names exist across different repos, `sv list` keeps each source visible and prints a tip telling you to use the qualified `Add as` value. See [reading sv output](docs/output.md) for examples.
 
 Add a skill to the current project:
 

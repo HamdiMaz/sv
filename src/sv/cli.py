@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Sequence
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import textwrap
 from typing import Any
 
 from sv.agents import PiAdapter
@@ -46,9 +48,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     add_parser = subparsers.add_parser(
-        "add", help="Add source skills to this Pi project."
+        "add",
+        help="Add source skills to this Pi project.",
+        description="Add one or more source skills to this project's .pi/skills directory.",
+        epilog=(
+            "Examples:\n"
+            "  sv add find-docs\n"
+            "  sv add HamdiMaz/Skills:find-docs\n"
+            "  sv add -l\n"
+            "  sv add --all\n\n"
+            "Use repo:skill to choose a source when multiple repos provide the same skill name."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    add_parser.add_argument("skill", nargs="?")
+    add_parser.add_argument(
+        "skill",
+        nargs="?",
+        help="Skill name or repo:skill reference. Use 'all' to add every non-conflicting skill.",
+    )
     add_parser.add_argument(
         "--all", action="store_true", help="Add every skill from source repos."
     )
@@ -63,7 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
     remove_parser = subparsers.add_parser(
         "remove", help="Remove Pi skills from this project."
     )
-    remove_parser.add_argument("skill", nargs="?")
+    remove_parser.add_argument(
+        "skill", nargs="?", help="Project skill name to remove from .pi/skills."
+    )
     remove_parser.add_argument(
         "-l",
         "--list",
@@ -80,18 +99,24 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser(
         "run", help="Run Pi with only project skills enabled."
     )
-    run_parser.add_argument("pi_args", nargs=argparse.REMAINDER)
+    run_parser.add_argument(
+        "pi_args", nargs=argparse.REMAINDER, help="Arguments forwarded to pi after --."
+    )
 
     repo_parser = subparsers.add_parser(
         "repo", help="Manage global skill source repos."
     )
     repo_subparsers = repo_parser.add_subparsers(dest="repo_command", required=True)
     repo_add_parser = repo_subparsers.add_parser("add", help="Add a skill source repo.")
-    repo_add_parser.add_argument("repo")
+    repo_add_parser.add_argument(
+        "repo", help="GitHub owner/repo, Git URL, or local Git repo path."
+    )
     repo_remove_parser = repo_subparsers.add_parser(
         "remove", help="Remove a skill source repo."
     )
-    repo_remove_parser.add_argument("repo_id")
+    repo_remove_parser.add_argument(
+        "repo_id", help="Repo ID shown by 'sv repo list'."
+    )
     repo_subparsers.add_parser("list", help="List configured skill source repos.")
 
     return parser
@@ -220,6 +245,24 @@ def _contains_control_characters(value: str) -> bool:
     return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
 
 
+def _table_width() -> int:
+    return shutil.get_terminal_size(fallback=(120, 24)).columns
+
+
+def _print_wrapped(message: str, *, leading_blank_line: bool = False) -> None:
+    if leading_blank_line:
+        print()
+    print(
+        textwrap.fill(
+            message,
+            width=_table_width(),
+            subsequent_indent="     ",
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+    )
+
+
 def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:
     if args.repo_command == "add":
         try:
@@ -251,6 +294,8 @@ def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:
                 ["Repo", "URL", "Cache"],
                 rows,
                 max_widths={"Repo": 32, "URL": 64, "Cache": 72},
+                min_widths={"Repo": 12, "URL": 20, "Cache": 20},
+                max_table_width=_table_width(),
             )
         )
         return 0
@@ -297,14 +342,17 @@ def _handle_list(catalog: Sequence[SourceSkill]) -> int:
             ["Skill", "Repo", "Add as", "Description"],
             _source_skill_rows(catalog),
             max_widths={"Skill": 28, "Repo": 32, "Add as": 48, "Description": 72},
+            min_widths={"Skill": 10, "Repo": 12, "Add as": 16, "Description": 24},
+            max_table_width=_table_width(),
         )
     )
     duplicates = _duplicate_skill_names(catalog)
     if duplicates:
         duplicate_list = ", ".join(duplicates)
-        print(
-            f"\nTip: duplicate skill names are available ({duplicate_list}). "
-            "Use the 'Add as' repo:skill value to choose a source explicitly."
+        _print_wrapped(
+            f"Tip: duplicate skill names are available ({duplicate_list}). "
+            "Use the 'Add as' repo:skill value to choose a source explicitly.",
+            leading_blank_line=True,
         )
     return 0
 
@@ -356,6 +404,8 @@ def _handle_add(
             ["#", "Skill", "Repo", "Add as", "Description"],
             rows,
             max_widths={"Skill": 28, "Repo": 32, "Add as": 48, "Description": 72},
+            min_widths={"Skill": 10, "Repo": 12, "Add as": 16, "Description": 24},
+            max_table_width=_table_width(),
         )
     )
     chosen = skill_chooser(matches)

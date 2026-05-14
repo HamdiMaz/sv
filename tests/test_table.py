@@ -70,3 +70,37 @@ def test_format_table_breaks_long_words_to_honor_configured_widths():
         "ghijkl",
         "mnop",
     ]
+
+
+def test_format_table_shrinks_single_column_to_fit_total_width():
+    output = format_table(
+        ["URL"],
+        [["abcdefghijklmnop"]],
+        max_table_width=6,
+    )
+
+    assert output.splitlines() == [
+        "URL",
+        "------",
+        "abcdef",
+        "ghijkl",
+        "mnop",
+    ]
+
+
+def test_format_table_shrinks_columns_to_fit_total_width():
+    output = format_table(
+        ["Skill", "Repo", "Description"],
+        [["alpha", "Org/A", "This description wraps to fit a narrow terminal."]],
+        max_table_width=40,
+        min_widths={"Description": 12},
+    )
+
+    lines = output.splitlines()
+    assert all(len(line) <= 40 for line in lines)
+    assert lines == [
+        "Skill  Repo   Description",
+        "-----  -----  --------------------------",
+        "alpha  Org/A  This description wraps to",
+        "              fit a narrow terminal.",
+    ]
