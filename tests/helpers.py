@@ -26,6 +26,47 @@ class SvResult:
     stderr: str
 
 
+def assert_no_traceback(output: str) -> None:
+    if "Traceback" in output:
+        raise AssertionError(f"Unexpected traceback output:\n{output}")
+
+
+def assert_no_raw_control_characters(output: str) -> None:
+    def is_raw_control_character(char: str) -> bool:
+        if char in {"\n", "\r", "\t"}:
+            return False
+        codepoint = ord(char)
+        return codepoint < 0x20 or 0x7F <= codepoint <= 0x9F
+
+    for index, char in enumerate(output):
+        if is_raw_control_character(char):
+            codepoint = ord(char)
+            raise AssertionError(
+                f"Output contains raw control character U+{codepoint:04x} at index {index}:"
+                f" {char!r}"
+            )
+
+
+def assert_no_partial_sv_dirs(project_skills_dir: Path) -> None:
+    if not project_skills_dir.exists():
+        return
+
+    partial_dirs = [
+        path.name
+        for path in project_skills_dir.iterdir()
+        if path.name.startswith(".")
+        and (
+            path.name.endswith(".sv-add-tmp")
+            or path.name.endswith(".sv-sync-tmp")
+            or path.name.endswith(".sv-remove-backup")
+        )
+    ]
+
+    assert not partial_dirs, (
+        f"Found partial sv directories in {project_skills_dir}: {partial_dirs}"
+    )
+
+
 def parse_sv(args: list[str] | tuple[str, ...]) -> Namespace:
     return build_parser().parse_args(args)
 

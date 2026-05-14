@@ -5,7 +5,11 @@ import pytest
 
 from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, handle
 from sv.project import AddSkillResult, SyncResult, SyncSkip
-from tests.helpers import parse_sv
+from tests.helpers import (
+    assert_no_raw_control_characters,
+    assert_no_traceback,
+    parse_sv,
+)
 
 
 def parse(argv):
@@ -35,7 +39,7 @@ def test_print_add_result_escapes_existing_manifest_repo_id(
     )
 
     output = capsys.readouterr().out
-    assert "\x1b" not in output
+    assert_no_raw_control_characters(output)
     assert "Bad\\x1b[2JRepo" in output
 
 
@@ -55,7 +59,7 @@ def test_print_sync_result_escapes_manifest_repo_ids(capsys):
     )
 
     output = capsys.readouterr().out
-    assert "\x1b" not in output
+    assert_no_raw_control_characters(output)
     assert "Bad\\x1b[2JRepo" in output
 
 
@@ -116,7 +120,7 @@ def test_run_reports_process_launch_os_errors_without_traceback(
     assert exit_code == 1
     captured = capsys.readouterr()
     assert "error: Unable to run 'pi': denied" in captured.err
-    assert "Traceback" not in captured.err
+    assert_no_traceback(captured.err)
 
 
 def test_run_escapes_control_characters_in_launch_errors(
@@ -136,7 +140,7 @@ def test_run_escapes_control_characters_in_launch_errors(
     assert exit_code == 1
     message = capsys.readouterr().err
     assert "denied\\x1b[2J" in message
-    assert "\x1b" not in message
+    assert_no_raw_control_characters(message)
 
 
 def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys):

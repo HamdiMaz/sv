@@ -4,6 +4,7 @@ import shutil
 
 import pytest
 
+from tests.helpers import assert_no_partial_sv_dirs
 from sv.agents import PiAdapter
 from sv.catalog import SourceSkill
 from sv.errors import SvError
@@ -137,7 +138,7 @@ def test_add_project_skill_wraps_copy_failures_and_cleans_temp(
         add_project_skill(entry, project_skills)
 
     assert not (project_skills / "alpha").exists()
-    assert not (project_skills / ".alpha.sv-add-tmp").exists()
+    assert_no_partial_sv_dirs(project_skills)
     assert load_manifest(project_skills) == {}
 
 
@@ -634,6 +635,7 @@ def test_sync_project_skills_preserves_local_skill_when_copy_fails(
         sync_project_skills([entry], project_skills)
 
     assert (managed_local / "notes.md").read_text() == "local v1\n"
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_sync_project_skills_restores_local_skill_when_replace_fails(
