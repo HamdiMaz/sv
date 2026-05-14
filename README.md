@@ -2,7 +2,7 @@
 
 `sv` manages project-local AI agent skills for Pi. It copies valid skills from one or more Git-backed source repositories into the current project's `.pi/skills` directory and records where installed skills came from so they can be synced reliably.
 
-Start with [getting started](docs/getting-started.md) for the shortest setup path. For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
+Start with [getting started](docs/getting-started.md) for the shortest setup path. For copy-paste workflows, see [examples](docs/examples.md). For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
 
 ## Installation
 
@@ -88,7 +88,7 @@ List valid skills available in configured source repos:
 sv list
 ```
 
-`sv list` shows the skill name, source repo, and parsed description from `SKILL.md`. To keep normal lists easy to scan, the qualified `Add as` column appears only when duplicate skill names exist across different repos, and only duplicate-name rows fill it in. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. When duplicate skill names exist, `sv list` keeps each source visible and prints a tip telling you to use the qualified `Add as` value. See [reading sv output](docs/output.md) for examples.
+`sv list` shows the skill name, source repo, and parsed description from `SKILL.md`. The main list always stays compact with `Skill`, `Repo`, and `Description` columns. When duplicate skill names exist across repos, `sv list` keeps each source visible in the main list, then prints a separate `Duplicate skill names` section with exact `Add as` values to copy. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. See [reading sv output](docs/output.md) for examples.
 
 Add a skill to the current project:
 
@@ -221,5 +221,5 @@ Start Pi through `sv run` when you want to use only project-local skills.
 - **`Configured source repo is ..., but existing source clone uses ...`.** The configured repo ID points at a cache cloned from a different remote. Remove the reported cache directory or update your repo config.
 - **`No skill source repos configured.`** Add a source with `sv repo add <owner/repo>` before listing or adding skills.
 - **Interactive selection requires a TTY.** Run `sv add -l` or `sv remove -l` in an interactive terminal, or use non-interactive commands such as `sv add <skill>` and `sv remove <skill>`.
-- **`Multiple source skills match ...` / duplicate skill names.** Run `sv list` and copy the `Add as` value for the source you want, for example `sv add HamdiMaz/Skills:find-docs`.
+- **`Multiple source skills match ...` / duplicate skill names.** Run `sv list` and copy the `Add as` value from the `Duplicate skill names` section, for example `sv add HamdiMaz/Skills:find-docs`.
 - **`Unable to run 'pi'.`** Install Pi and make sure the `pi` executable is available on your `PATH`.

@@ -12,7 +12,23 @@
 | `Repo` | Source repo ID. Use this with `sv repo remove` and qualified skill references. |
 | `Description` | Description from the skill's `SKILL.md` frontmatter. |
 
-If two repos provide the same skill name, both rows stay visible and `sv list` adds an `Add as` column. Only duplicate-name rows need a qualified value, so unique rows leave that column blank to keep the list from repeating unnecessary `repo:skill` text. Copy the `Add as` value for the source you want:
+If two repos provide the same skill name, both rows stay visible in the compact main table and `sv list` prints a separate duplicate section:
+
+```text
+Skill      Repo             Description
+---------  ---------------  -----------------------
+find-docs  HamdiMaz/Skills  Retrieves docs.
+find-docs  Team/Skills      Team-specific docs.
+review     Team/Skills      Reviews code changes.
+
+Duplicate skill names:
+Skill      Repo             Add as
+---------  ---------------  ----------------------------
+find-docs  HamdiMaz/Skills  HamdiMaz/Skills:find-docs
+find-docs  Team/Skills      Team/Skills:find-docs
+```
+
+Copy the `Add as` value for the source you want:
 
 ```bash
 sv add HamdiMaz/Skills:find-docs
@@ -41,7 +57,7 @@ Terminal control characters from repo metadata or skill descriptions are escaped
 
 ## Duplicate-name guidance
 
-When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the table. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` shows the matching sources and asks you to choose one.
+When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the duplicate section. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` shows the matching sources and asks you to choose one.
 
 `sv add --all` is intentionally strict: it stops before copying anything if duplicate skill names exist. Add those skills explicitly with `repo:skill` so one source cannot overwrite another by accident.
 

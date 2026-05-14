@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Kept `sv list` compact when duplicate skill names exist by moving qualified `Add as` values into a separate duplicate-name section.
+- Added copy-paste examples for common `sv` workflows and updated docs to explain the duplicate-name list output.
 - Added a getting-started guide focused on the shortest setup path and linked it from the README.
 - Added a compact interactive picker help/status line showing the visible range and controls, with terminal-width truncation for narrow terminals.
 - Improved table wrapping for repo-like values so `owner/repo` IDs and `repo:skill` references prefer clean `/` and `:` wrap points before hard wrapping.

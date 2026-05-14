@@ -24,7 +24,7 @@ sv repo list
 sv list
 ```
 
-The normal list shows `Skill`, `Repo`, and `Description`. If two repos provide the same skill name, `sv` adds an `Add as` column. Copy that exact value when you need a specific source:
+The main list shows `Skill`, `Repo`, and `Description`. If two repos provide the same skill name, `sv` adds a separate `Duplicate skill names` section with `Add as` values. Copy that exact value when you need a specific source:
 
 ```bash
 sv add HamdiMaz/Skills:find-docs
@@ -77,4 +77,4 @@ pi --no-skills --skill .pi/skills <pi args>
 | Select project skills to remove | `sv remove -l` |
 | Refresh and sync with progress messages | `sv update` |
 
-For more detail, read the [usage guide](usage.md), [command reference](commands.md), and [output guide](output.md).
+For more detail, read the [examples](examples.md), [usage guide](usage.md), [command reference](commands.md), and [output guide](output.md).

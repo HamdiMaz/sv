@@ -418,26 +418,31 @@ def _handle_list(catalog: Sequence[SourceSkill]) -> int:
         return 0
 
     duplicates = _duplicate_skill_names(catalog)
-    duplicate_names = set(duplicates)
-    include_references = bool(duplicates)
     print(
         format_table(
-            _source_skill_headers(include_references=include_references),
-            _source_skill_rows(
-                catalog,
-                include_references=include_references,
-                duplicate_names=duplicate_names,
-            ),
-            max_widths=_source_skill_max_widths(include_references=include_references),
-            min_widths=_source_skill_min_widths(include_references=include_references),
+            _source_skill_headers(),
+            _source_skill_rows(catalog),
+            max_widths=_source_skill_max_widths(),
+            min_widths=_source_skill_min_widths(),
             max_table_width=_table_width(),
         )
     )
     if duplicates:
-        duplicate_list = ", ".join(duplicates)
+        duplicate_names = set(duplicates)
+        print()
+        _print_wrapped("Duplicate skill names:")
+        print(
+            format_table(
+                ["Skill", "Repo", "Add as"],
+                _duplicate_source_skill_rows(catalog, duplicate_names=duplicate_names),
+                max_widths={"Skill": 28, "Repo": 32, "Add as": 48},
+                min_widths={"Skill": 10, "Repo": 12, "Add as": 16},
+                max_table_width=_table_width(),
+            )
+        )
         _print_wrapped(
-            f"Tip: duplicate skill names are available ({duplicate_list}). "
-            "Use the 'Add as' repo:skill value to choose a source explicitly.",
+            "Tip: use the exact 'Add as' value with 'sv add <repo>:<skill>' "
+            "to choose a source explicitly.",
             leading_blank_line=True,
         )
     return 0
@@ -690,40 +695,30 @@ def _ambiguous_skill_error(skill_reference: str, matches: Sequence[SourceSkill])
     )
 
 
-def _source_skill_headers(*, include_references: bool) -> list[str]:
-    if include_references:
-        return ["Skill", "Repo", "Add as", "Description"]
+def _source_skill_headers() -> list[str]:
     return ["Skill", "Repo", "Description"]
 
 
-def _source_skill_max_widths(*, include_references: bool) -> CellWidths:
-    widths: dict[str | int, int] = {"Skill": 28, "Repo": 32, "Description": 72}
-    if include_references:
-        widths["Add as"] = 48
-    return widths
+def _source_skill_max_widths() -> CellWidths:
+    return {"Skill": 28, "Repo": 32, "Description": 72}
 
 
-def _source_skill_min_widths(*, include_references: bool) -> CellWidths:
-    widths: dict[str | int, int] = {"Skill": 10, "Repo": 12, "Description": 24}
-    if include_references:
-        widths["Add as"] = 16
-    return widths
+def _source_skill_min_widths() -> CellWidths:
+    return {"Skill": 10, "Repo": 12, "Description": 24}
 
 
-def _source_skill_rows(
-    catalog: Sequence[SourceSkill], *, include_references: bool, duplicate_names: set[str]
-) -> list[list[str]]:
-    if include_references:
-        return [
-            [
-                entry.name,
-                entry.repo_id,
-                _source_skill_reference(entry) if entry.name in duplicate_names else "",
-                entry.description,
-            ]
-            for entry in catalog
-        ]
+def _source_skill_rows(catalog: Sequence[SourceSkill]) -> list[list[str]]:
     return [[entry.name, entry.repo_id, entry.description] for entry in catalog]
+
+
+def _duplicate_source_skill_rows(
+    catalog: Sequence[SourceSkill], *, duplicate_names: set[str]
+) -> list[list[str]]:
+    return [
+        [entry.name, entry.repo_id, _source_skill_reference(entry)]
+        for entry in catalog
+        if entry.name in duplicate_names
+    ]
 
 
 def _duplicate_skill_names(catalog: Sequence[SourceSkill]) -> list[str]:

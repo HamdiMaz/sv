@@ -531,11 +531,12 @@ def test_list_wraps_duplicate_guidance_to_terminal_width(
 
     assert exit_code == 0
     lines = capsys.readouterr().out.splitlines()
-    assert any(line.startswith("Tip: duplicate skill names") for line in lines)
+    assert any(line.startswith("Duplicate skill names:") for line in lines)
+    assert any(line.startswith("Tip: use the exact") for line in lines)
     assert all(len(line) <= 40 for line in lines)
 
 
-def test_list_shows_qualified_references_for_duplicate_skill_names(
+def test_list_shows_duplicate_references_without_widening_main_skill_table(
     tmp_path: Path, capsys
 ):
     source_a = make_source_repo(tmp_path, "source-a")
@@ -558,12 +559,16 @@ def test_list_shows_qualified_references_for_duplicate_skill_names(
 
     assert exit_code == 0
     output = capsys.readouterr().out
+    sections = output.split("\n\n")
+    assert sections[0].splitlines()[0].startswith("Skill")
+    assert "Add as" not in sections[0]
+    assert "Duplicate skill names:" in output
     assert "Add as" in output
     assert f"{repo_ids[0]}:alpha" in output
     assert f"{repo_ids[1]}:alpha" in output
     assert f"{repo_ids[0]}:beta" not in output
     assert f"{repo_ids[1]}:gamma" not in output
-    assert "Tip: duplicate skill names are available" in output
+    assert "Tip: use the exact 'Add as' value" in output
 
 
 def test_add_interactive_rejects_selected_duplicate_skill_names_without_copying(

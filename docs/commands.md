@@ -6,9 +6,9 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 
 | Command | Use when | Notes |
 | --- | --- | --- |
-| `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. Unique skill names show a compact table; duplicate names include `Add as` values only on rows that need `repo:skill`. |
+| `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. The main table stays compact; duplicate names get a separate section with `Add as` values. |
 | `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. |
-| `sv add <repo>:<skill>` | Multiple repos provide the same skill name. | Copy the exact value from the `Add as` column in `sv list`. |
+| `sv add <repo>:<skill>` | Multiple repos provide the same skill name. | Copy the exact value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Use Space to select and Enter to confirm. |
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |
 | `sv remove <skill>` | You want to remove one project skill. | Updates `.pi/skills/.sv-manifest.toml`. |
@@ -33,7 +33,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 A project can only contain one `.pi/skills/<name>` folder. When multiple source repos provide the same skill name:
 
 1. Run `sv list`.
-2. Copy the `Add as` value for the source you want.
+2. Copy the `Add as` value from the `Duplicate skill names` section for the source you want.
 3. Install it with `sv add <repo>:<skill>`.
 
 Example:

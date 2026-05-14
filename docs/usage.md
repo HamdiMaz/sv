@@ -38,7 +38,7 @@ If no source repos are configured, `sv list` tells you to add one with `sv repo 
 | `Repo` | The configured source repo ID. |
 | `Description` | The description parsed from the skill's `SKILL.md` frontmatter. |
 
-When two repos contain the same skill name, `sv list` keeps both rows visible, adds an `Add as` column, and prints a duplicate-name tip. Use the `Add as` value to install the intended source. Unique rows leave `Add as` blank, so the duplicate-aware table does not repeat `repo:skill` text where it is not needed. If the same repo is accidentally listed twice in `~/.sv/config.toml` (including the same or equivalent GitHub URL under different IDs), `sv` coalesces that repeated source so the same skill does not appear twice.
+When two repos contain the same skill name, `sv list` keeps both rows visible in the compact main table, then prints a separate `Duplicate skill names` section with exact `Add as` values. Use the `Add as` value to install the intended source. Keeping qualified references out of the main table avoids blank or repeated `repo:skill` cells for unique skills. If the same repo is accidentally listed twice in `~/.sv/config.toml` (including the same or equivalent GitHub URL under different IDs), `sv` coalesces that repeated source so the same skill does not appear twice.
 
 ## Adding skills without surprises
 
@@ -53,7 +53,7 @@ When two repos contain the same skill name, `sv list` keeps both rows visible, a
 
 Duplicate skill names are allowed in source repos, but a Pi project can only have one folder for a given skill name. To avoid accidental overwrites:
 
-1. Use `sv list` to find the `Add as` value.
+1. Use `sv list` to find the `Add as` value in the `Duplicate skill names` section.
 2. Install one source explicitly with `sv add <repo>:<skill>`.
 3. Avoid selecting two sources for the same skill name in `sv add -l`; `sv` rejects that selection before copying anything.
 
