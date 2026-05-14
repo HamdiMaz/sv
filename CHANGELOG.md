@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added source identity regression coverage to ensure equivalent GitHub source forms (`owner/repo`, HTTPS, and SSH variants) normalize consistently and coalesce catalog entries while preserving aliases.
 - Added duplicate-bulk add atomicity regression coverage: interactive `sv add -l` and `sv add --all` now fail fast on duplicate skills and do not copy any skills.
 - Added docs integrity tests verifying local README documentation links and top-level headings in `docs/*.md` files.
 - Added docs command parsing tests to ensure documented `sv` commands in README/docs code blocks parse via `build_parser()` (including common examples and explicit non-existent command checks).
