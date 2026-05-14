@@ -11,12 +11,13 @@ from sv.cli import (
     _handle_list,
     _handle_sync,
     _print_add_result,
+    _print_sync_result,
     build_parser,
     handle,
 )
 from sv.config import RepoConfig, SvConfig, SvPaths
 from sv.manifest import ManifestEntry, save_manifest
-from sv.project import AddSkillResult
+from sv.project import AddSkillResult, SyncResult, SyncSkip
 from sv.selector import SelectionState, _render
 from tests.helpers import assert_no_raw_control_characters
 
@@ -125,6 +126,21 @@ def test_print_add_result_escapes_manifest_repo_id(tmp_path: Path, capsys) -> No
     assert "Bad\\x1b[2JRepo" in output
 
 
+def test_print_add_result_escapes_requested_repo_id_for_added_skill(tmp_path: Path, capsys) -> None:
+    _print_add_result(
+        AddSkillResult(
+            skill="alpha",
+            target=tmp_path / ".pi" / "skills" / "alpha",
+            status="added",
+            repo_id="Bad\x1b[2JRepo",
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert_no_raw_control_characters(output)
+    assert "Bad\\x1b[2JRepo" in output
+
+
 def test_handle_sync_prints_escaped_manifest_repo_ids(tmp_path: Path, capsys) -> None:
     project = tmp_path / "project"
     skills = project / ".pi" / "skills"
@@ -150,6 +166,26 @@ def test_handle_sync_prints_escaped_manifest_repo_ids(tmp_path: Path, capsys) ->
     output = capsys.readouterr().out
     assert_no_raw_control_characters(output)
     assert "Skipped local Pi skill 'alpha': recorded source is missing (Bad\\x1b[2JRepo)." in output
+
+
+def test_print_sync_result_escapes_ambiguous_repo_ids(capsys) -> None:
+    _print_sync_result(
+        SyncResult(
+            updated=[],
+            skipped=[
+                SyncSkip(
+                    skill="alpha",
+                    reason="ambiguous",
+                    repo_ids=("GoodRepo", "Bad\\x1b[2JRepo"),
+                )
+            ],
+            backfilled=[],
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert_no_raw_control_characters(output)
+    assert "Skipped local Pi skill 'alpha': multiple source repos match (GoodRepo, Bad\\x1b[2JRepo)." in output
 
 
 def test_source_git_errors_escape_stderr_control_characters(
