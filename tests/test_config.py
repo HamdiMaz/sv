@@ -30,8 +30,68 @@ def test_normalize_repo_keeps_ssh_url():
     assert normalize_repo(url) == url
 
 
+@pytest.mark.parametrize(
+    ("raw_repo", "expected"),
+    [
+        ("HamdiMaz/Skills", "https://github.com/HamdiMaz/Skills.git"),
+        ("https://github.com/HamdiMaz/Skills/", "https://github.com/HamdiMaz/Skills/"),
+        ("http://github.com/HamdiMaz/Skills.git", "http://github.com/HamdiMaz/Skills.git"),
+        ("git@github.com:HamdiMaz/Skills.git", "git@github.com:HamdiMaz/Skills.git"),
+        ("ssh://git@github.com/HamdiMaz/Skills.git", "ssh://git@github.com/HamdiMaz/Skills.git"),
+        ("file:///tmp/skill-source", "file:///tmp/skill-source"),
+    ],
+)
+def test_normalize_repo_supported_form_matrix(raw_repo: str, expected: str):
+    assert normalize_repo(raw_repo) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_repo", "create_path"),
+    [
+        ("skill-source", True),
+        ("./skill-source", True),
+        ("./missing-skill-source", False),
+    ],
+)
+def test_normalize_repo_local_path_matrix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw_repo: str, create_path: bool
+):
+    if create_path:
+        (tmp_path / raw_repo.lstrip("./")).mkdir()
+
+    monkeypatch.chdir(tmp_path)
+
+    assert normalize_repo(raw_repo) == str(Path(raw_repo).resolve())
+
+
 def test_derive_repo_id_uses_owner_repo_for_github_ssh_url():
     assert derive_repo_id("ssh://git@github.com/HamdiMaz/Skills.git") == "HamdiMaz/Skills"
+
+
+@pytest.mark.parametrize(
+    ("raw_repo", "expected"),
+    [
+        ("HamdiMaz/Skills", "HamdiMaz/Skills"),
+        ("https://github.com/HamdiMaz/Skills/", "HamdiMaz/Skills"),
+        ("http://github.com/HamdiMaz/Skills.git", "HamdiMaz/Skills"),
+        ("git@github.com:HamdiMaz/Skills.git", "HamdiMaz/Skills"),
+        ("ssh://git@github.com/HamdiMaz/Skills.git", "HamdiMaz/Skills"),
+    ],
+)
+def test_derive_repo_id_supported_form_matrix(raw_repo: str, expected: str):
+    assert derive_repo_id(raw_repo) == expected
+
+
+def test_derive_repo_id_file_and_local_path_matrix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    local_repo = tmp_path / "skill-source"
+    local_repo.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    assert derive_repo_id(str(local_repo)).startswith("local-skill-source-")
+    assert derive_repo_id("./missing-skill-source").startswith(
+        "local-missing-skill-source-"
+    )
+    assert derive_repo_id("file:///tmp/skill-source").startswith("local-skill-source-")
 
 
 def test_normalize_repo_reports_unresolvable_user_home():
@@ -82,6 +142,20 @@ def test_normalize_repo_rejects_control_characters():
         normalize_repo("https://example.com/skills\nrepo.git")
 
 
+@pytest.mark.parametrize(
+    ("raw_repo", "match"),
+    [
+        ("--upload-pack=/tmp/fake", "repo cannot start with '-'"),
+        ("https://example.com/skills\trepo.git", "repo cannot contain control characters"),
+        ("https://example.com/skills\nrepo.git", "repo cannot contain control characters"),
+        ("\x00repo", "repo cannot contain control characters"),
+    ],
+)
+def test_normalize_repo_invalid_input_matrix(raw_repo: str, match: str):
+    with pytest.raises(ValueError, match=match):
+        normalize_repo(raw_repo)
+
+
 def test_derive_repo_id_uses_owner_repo_for_github_forms():
     assert derive_repo_id("HamdiMaz/Skills") == "HamdiMaz/Skills"
     assert derive_repo_id("https://github.com/HamdiMaz/Skills.git") == "HamdiMaz/Skills"
@@ -97,6 +171,20 @@ def test_derive_repo_id_uses_safe_hashed_id_for_local_paths(tmp_path: Path):
     assert repo_id.startswith("local-skill-source-")
     assert "/" not in repo_id
     assert " " not in repo_id
+
+
+@pytest.mark.parametrize(
+    ("raw_repo", "match"),
+    [
+        ("--upload-pack=/tmp/fake", "repo cannot start with '-'"),
+        ("https://example.com/skills\trepo.git", "repo cannot contain control characters"),
+        ("https://example.com/skills\nrepo.git", "repo cannot contain control characters"),
+        ("\x00repo", "repo cannot contain control characters"),
+    ],
+)
+def test_derive_repo_id_invalid_input_matrix(raw_repo: str, match: str):
+    with pytest.raises(ValueError, match=match):
+        derive_repo_id(raw_repo)
 
 
 def test_paths_include_sources_root_and_per_repo_cache(tmp_path: Path):
