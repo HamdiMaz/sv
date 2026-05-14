@@ -219,6 +219,37 @@ def test_list_project_skills_rejects_symlinked_project_skills_path(
     assert (outside / "sentinel.txt").read_text() == "outside\n"
 
 
+def test_run_rejects_symlinked_pi_dir_before_launching_process(
+    tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside-pi"
+    (outside / "skills").mkdir(parents=True)
+    (outside / "sentinel.txt").write_text("outside\n")
+    os.symlink(outside, project / ".pi", target_is_directory=True)
+    calls: list[list[str]] = []
+
+    def process_runner(command: list[str]) -> int:
+        calls.append(command)
+        return 0
+
+    exit_code = handle(
+        parse_sv(["run"]),
+        cwd=project,
+        home=home,
+        process_runner=process_runner,
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert calls == []
+    assert "Refusing to use symlinked Pi skills path" in captured.err
+    assert_no_traceback(captured.err)
+    assert (outside / "sentinel.txt").read_text() == "outside\n"
+
+
 def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys) -> None:
     home = tmp_path / "home"
     project = tmp_path / "project"
