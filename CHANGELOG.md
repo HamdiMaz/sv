@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T037: added a local-git end-to-end smoke test covering repo add/list, list, add, source update, sync, remove, and `sv run` with a fake Pi process runner.
 - Completed T036: expanded catalog tests for missing/invalid source contents, hidden skill directories, ordering, and `SourceSkill` display metadata.
 - Completed T035: expanded `SKILL.md` frontmatter parser coverage for comments, whitespace, colon-containing descriptions, duplicate keys, body delimiters, and empty metadata rejection.
 - Completed `T032`: added selector interaction-loop tests with fake TTY streams and `_read_key` injection for first/third selection, cancel, and empty enter, including cursor restoration verification on normal and failure paths.
