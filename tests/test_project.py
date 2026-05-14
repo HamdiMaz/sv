@@ -692,6 +692,84 @@ def test_sync_project_skills_skips_ambiguous_untracked_skill(tmp_path: Path):
     assert load_manifest(project_skills) == {}
 
 
+def test_sync_project_skills_cleans_temp_and_backup_dirs_after_success(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("managed local v1\n")
+    (entry.source_path / "notes.md").write_text("managed remote v2\n")
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/managed",
+                description="Managed skill.",
+            )
+        },
+    )
+    stale_temp = project_skills / ".managed.sv-sync-tmp"
+    stale_backup = project_skills / ".managed.sv-sync-backup"
+    stale_temp.mkdir(parents=True)
+    stale_backup.mkdir(parents=True)
+    (stale_temp / "leftover.txt").write_text("temp\n")
+    (stale_backup / "leftover.txt").write_text("backup\n")
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == ["managed"]
+    assert result.backfilled == []
+    assert result.skipped == []
+    assert (managed_local / "notes.md").read_text() == "managed remote v2\n"
+    assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
+    assert not stale_temp.exists()
+    assert not stale_backup.exists()
+    assert_no_partial_sv_dirs(project_skills)
+
+
+def test_sync_project_skills_updates_managed_skill_before_skipping_local_only_skill(
+    tmp_path: Path,
+):
+    source_entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("managed local v1\n")
+    local_only = project_skills / "local_only"
+    local_only.mkdir(parents=True)
+    (local_only / "notes.md").write_text("kept local\n")
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/managed",
+                description="Managed skill.",
+            )
+        },
+    )
+    (source_entry.source_path / "notes.md").write_text("managed remote v2\n")
+
+    result = sync_project_skills([source_entry], project_skills)
+
+    assert result.updated == ["managed"]
+    assert result.backfilled == []
+    assert [(skip.skill, skip.reason, skip.repo_ids) for skip in result.skipped] == [
+        ("local_only", "local-only", ())
+    ]
+    assert (managed_local / "notes.md").read_text() == "managed remote v2\n"
+    assert (local_only / "notes.md").read_text() == "kept local\n"
+    assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
+    assert_no_partial_sv_dirs(project_skills)
+
+
 def test_sync_project_skills_preserves_local_skill_when_copy_fails(
     tmp_path: Path, monkeypatch
 ):
@@ -734,6 +812,7 @@ def test_sync_project_skills_restores_local_skill_when_replace_fails(
         sync_project_skills([entry], project_skills)
 
     assert (managed_local / "notes.md").read_text() == "local v1\n"
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_sync_project_skills_restores_local_skill_when_manifest_update_fails(
@@ -755,6 +834,7 @@ def test_sync_project_skills_restores_local_skill_when_manifest_update_fails(
 
     assert (managed_local / "notes.md").read_text() == "local v1\n"
     assert load_manifest(project_skills) == {}
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_sync_project_skills_rejects_symlinked_project_skills_dir(tmp_path: Path):
