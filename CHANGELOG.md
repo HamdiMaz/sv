@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `tests/test_cli_sync_contracts.py` to lock `sv sync` contracts for missing `.pi/skills`, managed updates, source-missing, legacy backfill, ambiguous legacy, and local-only skip behavior.
 - Completed T026: added `tests/test_cli_remove_contracts.py` to lock remove command validation, interactive behavior, and manifest updates.
 
 - Completed T024: added `tests/test_cli_add_contracts.py` to lock `sv add` validation failure behavior for missing skills, invalid skill names, control-character references, and invalid flag combinations.
