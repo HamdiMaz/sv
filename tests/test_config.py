@@ -127,6 +127,21 @@ def test_derive_repo_id_uses_safe_hashed_id_for_local_paths(tmp_path: Path):
     assert " " not in repo_id
 
 
+def test_derive_repo_id_strips_git_suffix_from_fallback_ids():
+    repo_id = derive_repo_id("https://example.com/team/custom-skills.git")
+
+    assert repo_id.startswith("local-custom-skills-")
+    assert ".git" not in repo_id
+
+
+def test_derive_repo_id_fallback_ids_are_deterministic_and_distinct():
+    first = derive_repo_id("https://example.com/team/custom-skills.git")
+    second = derive_repo_id("https://mirror.example.com/team/custom-skills.git")
+
+    assert derive_repo_id("https://example.com/team/custom-skills.git") == first
+    assert first != second
+
+
 def test_normalize_repo_reports_unresolvable_user_home():
     with pytest.raises(ValueError, match="Could not resolve home directory"):
         normalize_repo("~definitely-not-an-sv-user/Skills")
@@ -182,12 +197,15 @@ def test_repo_parser_invalid_input_matrix(raw_repo: str, match: str):
         derive_repo_id(raw_repo)
 
 
-def test_paths_include_sources_root_and_per_repo_cache(tmp_path: Path):
+def test_paths_include_sources_root_default_repo_and_per_repo_cache(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
 
     assert paths.sv_home == tmp_path / ".sv"
     assert paths.config_file == tmp_path / ".sv" / "config.toml"
     assert paths.sources_dir == tmp_path / ".sv" / "sources"
+    assert paths.source_repo == (
+        tmp_path / ".sv" / "sources" / "HamdiMaz" / "Skills" / "repo"
+    )
     assert paths.source_repo_for("HamdiMaz/Skills") == (
         tmp_path / ".sv" / "sources" / "HamdiMaz" / "Skills" / "repo"
     )
@@ -199,6 +217,14 @@ def test_load_config_uses_default_repo_when_config_missing(tmp_path: Path):
     assert config == SvConfig(
         repos=(RepoConfig(id="HamdiMaz/Skills", url=DEFAULT_REPO),)
     )
+
+
+def test_single_repo_compatibility_property_returns_first_repo_url():
+    config = SvConfig(
+        repos=(RepoConfig(id="Org/Skills", url="https://example.com/skills.git"),)
+    )
+
+    assert config.repo == "https://example.com/skills.git"
 
 
 def test_single_repo_compatibility_property_returns_none_for_empty_config():
