@@ -30,15 +30,15 @@ Run commands from the project root where `.pi/skills` should be managed.
 
 If no source repos are configured, `sv list` tells you to add one with `sv repo add <owner/repo>` instead of showing an empty skill table.
 
-`sv list` prints a compact table for unique skill names:
+`sv list` prints a compact table with one row per skill name:
 
 | Column | Meaning |
 | --- | --- |
 | `Skill` | The folder name copied into `.pi/skills`. |
-| `Repo` | The configured source repo ID. |
-| `Description` | The description parsed from the skill's `SKILL.md` frontmatter. |
+| `Source` | The configured source repo ID, or `N sources` when multiple repos provide that skill name. |
+| `Description` | The description parsed from `SKILL.md`, or a prompt to choose from the duplicate section. |
 
-When two repos contain the same skill name, `sv list` keeps both rows visible in the compact main table, then prints a separate `Duplicate skill names` section with exact `Add as` values. Use the `Add as` value to install the intended source. Keeping qualified references out of the main table avoids blank or repeated `repo:skill` cells for unique skills. If the same repo is accidentally listed twice in `~/.sv/config.toml` (including the same or equivalent GitHub URL under different IDs), `sv` coalesces that repeated source so the same skill does not appear twice.
+When two repos contain the same skill name, `sv list` groups the name into one `N sources` row in the main table, then prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value. Use the `Add as` value to install the intended source. Keeping duplicate rows and qualified references out of the main table makes the list easier to scan while preserving every source choice below it. If the same repo is accidentally listed twice in `~/.sv/config.toml` (including the same or equivalent GitHub URL under different IDs), `sv` coalesces that repeated source so the same skill does not appear twice.
 
 ## Adding skills without surprises
 

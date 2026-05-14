@@ -433,10 +433,20 @@ def _handle_list(catalog: Sequence[SourceSkill]) -> int:
         _print_wrapped("Duplicate skill names:")
         print(
             format_table(
-                ["Skill", "Repo", "Add as"],
+                ["Skill", "Repo", "Description", "Add as"],
                 _duplicate_source_skill_rows(catalog, duplicate_names=duplicate_names),
-                max_widths={"Skill": 28, "Repo": 32, "Add as": 48},
-                min_widths={"Skill": 10, "Repo": 12, "Add as": 16},
+                max_widths={
+                    "Skill": 28,
+                    "Repo": 32,
+                    "Description": 56,
+                    "Add as": 48,
+                },
+                min_widths={
+                    "Skill": 10,
+                    "Repo": 12,
+                    "Description": 20,
+                    "Add as": 16,
+                },
                 max_table_width=_table_width(),
             )
         )
@@ -696,29 +706,51 @@ def _ambiguous_skill_error(skill_reference: str, matches: Sequence[SourceSkill])
 
 
 def _source_skill_headers() -> list[str]:
-    return ["Skill", "Repo", "Description"]
+    return ["Skill", "Source", "Description"]
 
 
 def _source_skill_max_widths() -> CellWidths:
-    return {"Skill": 28, "Repo": 32, "Description": 72}
+    return {"Skill": 28, "Source": 32, "Description": 72}
 
 
 def _source_skill_min_widths() -> CellWidths:
-    return {"Skill": 10, "Repo": 12, "Description": 24}
+    return {"Skill": 10, "Source": 12, "Description": 24}
 
 
 def _source_skill_rows(catalog: Sequence[SourceSkill]) -> list[list[str]]:
-    return [[entry.name, entry.repo_id, entry.description] for entry in catalog]
+    rows: list[list[str]] = []
+    for skill_name, entries in _source_skills_by_name(catalog).items():
+        if len(entries) == 1:
+            entry = entries[0]
+            rows.append([entry.name, entry.repo_id, entry.description])
+            continue
+        rows.append(
+            [
+                skill_name,
+                f"{len(entries)} sources",
+                "Choose a source below.",
+            ]
+        )
+    return rows
 
 
 def _duplicate_source_skill_rows(
     catalog: Sequence[SourceSkill], *, duplicate_names: set[str]
 ) -> list[list[str]]:
     return [
-        [entry.name, entry.repo_id, _source_skill_reference(entry)]
+        [entry.name, entry.repo_id, entry.description, _source_skill_reference(entry)]
         for entry in catalog
         if entry.name in duplicate_names
     ]
+
+
+def _source_skills_by_name(
+    catalog: Sequence[SourceSkill],
+) -> dict[str, list[SourceSkill]]:
+    by_name: dict[str, list[SourceSkill]] = {}
+    for entry in catalog:
+        by_name.setdefault(entry.name, []).append(entry)
+    return by_name
 
 
 def _duplicate_skill_names(catalog: Sequence[SourceSkill]) -> list[str]:

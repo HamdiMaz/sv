@@ -4,28 +4,27 @@
 
 ## Skill lists
 
-`sv list` shows one row for each available source skill. For unique skill names, the table stays compact:
+`sv list` shows one row per skill name so the main list stays easy to scan:
 
 | Column | Meaning |
 | --- | --- |
 | `Skill` | Folder name that will be created under `.pi/skills`. |
-| `Repo` | Source repo ID. Use this with `sv repo remove` and qualified skill references. |
-| `Description` | Description from the skill's `SKILL.md` frontmatter. |
+| `Source` | Source repo ID, or `N sources` when duplicate names need a source choice. |
+| `Description` | Description from `SKILL.md`, or a short prompt to use the duplicate section. |
 
-If two repos provide the same skill name, both rows stay visible in the compact main table and `sv list` prints a separate duplicate section:
+If two repos provide the same skill name, the main table groups that name and `sv list` prints a separate duplicate section with the exact choices:
 
 ```text
-Skill      Repo             Description
----------  ---------------  -----------------------
-find-docs  HamdiMaz/Skills  Retrieves docs.
-find-docs  Team/Skills      Team-specific docs.
+Skill      Source           Description
+---------  ---------------  ----------------------
+find-docs  2 sources        Choose a source below.
 review     Team/Skills      Reviews code changes.
 
 Duplicate skill names:
-Skill      Repo             Add as
----------  ---------------  ----------------------------
-find-docs  HamdiMaz/Skills  HamdiMaz/Skills:find-docs
-find-docs  Team/Skills      Team/Skills:find-docs
+Skill      Repo             Description           Add as
+---------  ---------------  --------------------  ----------------------------
+find-docs  HamdiMaz/Skills  Retrieves docs.       HamdiMaz/Skills:find-docs
+find-docs  Team/Skills      Team-specific docs.   Team/Skills:find-docs
 ```
 
 Copy the `Add as` value for the source you want:
@@ -43,7 +42,7 @@ Tables wrap long values to fit the current terminal width. This keeps important 
 Example shape:
 
 ```text
-Skill      Repo         Description
+Skill      Source       Description
 ---------  -----------  ------------------------
 find-docs  Team/Skills  Retrieves documentation
                          and API examples.

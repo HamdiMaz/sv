@@ -24,7 +24,7 @@ sv repo list
 sv list
 ```
 
-The main list shows `Skill`, `Repo`, and `Description`. If two repos provide the same skill name, `sv` adds a separate `Duplicate skill names` section with `Add as` values. Copy that exact value when you need a specific source:
+The main list shows `Skill`, `Source`, and `Description`. If two repos provide the same skill name, `sv` shows one `N sources` row in the main list and adds a separate `Duplicate skill names` section with each repo, description, and `Add as` value. Copy that exact value when you need a specific source:
 
 ```bash
 sv add HamdiMaz/Skills:find-docs

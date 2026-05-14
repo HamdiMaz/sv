@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Grouped duplicate skill names into a single `N sources` row in the main `sv list` table and added descriptions to the duplicate-source section so source choices are clearer without visually repeating skills.
 - Kept `sv list` compact when duplicate skill names exist by moving qualified `Add as` values into a separate duplicate-name section.
 - Added copy-paste examples for common `sv` workflows and updated docs to explain the duplicate-name list output.
 - Added a getting-started guide focused on the shortest setup path and linked it from the README.

@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 import subprocess
+import unicodedata
 
 import pytest
 
@@ -10,6 +11,15 @@ from sv.config import SvPaths, derive_repo_id, load_config
 
 def parse(argv):
     return build_parser().parse_args(argv)
+
+
+def display_width(value: str) -> int:
+    width = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    return width
 
 
 def run_git(args, cwd: Path):
@@ -102,7 +112,7 @@ def test_list_and_add_from_local_git_source(tmp_path: Path, capsys):
     output = capsys.readouterr().out
     header = output.splitlines()[0]
     assert "Skill" in header
-    assert "Repo" in header
+    assert "Source" in header
     assert "Description" in header
     assert "Add as" not in header
     assert "alpha" in output
@@ -518,7 +528,15 @@ def test_list_wraps_duplicate_guidance_to_terminal_width(
     tmp_path: Path, capsys, monkeypatch
 ):
     source_a = make_source_repo(tmp_path, "source-a")
-    source_b = make_source_repo(tmp_path, "source-b")
+    source_b = make_source_repo(tmp_path, "very-long-source-b-name")
+    write_source_skill(
+        source_b,
+        "alpha",
+        "Alpha 日本語 description from the second source with enough detail to wrap.",
+        "alpha from b\n",
+    )
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "lengthen duplicate alpha description"], source_b)
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -533,7 +551,44 @@ def test_list_wraps_duplicate_guidance_to_terminal_width(
     lines = capsys.readouterr().out.splitlines()
     assert any(line.startswith("Duplicate skill names:") for line in lines)
     assert any(line.startswith("Tip: use the exact") for line in lines)
-    assert all(len(line) <= 40 for line in lines)
+    output = "\n".join(lines)
+    assert "日本" in output
+    assert "語" in output
+    assert all(display_width(line) <= 40 for line in lines)
+
+
+def test_list_groups_duplicate_skill_names_in_main_table(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    main_section = output.split("\n\n", maxsplit=1)[0]
+    main_alpha_rows = [
+        line for line in main_section.splitlines() if line.startswith("alpha")
+    ]
+    assert len(main_alpha_rows) == 1
+    assert "2 sources" in main_alpha_rows[0]
+    assert "Choose a source below" in main_alpha_rows[0]
+    assert "Alpha skill." not in main_section
+    assert "Alpha from B." not in main_section
+    duplicate_section = output.split("Duplicate skill names:", maxsplit=1)[1]
+    assert "Description" in duplicate_section
+    assert "Alpha skill." in duplicate_section
+    assert "Alpha from B." in duplicate_section
 
 
 def test_list_shows_duplicate_references_without_widening_main_skill_table(
