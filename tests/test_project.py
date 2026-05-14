@@ -409,6 +409,53 @@ def test_remove_project_skill_restores_skill_when_manifest_update_fails(
     assert load_manifest(project_skills)["alpha"].repo_id == "Org/Skills"
 
 
+def test_remove_project_skill_cleans_stale_remove_backup_on_success(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    assert add_project_skill(entry, project_skills).status == "added"
+    skill = project_skills / "alpha"
+    stale_backup = project_skills / ".alpha.sv-remove-backup"
+    stale_backup.mkdir(parents=True)
+    (stale_backup / "leftover.txt").write_text("leftover\n")
+
+    result = remove_project_skill("alpha", project_skills)
+
+    assert result.skill == "alpha"
+    assert result.target == skill
+    assert not skill.exists()
+    assert not stale_backup.exists()
+    assert load_manifest(project_skills) == {}
+    assert_no_partial_sv_dirs(project_skills)
+
+
+def test_remove_project_skill_restores_skill_when_backup_cleanup_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    assert add_project_skill(entry, project_skills).status == "added"
+    skill = project_skills / "alpha"
+    backup_target = project_skills / ".alpha.sv-remove-backup"
+    original_manifest = load_manifest(project_skills)
+    original_rmtree = shutil.rmtree
+
+    def fail_remove_backup(path, *args, **kwargs):
+        if path == backup_target:
+            raise OSError("backup cleanup failed")
+        return original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", fail_remove_backup)
+
+    with pytest.raises(SvError, match="Failed to remove Pi skill 'alpha'"):
+        remove_project_skill("alpha", project_skills)
+
+    assert load_manifest(project_skills) == original_manifest
+    assert skill.exists()
+    assert (skill / "notes.md").read_text() == "alpha remote\n"
+    assert not backup_target.exists()
+    assert_no_partial_sv_dirs(project_skills)
+
+
 def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
     with pytest.raises(SvError, match="Pi skill 'missing' was not found"):
         remove_project_skill("missing", tmp_path / "project" / ".pi" / "skills")

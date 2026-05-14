@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T021: completed remove rollback coverage with tests for stale `.sv-remove-backup` cleanup on successful removal and restore behavior when backup cleanup fails in `tests/test_project.py`.
 - Completed T020: extended add rollback coverage in `tests/test_project.py` to assert `.sv-add-tmp` cleanup on failures and to verify stale add temp directories are cleaned before successful copy.
 - Completed T019: added manifest atomic-write regression coverage for deterministic ordering, empty-save cleanup, empty-save deletion failures, and invalid-parent path failures in `tests/test_manifest.py`.
 - Completed T015: added `tests/test_security_paths.py` with security-path traversal coverage for hostile skill names and repo IDs, validating SvError behavior and no filesystem mutation on validation failures.
