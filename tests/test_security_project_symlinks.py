@@ -158,6 +158,26 @@ def test_sync_project_skills_rejects_symlinked_project_skills_dir(tmp_path: Path
     assert (outside / "sentinel.txt").read_text() == "outside\n"
 
 
+def test_sync_project_skills_rejects_symlinked_pi_dir(tmp_path: Path) -> None:
+    entry = _make_source_skill(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside-pi"
+    outside.mkdir()
+    (outside / "sentinel.txt").write_text("outside\n")
+
+    os.symlink(
+        outside,
+        project / ".pi",
+        target_is_directory=True,
+    )
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Pi skills path"):
+        sync_project_skills([entry], project / ".pi" / "skills")
+
+    assert (outside / "sentinel.txt").read_text() == "outside\n"
+
+
 def test_sync_project_skills_rejects_symlinked_project_skill_directory(
     tmp_path: Path,
 ) -> None:
@@ -175,6 +195,26 @@ def test_sync_project_skills_rejects_symlinked_project_skill_directory(
 
     with pytest.raises(SvError, match="Refusing to manage symlinked Pi skill 'alpha'"):
         sync_project_skills([entry], project_skills)
+
+    assert (outside / "sentinel.txt").read_text() == "outside\n"
+
+
+def test_list_project_skills_rejects_symlinked_project_skills_path(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    outside = tmp_path / "outside-skills"
+    outside.mkdir()
+    (outside / "sentinel.txt").write_text("outside\n")
+    (project / ".pi").mkdir(parents=True)
+    os.symlink(
+        outside,
+        project / ".pi" / "skills",
+        target_is_directory=True,
+    )
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Pi skills path"):
+        list_project_skills(project / ".pi" / "skills")
 
     assert (outside / "sentinel.txt").read_text() == "outside\n"
 
