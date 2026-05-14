@@ -8,6 +8,7 @@ from sv.errors import SvError
 from sv.manifest import (
     ManifestEntry,
     load_manifest,
+    remove_manifest_entry,
     save_manifest,
     upsert_manifest_entry,
 )
@@ -272,11 +273,27 @@ def test_save_manifest_preserves_existing_manifest_when_temp_write_fails(
     }
     save_manifest(project_skills, original)
     original_text = (project_skills / ".sv-manifest.toml").read_text()
-    def fail_temp_write(path, text):
-        path.write_text("partial\n")
-        raise OSError("write failed")
+    real_close = manifest_module.os.close
 
-    monkeypatch.setattr(manifest_module, "_write_manifest_temp_file", fail_temp_write)
+    class BrokenFile:
+        def __init__(self, fd: int):
+            self.fd = fd
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def write(self, text: str) -> None:
+            real_close(self.fd)
+            raise OSError("write failed")
+
+    monkeypatch.setattr(
+        manifest_module.os,
+        "fdopen",
+        lambda fd, *args, **kwargs: BrokenFile(fd),
+    )
 
     with pytest.raises(SvError, match="Failed to write sv manifest"):
         save_manifest(
@@ -294,6 +311,101 @@ def test_save_manifest_preserves_existing_manifest_when_temp_write_fails(
 
     assert (project_skills / ".sv-manifest.toml").read_text() == original_text
     assert not (project_skills / ".sv-manifest.toml.tmp").exists()
+
+
+def test_load_manifest_rejects_skills_value_that_is_not_a_list(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    (project_skills / ".sv-manifest.toml").write_text("[skills]\n")
+
+    with pytest.raises(SvError, match="skills must be a list"):
+        load_manifest(project_skills)
+
+
+def test_load_manifest_rejects_non_table_skill_entries(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    (project_skills / ".sv-manifest.toml").write_text('skills = ["alpha"]\n')
+
+    with pytest.raises(SvError, match=r"skills\[1\] must be a table"):
+        load_manifest(project_skills)
+
+
+def test_remove_manifest_entry_missing_skill_keeps_manifest(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    save_manifest(
+        project_skills,
+        {
+            "alpha": ManifestEntry(
+                name="alpha",
+                repo_id="Org/A",
+                repo_url="https://github.com/Org/A.git",
+                source_path="skills/alpha",
+                description="Alpha skill.",
+            )
+        },
+    )
+    original = (project_skills / ".sv-manifest.toml").read_text()
+
+    remove_manifest_entry(project_skills, "missing")
+
+    assert (project_skills / ".sv-manifest.toml").read_text() == original
+    assert sorted(load_manifest(project_skills)) == ["alpha"]
+
+
+def test_save_manifest_replaces_stale_regular_temp_file(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    temp_path = project_skills / ".sv-manifest.toml.tmp"
+    temp_path.write_text("stale\n")
+
+    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    assert load_manifest(project_skills)["alpha"].repo_id == "Org/A"
+    assert not temp_path.exists()
+
+
+def test_save_manifest_removes_temp_file_when_low_level_write_fails(
+    tmp_path: Path, monkeypatch
+):
+    project_skills = tmp_path / ".pi" / "skills"
+    temp_path = project_skills / ".sv-manifest.toml.tmp"
+    real_close = manifest_module.os.close
+
+    class BrokenFile:
+        def __init__(self, fd: int):
+            self.fd = fd
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def write(self, text: str) -> None:
+            real_close(self.fd)
+            raise OSError("write failed")
+
+    monkeypatch.setattr(
+        manifest_module.os,
+        "fdopen",
+        lambda fd, *args, **kwargs: BrokenFile(fd),
+    )
+
+    with pytest.raises(SvError, match="Failed to write sv manifest"):
+        save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    assert not temp_path.exists()
+
+
+def _manifest_entry(name: str) -> ManifestEntry:
+    return ManifestEntry(
+        name=name,
+        repo_id="Org/A",
+        repo_url="https://github.com/Org/A.git",
+        source_path=f"skills/{name}",
+        description=f"{name.title()} skill.",
+    )
 
 
 def test_upsert_manifest_entry_preserves_other_entries(tmp_path: Path):

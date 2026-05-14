@@ -41,7 +41,7 @@ pythonpath = ["src"]
 addopts = [
     "--cov=sv",
     "--cov-report=term-missing",
-    "--cov-fail-under=85",
+    "--cov-fail-under=95",
 ]
 markers = [
     "integration: integration tests",

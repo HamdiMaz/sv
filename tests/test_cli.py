@@ -1,9 +1,13 @@
+from argparse import Namespace
 from pathlib import Path
 import unicodedata
 
 import pytest
 
+import sv.cli as cli_module
+from sv.catalog import SourceSkill
 from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, handle
+from sv.errors import SvError
 from sv.project import AddSkillResult, SyncResult, SyncSkip
 from tests.helpers import (
     assert_no_raw_control_characters,
@@ -493,3 +497,232 @@ def test_print_wrapped_honors_display_width_for_wide_unicode(capsys, monkeypatch
 def test_config_command_is_removed_from_parser():
     with pytest.raises(SystemExit):
         parse(["config", "show"])
+
+
+def test_default_process_runner_delegates_to_subprocess_call(monkeypatch):
+    calls = []
+
+    def fake_call(command):
+        calls.append(command)
+        return 17
+
+    monkeypatch.setattr(cli_module.subprocess, "call", fake_call)
+
+    assert cli_module.default_process_runner(("pi", "--help")) == 17
+    assert calls == [["pi", "--help"]]
+
+
+def test_main_parses_arguments_and_uses_current_project_paths(monkeypatch, tmp_path: Path):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    parsed_calls = []
+
+    monkeypatch.setattr(cli_module.Path, "cwd", lambda: project)
+    monkeypatch.setattr(cli_module.Path, "home", lambda: home)
+
+    def fake_handle(args, cwd, home):
+        parsed_calls.append((args.command, args.repo_command, cwd, home))
+        return 0
+
+    monkeypatch.setattr(cli_module, "handle", fake_handle)
+
+    assert cli_module.main(["repo", "list"]) == 0
+    assert parsed_calls == [("repo", "list", project, home)]
+
+
+def test_remove_without_skill_reports_actionable_error(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = handle(parse(["remove"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    assert "Specify a skill name or use -l." in capsys.readouterr().err
+
+
+def test_unknown_commands_are_reported_without_tracebacks(tmp_path: Path, capsys):
+    exit_code = handle(Namespace(command="mystery"), cwd=tmp_path, home=tmp_path)
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Unknown command: mystery" in captured.err
+    assert_no_traceback(captured.err)
+
+
+def test_unknown_repo_subcommand_is_reported_without_tracebacks(
+    tmp_path: Path, capsys
+):
+    exit_code = handle(
+        Namespace(command="repo", repo_command="mystery"), cwd=tmp_path, home=tmp_path
+    )
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Unknown repo command: mystery" in captured.err
+    assert_no_traceback(captured.err)
+
+
+def test_empty_repo_qualified_add_reference_fails_before_git(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(parse(["add", ":alpha"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert exit_code == 1
+    assert "Invalid skill reference ':alpha'. Use repo:skill." in capsys.readouterr().err
+
+
+def test_missing_qualified_skill_reference_reports_exact_reference(tmp_path: Path):
+    with pytest.raises(SvError, match="Org/Skills:missing"):
+        cli_module._handle_add(
+            "Org/Skills:missing",
+            [],
+            cwd=tmp_path,
+            adapter=cli_module.PiAdapter(),
+            skill_chooser=lambda matches: None,
+        )
+
+
+def test_duplicate_add_choice_can_be_cancelled(tmp_path: Path, capsys):
+    first = _source_skill(tmp_path, "source-a", repo_id="Org/A")
+    second = _source_skill(tmp_path, "source-b", repo_id="Org/B")
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [first, second],
+        cwd=tmp_path / "project",
+        adapter=cli_module.PiAdapter(),
+        skill_chooser=lambda matches: None,
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Multiple source skills match 'alpha'" in output
+    assert "No skill selected." in output
+    assert "Org/A:alpha" in output
+
+
+def test_add_all_and_interactive_report_empty_catalog(tmp_path: Path, capsys):
+    project = tmp_path / "project"
+
+    assert cli_module._handle_add_all([], cwd=project, adapter=cli_module.PiAdapter()) == 0
+    assert (
+        cli_module._handle_add_interactive(
+            [],
+            cwd=project,
+            adapter=cli_module.PiAdapter(),
+            skill_selector=lambda skills, **kwargs: [],
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert output.count("No valid skills found in configured source repos.") == 2
+
+
+def test_print_add_result_existing_without_recorded_origin_mentions_requested_repo(
+    tmp_path: Path, capsys
+):
+    _print_add_result(
+        AddSkillResult(
+            skill="alpha",
+            target=tmp_path / "project" / ".pi" / "skills" / "alpha",
+            status="exists",
+            repo_id="Org/Skills",
+            existing_repo_id=None,
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert "no sv origin recorded" in output
+    assert "requested Org/Skills" in output
+
+
+def test_remove_interactive_cancel_leaves_project_skills_unchanged(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    skill = project / ".pi" / "skills" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "notes.md").write_text("alpha\n")
+
+    exit_code = handle(
+        parse(["remove", "-l"]),
+        cwd=project,
+        home=home,
+        skill_selector=lambda skills: [],
+    )
+
+    assert exit_code == 0
+    assert (skill / "notes.md").read_text() == "alpha\n"
+    assert "No skills selected." in capsys.readouterr().out
+
+
+def test_choose_skill_returns_none_without_tty(monkeypatch, tmp_path: Path):
+    class NonTty:
+        def isatty(self):
+            return False
+
+    monkeypatch.setattr(cli_module.sys, "stdin", NonTty())
+    monkeypatch.setattr(cli_module.sys, "stdout", NonTty())
+
+    assert cli_module._choose_skill([_source_skill(tmp_path, "source")]) is None
+
+
+def test_choose_skill_reprompts_until_valid_selection(monkeypatch, tmp_path: Path):
+    skill = _source_skill(tmp_path, "source")
+    choices = iter(["bad", "3", "1"])
+
+    class TtyOutput:
+        def __init__(self):
+            self.text = ""
+
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            self.text += text
+
+        def flush(self):
+            return None
+
+    output = TtyOutput()
+    monkeypatch.setattr(cli_module.sys, "stdin", output)
+    monkeypatch.setattr(cli_module.sys, "stdout", output)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(choices))
+
+    assert cli_module._choose_skill([skill]) == skill
+    assert "Enter a number from 1 to 1" in output.text
+
+
+def test_choose_skill_accepts_quit(monkeypatch, tmp_path: Path):
+    class TtyInput:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(cli_module.sys, "stdin", TtyInput())
+    monkeypatch.setattr(cli_module.sys, "stdout", TtyInput())
+    monkeypatch.setattr("builtins.input", lambda _prompt: "q")
+
+    assert cli_module._choose_skill([_source_skill(tmp_path, "source")]) is None
+
+
+def _source_skill(tmp_path: Path, repo_folder: str, *, repo_id: str = "Org/Skills") -> SourceSkill:
+    source = tmp_path / repo_folder
+    skill_dir = source / "skills" / "alpha"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha skill.\n---\n")
+    return SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo_id,
+        repo_url=f"https://github.com/{repo_id}.git",
+        repo_path=source,
+        source_path=skill_dir,
+    )

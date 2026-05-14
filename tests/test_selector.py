@@ -1,4 +1,5 @@
 from io import StringIO
+import builtins
 import os
 import re
 import sys
@@ -384,6 +385,118 @@ def test_select_skills_restores_cursor_and_terminal_settings_after_render_error(
     assert "\x1b[?25h" in output.getvalue()
     assert restore_calls == [(0, 1, ["settings"])
     ]
+
+
+def test_selection_state_boundary_actions_are_noops():
+    empty = SelectionState([])
+    empty.move_up()
+    empty.move_down()
+    empty.page_previous()
+    empty.page_next()
+    empty.toggle_current()
+
+    assert empty.cursor == 0
+    assert empty.viewport_start == 0
+    assert empty.selected_items() == []
+
+    single = SelectionState(["alpha"])
+    single.move_up()
+    single.move_down()
+    single.page_previous()
+    single.page_next()
+
+    assert single.cursor == 0
+    assert single.viewport_start == 0
+
+
+def test_select_skills_returns_empty_before_tty_checks():
+    class NonTty(StringIO):
+        def isatty(self):
+            return False
+
+    assert select_skills([], stdin=NonTty(), stdout=NonTty()) == []
+
+
+def test_select_skills_requires_tty_streams():
+    class NonTty(StringIO):
+        def isatty(self):
+            return False
+
+    with pytest.raises(SvError, match="requires a TTY"):
+        select_skills(["alpha"], stdin=NonTty(), stdout=NonTty())
+
+
+def test_select_skills_reports_missing_terminal_modules(monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "termios":
+            raise ImportError("no termios")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(SvError, match="Unix-like terminal"):
+        select_skills(["alpha"], stdin=TtyStream(), stdout=TtyStream())
+
+
+def test_select_skills_handles_navigation_and_unknown_keys(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["down", "right", "left", "up", "unknown", "enter"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
+
+    selected = select_skills(
+        [f"skill-{index}" for index in range(1, 8)],
+        stdin=TtyStream(),
+        stdout=output,
+    )
+
+    assert selected == []
+    rendered = visible_text(output.getvalue())
+    assert "Showing 1-5 of 7" in rendered
+
+
+def test_render_handles_empty_state_help_line():
+    state = SelectionState([])
+    stdout = StringIO()
+
+    _render(state, stdout)
+
+    assert visible_text(stdout.getvalue()).strip() == "No skills to show • q cancel"
+
+
+def test_render_marks_selected_cursor_with_selected_highlight():
+    state = SelectionState(["alpha"])
+    state.selected.add(0)
+    stdout = StringIO()
+
+    _render(state, stdout)
+
+    first_line = stdout.getvalue().splitlines()[0]
+    assert first_line.startswith("\x1b[48;5;220m")
+    assert "[x] 1- alpha" in first_line
+
+
+def test_render_handles_combining_marks_and_one_column_terminal(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "1")
+    state = SelectionState(["e\u0301clair"])
+    stdout = StringIO()
+
+    _render(state, stdout)
+
+    lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert lines[0] == "."
+    assert all(display_width(line) <= 1 for line in lines)
+
+
+def test_read_key_returns_unknown_for_regular_characters():
+    assert _read_key_from_bytes(b"x") == "unknown"
 
 
 def _read_key_from_bytes(data: bytes) -> str:

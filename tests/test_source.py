@@ -5,7 +5,14 @@ import pytest
 
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
-from sv.source import ensure_source_repo, ensure_source_repos, list_source_skills
+import sv.source as source_module
+from sv.source import (
+    default_runner,
+    ensure_source_repo,
+    ensure_source_repos,
+    list_source_skills,
+    reject_symlinked_source_cache_path,
+)
 
 
 class FakeRunner:
@@ -45,6 +52,65 @@ def test_ensure_source_repo_clones_when_missing(tmp_path: Path):
         ),
     ]
     assert repo_path.parent.exists()
+
+
+def test_default_runner_reports_missing_git_as_sv_error(monkeypatch):
+    def missing_binary(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(source_module.subprocess, "run", missing_binary)
+
+    with pytest.raises(SvError, match="Git is required"):
+        default_runner(["git", "status"])
+
+
+def test_default_runner_reraises_missing_non_git_binary(monkeypatch):
+    def missing_binary(*args, **kwargs):
+        raise FileNotFoundError("custom")
+
+    monkeypatch.setattr(source_module.subprocess, "run", missing_binary)
+
+    with pytest.raises(FileNotFoundError):
+        default_runner(["custom-tool"])
+
+
+def test_ensure_source_repo_rejects_control_characters_in_repo_url(tmp_path: Path):
+    repo_path = tmp_path / ".sv" / "sources" / "default" / "repo"
+    runner = FakeRunner([])
+
+    with pytest.raises(SvError, match="repo cannot contain control characters"):
+        ensure_source_repo("https://example.com/skills.git\x1b[2J", repo_path, runner=runner)
+
+    assert runner.calls == []
+
+
+def test_ensure_source_repo_reports_missing_git_from_runner(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+
+    def runner(args, cwd=None):
+        raise FileNotFoundError("git")
+
+    with pytest.raises(SvError, match="Git is required"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+
+def test_ensure_source_repo_reports_exit_code_without_git_output(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+    runner = FakeRunner(
+        [
+            completed(["git", "--version"], returncode=2),
+        ]
+    )
+
+    with pytest.raises(SvError, match="exit code 2"):
+        ensure_source_repo("https://example.com/skills.git", repo_path, runner=runner)
+
+
+def test_reject_symlinked_source_cache_path_handles_paths_outside_cache(tmp_path: Path):
+    sources_dir = tmp_path / "sources"
+    repo_path = tmp_path / "elsewhere" / "repo"
+
+    reject_symlinked_source_cache_path(repo_path, sources_dir)
 
 
 def test_ensure_source_repo_rejects_option_like_repo_url(tmp_path: Path):

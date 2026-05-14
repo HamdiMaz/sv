@@ -410,11 +410,17 @@ def _replace_tree(
         target.rename(backup_target)
         try:
             temp_target.rename(target)
-        except OSError:
+        except OSError as replace_exc:
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
             if backup_target.exists():
-                backup_target.rename(target)
+                try:
+                    backup_target.rename(target)
+                except OSError as rollback_exc:
+                    raise SvError(
+                        f"Failed to sync skill '{target.name}': {replace_exc} "
+                        f"and rollback failed: {rollback_exc}"
+                    ) from rollback_exc
             raise
         try:
             if after_replace is not None:
@@ -435,8 +441,11 @@ def _replace_tree(
         if backup_target.exists() and not target.exists():
             try:
                 backup_target.rename(target)
-            except OSError:
-                pass
+            except OSError as rollback_exc:
+                raise SvError(
+                    f"Failed to sync skill '{target.name}': {exc} "
+                    f"and rollback failed: {rollback_exc}"
+                ) from rollback_exc
         raise SvError(f"Failed to sync skill '{target.name}': {exc}") from exc
 
 

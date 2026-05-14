@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T041: raised the coverage gate to 95% and added focused coverage for CLI fallbacks, selector edge cases, manifest/source error paths, project rollback failures, and table wrapping.
 - Completed T040: added testing workflow documentation covering release verification, fast local loops, integration and security markers, and coverage reports.
 - Completed T039: split oversized CLI source-command coverage by moving add/list scenarios into focused contract files and removing duplicate sync/update/list/add cases already covered elsewhere.
 - Completed T038: added a parametrized CLI error contract matrix covering malformed configs/manifests, missing or invalid skills, git and Pi launch failures, and unsafe symlink paths without tracebacks or raw control characters.

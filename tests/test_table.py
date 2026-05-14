@@ -344,6 +344,44 @@ def test_format_table_handles_empty_string_cells_while_wrapping():
     assert all(display_width(line) <= 6 for line in output.splitlines())
 
 
+def test_format_table_accepts_column_index_width_overrides():
+    output = format_table(
+        ["A", "B"],
+        [["abcdef", "xy"]],
+        max_widths={0: 3},
+    )
+
+    assert output.splitlines() == [
+        "A    B",
+        "---  --",
+        "abc  xy",
+        "def",
+    ]
+
+
+def test_format_table_replaces_overwide_character_after_current_text():
+    output = format_table(["V"], [["a語b"]], max_widths={"V": 1})
+
+    assert output.splitlines() == [
+        "V",
+        "-",
+        "a",
+        "?",
+        "b",
+    ]
+
+
+def test_format_table_preserves_combining_mark_when_breaking_long_text():
+    output = format_table(["Value"], [["abce\u0301def"]], max_widths={"Value": 4})
+
+    assert output.splitlines() == [
+        "Value",
+        "-----",
+        "abcéd",
+        "ef",
+    ]
+
+
 def test_format_table_treats_zero_or_negative_max_table_width_as_unbounded():
     for max_table_width in (0, -1, -2):
         output = format_table(

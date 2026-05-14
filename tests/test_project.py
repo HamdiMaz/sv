@@ -456,6 +456,108 @@ def test_remove_project_skill_restores_skill_when_backup_cleanup_fails(
     assert_no_partial_sv_dirs(project_skills)
 
 
+def test_remove_project_skill_reports_stale_backup_cleanup_failure(
+    tmp_path: Path, monkeypatch
+):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    skill = project_skills / "alpha"
+    skill.mkdir(parents=True)
+    stale_backup = project_skills / ".alpha.sv-remove-backup"
+    stale_backup.mkdir()
+    original_rmtree = shutil.rmtree
+
+    def fail_stale_backup_cleanup(path, *args, **kwargs):
+        if path == stale_backup:
+            raise OSError("stale cleanup failed")
+        return original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", fail_stale_backup_cleanup)
+
+    with pytest.raises(SvError, match="Failed to remove stale sv backup"):
+        remove_project_skill("alpha", project_skills)
+
+    assert skill.exists()
+    assert stale_backup.exists()
+
+
+def test_remove_project_skill_reports_rename_failure(tmp_path: Path, monkeypatch):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    skill = project_skills / "alpha"
+    skill.mkdir(parents=True)
+    original_rename = Path.rename
+
+    def fail_remove_rename(path, target):
+        if path == skill:
+            raise OSError("rename failed")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_remove_rename)
+
+    with pytest.raises(SvError, match="Failed to remove Pi skill 'alpha'"):
+        remove_project_skill("alpha", project_skills)
+
+    assert skill.exists()
+
+
+def test_remove_project_skill_reports_manifest_failure_when_restore_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    assert add_project_skill(entry, project_skills).status == "added"
+    skill = project_skills / "alpha"
+    backup_target = project_skills / ".alpha.sv-remove-backup"
+    original_rename = Path.rename
+
+    def fail_remove_manifest_entry(project_skills_dir, skill_name):
+        raise SvError("manifest write failed")
+
+    def fail_restore_rename(path, target):
+        if path == backup_target and target == skill:
+            raise OSError("restore failed")
+        return original_rename(path, target)
+
+    monkeypatch.setattr("sv.project.remove_manifest_entry", fail_remove_manifest_entry)
+    monkeypatch.setattr(Path, "rename", fail_restore_rename)
+
+    with pytest.raises(SvError, match="rollback failed"):
+        remove_project_skill("alpha", project_skills)
+
+    assert backup_target.exists()
+    assert not skill.exists()
+
+
+def test_remove_project_skill_reports_cleanup_failure_when_rollback_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    assert add_project_skill(entry, project_skills).status == "added"
+    skill = project_skills / "alpha"
+    backup_target = project_skills / ".alpha.sv-remove-backup"
+    original_rmtree = shutil.rmtree
+    original_rename = Path.rename
+
+    def fail_remove_backup(path, *args, **kwargs):
+        if path == backup_target:
+            raise OSError("backup cleanup failed")
+        return original_rmtree(path, *args, **kwargs)
+
+    def fail_restore_rename(path, target):
+        if path == backup_target and target == skill:
+            raise OSError("restore failed")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(shutil, "rmtree", fail_remove_backup)
+    monkeypatch.setattr(Path, "rename", fail_restore_rename)
+
+    with pytest.raises(SvError, match="cleanup failed .* rollback failed"):
+        remove_project_skill("alpha", project_skills)
+
+    assert backup_target.exists()
+    assert not skill.exists()
+
+
 def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
     with pytest.raises(SvError, match="Pi skill 'missing' was not found"):
         remove_project_skill("missing", tmp_path / "project" / ".pi" / "skills")
@@ -871,3 +973,141 @@ def test_sync_project_skills_reports_no_skills_dir(tmp_path: Path):
     assert result.updated == []
     assert result.skipped == []
     assert result.backfilled == []
+
+
+def test_sync_project_skills_ignores_non_directory_project_entries(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    (project_skills / "README.md").write_text("not a skill\n")
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == []
+    assert result.skipped == []
+    assert result.backfilled == []
+
+
+def test_sync_project_skills_reports_manifest_failure_when_restore_fails(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("local v1\n")
+    backup_target = project_skills / ".managed.sv-sync-backup"
+    original_rename = Path.rename
+
+    def fail_upsert(project_skills_dir, manifest_entry):
+        raise SvError("manifest write failed")
+
+    def fail_restore_rename(path, target):
+        if path == backup_target and target == managed_local:
+            raise OSError("restore failed")
+        return original_rename(path, target)
+
+    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+    monkeypatch.setattr(Path, "rename", fail_restore_rename)
+
+    with pytest.raises(SvError, match="manifest update failed .* rollback failed"):
+        sync_project_skills([entry], project_skills)
+
+    assert backup_target.exists()
+    assert not managed_local.exists()
+
+
+def test_sync_project_skills_restores_backup_when_os_error_happens_after_backup(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("local v1\n")
+    temp_target = project_skills / ".managed.sv-sync-tmp"
+    original_rename = Path.rename
+
+    def fail_temp_rename(path, target):
+        if path == temp_target and target == managed_local:
+            managed_local.mkdir(parents=True)
+            (managed_local / "partial.txt").write_text("partial\n")
+            raise OSError("replace failed")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_temp_rename)
+
+    with pytest.raises(SvError, match="Failed to sync skill 'managed'"):
+        sync_project_skills([entry], project_skills)
+
+    assert (managed_local / "notes.md").read_text() == "local v1\n"
+    assert not (managed_local / "partial.txt").exists()
+    assert_no_partial_sv_dirs(project_skills)
+
+
+def test_sync_project_skills_reports_outer_backup_restore_failure(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("local v1\n")
+    temp_target = project_skills / ".managed.sv-sync-tmp"
+    backup_target = project_skills / ".managed.sv-sync-backup"
+    original_rename = Path.rename
+    original_rmtree = shutil.rmtree
+
+    def fail_temp_and_backup_restore(path, target):
+        if path == temp_target and target == managed_local:
+            managed_local.mkdir(parents=True)
+            (managed_local / "partial.txt").write_text("partial\n")
+            raise OSError("replace failed")
+        if path == backup_target and target == managed_local:
+            raise OSError("restore failed")
+        return original_rename(path, target)
+
+    def fail_after_removing_partial_target(path, *args, **kwargs):
+        if path == managed_local:
+            original_rmtree(path, ignore_errors=kwargs.get("ignore_errors", False))
+            raise OSError("target cleanup failed")
+        return original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "rename", fail_temp_and_backup_restore)
+    monkeypatch.setattr(shutil, "rmtree", fail_after_removing_partial_target)
+
+    with pytest.raises(
+        SvError, match="target cleanup failed.*rollback failed: restore failed"
+    ):
+        sync_project_skills([entry], project_skills)
+
+    assert backup_target.exists()
+    assert not managed_local.exists()
+
+
+def test_sync_project_skills_reports_backup_restore_failure_after_os_error(
+    tmp_path: Path, monkeypatch
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    managed_local = project_skills / "managed"
+    managed_local.mkdir(parents=True)
+    (managed_local / "notes.md").write_text("local v1\n")
+    temp_target = project_skills / ".managed.sv-sync-tmp"
+    backup_target = project_skills / ".managed.sv-sync-backup"
+    original_rename = Path.rename
+
+    def fail_temp_and_backup_restore(path, target):
+        if path == temp_target and target == managed_local:
+            raise OSError("replace failed")
+        if path == backup_target and target == managed_local:
+            raise OSError("restore failed")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_temp_and_backup_restore)
+
+    with pytest.raises(SvError, match="replace failed.*rollback failed: restore failed"):
+        sync_project_skills([entry], project_skills)
+
+    assert backup_target.exists()
+    assert not managed_local.exists()
