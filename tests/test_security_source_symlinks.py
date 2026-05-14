@@ -141,6 +141,40 @@ def test_ensure_source_repos_rejects_symlinked_cache_ancestor_before_git(
     assert (outside_org / "sentinel.txt").read_text() == "outside\n"
 
 
+def test_ensure_source_repos_rejects_symlinked_cache_ancestor_before_git_for_batch(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    paths.sources_dir.mkdir(parents=True)
+    outside_org = tmp_path / "outside-org"
+    outside_org.mkdir()
+    (outside_org / "sentinel.txt").write_text("outside\n")
+    (paths.sources_dir / "Org").symlink_to(outside_org, target_is_directory=True)
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def git_runner(args, cwd=None):
+        calls.append((list(args), cwd))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        ensure_source_repos(
+            [
+                RepoConfig(id="Org/Skills", url="https://example.com/skills.git"),
+                RepoConfig(id="Other/Skills", url="https://example.com/other.git"),
+            ],
+            paths,
+            runner=git_runner,
+        )
+
+    assert calls == []
+    assert (outside_org / "sentinel.txt").read_text() == "outside\n"
+
+
 def test_ensure_source_repo_rejects_symlinked_git_metadata_before_git(
     tmp_path: Path,
 ) -> None:
