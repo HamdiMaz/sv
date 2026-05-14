@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Polished catalog tests for duplicate repo IDs that use equivalent or conflicting source URLs.
 - Polished source-cache safety tests for filesystem inspection failures before any Git process can run.
 - Polished config tests for legacy compatibility helpers, default source cache paths, fallback repo IDs, and TOML special-character escaping.
 - Polished docs tests to keep the testing guide's full release verification commands aligned with the GitHub Actions release-readiness workflow.

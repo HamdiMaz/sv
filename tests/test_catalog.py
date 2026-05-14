@@ -76,6 +76,38 @@ def test_build_source_catalog_ignores_exact_repeated_repo_entries(tmp_path: Path
     ]
 
 
+def test_build_source_catalog_ignores_same_repo_id_with_equivalent_url(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    https_repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    ssh_repo = RepoConfig(id="Org/Skills", url="git@github.com:Org/Skills.git")
+    make_skill(paths.source_repo_for(https_repo.id), "alpha", "Alpha skill.")
+
+    catalog = build_source_catalog([https_repo, ssh_repo], paths)
+
+    assert [(entry.name, entry.repo_id) for entry in catalog] == [
+        ("alpha", "Org/Skills")
+    ]
+
+
+def test_build_source_catalog_rejects_same_repo_id_with_different_urls(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    make_skill(paths.source_repo_for("Org/Skills"), "alpha", "Alpha skill.")
+    first_repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    conflicting_repo = RepoConfig(
+        id="Org/Skills", url="https://github.com/Other/Skills.git"
+    )
+
+    with pytest.raises(
+        SvError,
+        match="Configured source repo id 'Org/Skills' is listed more than once",
+    ):
+        build_source_catalog([first_repo, conflicting_repo], paths)
+
+
 def test_build_source_catalog_ignores_repeated_repo_urls(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
