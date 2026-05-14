@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T038: added a parametrized CLI error contract matrix covering malformed configs/manifests, missing or invalid skills, git and Pi launch failures, and unsafe symlink paths without tracebacks or raw control characters.
 - Completed T037: added a local-git end-to-end smoke test covering repo add/list, list, add, source update, sync, remove, and `sv run` with a fake Pi process runner.
 - Completed T036: expanded catalog tests for missing/invalid source contents, hidden skill directories, ordering, and `SourceSkill` display metadata.
 - Completed T035: expanded `SKILL.md` frontmatter parser coverage for comments, whitespace, colon-containing descriptions, duplicate keys, body delimiters, and empty metadata rejection.
