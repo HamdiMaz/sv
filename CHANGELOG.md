@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Polished test coverage startup by lazy-loading shared CLI helper imports and suppressing the known benign `module-not-measured` warning from collection-time package imports.
 - Added a CLI-level `sv run` regression test proving symlinked project `.pi` directories are rejected before launching Pi.
 - Completed T042: ran the full release-readiness gate (ruff, ty, coverage tests, and build) and confirmed no cleanup changes were needed.
 - Completed T041: raised the coverage gate to 95% and added focused coverage for CLI fallbacks, selector edge cases, manifest/source error paths, project rollback failures, and table wrapping.

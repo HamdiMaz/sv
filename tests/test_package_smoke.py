@@ -2,13 +2,14 @@ from importlib.metadata import version
 from pathlib import Path
 import tomllib
 
-import sv
-import sv.cli
-
 
 def test_importing_package_exposes_version():
+    import sv
+    import sv.cli
+
     assert isinstance(sv.__version__, str)
     assert sv.__version__
+    assert callable(sv.cli.main)
 
 
 def test_console_entry_point_is_sv_cli_main():
@@ -20,5 +21,7 @@ def test_console_entry_point_is_sv_cli_main():
 
 
 def test_declared_package_version_is_public_version():
+    import sv
+
     assert version("sv") == sv.__version__
 

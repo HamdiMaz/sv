@@ -51,3 +51,4 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["sv"]
+disable_warnings = ["module-not-measured"]

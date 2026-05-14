@@ -3,11 +3,13 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import subprocess
+from typing import TYPE_CHECKING
 import unicodedata
 
 import pytest
 
-from sv.cli import SkillChooser, SkillSelector, build_parser, handle, select_skills
+if TYPE_CHECKING:
+    from sv.cli import SkillChooser, SkillSelector
 
 
 def display_width(value: str) -> int:
@@ -68,6 +70,8 @@ def assert_no_partial_sv_dirs(project_skills_dir: Path) -> None:
 
 
 def parse_sv(args: list[str] | tuple[str, ...]) -> Namespace:
+    from sv.cli import build_parser
+
     return build_parser().parse_args(args)
 
 
@@ -79,9 +83,11 @@ def run_sv(
     capsys,
     git_runner=None,
     process_runner=None,
-    skill_selector: SkillSelector = select_skills,
-    skill_chooser: SkillChooser | None = None,
+    skill_selector: "SkillSelector | None" = None,
+    skill_chooser: "SkillChooser | None" = None,
 ) -> SvResult:
+    from sv.cli import handle, select_skills
+
     parsed = args if isinstance(args, Namespace) else parse_sv(args)
     capsys.readouterr()
 
@@ -91,7 +97,7 @@ def run_sv(
         home=home,
         git_runner=git_runner,
         process_runner=process_runner,
-        skill_selector=skill_selector,
+        skill_selector=select_skills if skill_selector is None else skill_selector,
         skill_chooser=skill_chooser,
     )
     captured = capsys.readouterr()
@@ -132,6 +138,8 @@ def make_source_repo(tmp_path: Path, name: str = "skill-source") -> Path:
 
 
 def configure_source(source: Path, project: Path, home: Path) -> None:
+    from sv.cli import build_parser, handle
+
     exit_code = handle(
         build_parser().parse_args(["repo", "add", str(source)]), cwd=project, home=home
     )

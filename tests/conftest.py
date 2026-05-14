@@ -1,7 +1,11 @@
+from typing import TYPE_CHECKING
+
 import pytest
 
-from sv.cli import SkillSelector, select_skills
 from tests.helpers import SvResult, run_sv as execute_sv
+
+if TYPE_CHECKING:
+    from sv.cli import SkillSelector
 
 
 @pytest.fixture
@@ -13,7 +17,7 @@ def run_sv(capsys):
         home,
         git_runner=None,
         process_runner=None,
-        skill_selector: SkillSelector = select_skills,
+        skill_selector: "SkillSelector | None" = None,
         skill_chooser=None,
     ) -> SvResult:
         return execute_sv(
