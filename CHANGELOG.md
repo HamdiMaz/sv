@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Completed T014: verified alias-preservation regression coverage for config rewrites and legacy-qualified `repo:skill` lookup in `tests/test_regressions_source_identity.py`.
 - Added source identity regression coverage to ensure equivalent GitHub source forms (`owner/repo`, HTTPS, and SSH variants) normalize consistently and coalesce catalog entries while preserving aliases.
 - Added alias-preservation regression coverage for config rewrites so add/remove operations keep legacy repo aliases and qualified reference resolution remains valid.
 - Added duplicate-bulk add atomicity regression coverage: interactive `sv add -l` and `sv add --all` now fail fast on duplicate skills and do not copy any skills.
