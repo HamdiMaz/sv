@@ -205,9 +205,19 @@ def _validate_skill_reference(reference: str) -> None:
         repo_id, skill = reference.rsplit(":", 1)
         if not repo_id.strip():
             raise SvError(f"Invalid skill reference {reference!r}. Use repo:skill.")
+        if _contains_control_characters(repo_id):
+            safe_reference = _escape_control_characters(reference)
+            raise SvError(
+                f"Invalid skill reference '{safe_reference}'. "
+                "Repo id cannot contain control characters."
+            )
         normalize_skill_name(skill)
         return
     normalize_skill_name(reference)
+
+
+def _contains_control_characters(value: str) -> bool:
+    return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
 
 
 def _handle_repo(args: argparse.Namespace, paths: SvPaths) -> int:

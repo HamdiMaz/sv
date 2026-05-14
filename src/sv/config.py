@@ -159,7 +159,7 @@ def remove_repo(paths: SvPaths, repo_id: str) -> RepoConfig:
     config = load_config(paths)
     remaining = tuple(repo for repo in config.repos if repo.id != repo_id)
     if len(remaining) == len(config.repos):
-        raise ValueError(f"Repo '{repo_id}' is not configured")
+        raise ValueError(f"Repo {repo_id!r} is not configured")
 
     removed = next(repo for repo in config.repos if repo.id == repo_id)
     _save_config(paths, SvConfig(repos=remaining))

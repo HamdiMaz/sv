@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed qualified `sv add repo:skill` and missing `sv repo remove` error messages to escape control characters from user input before printing.
 - Fixed manifest writes to refuse symlinked temporary manifest files before writing metadata.
 - Fixed `sv run` to refuse symlinked project skill paths before launching Pi.
 - Fixed source cache handling to reject symlinked cache ancestors and symlinked `.git` metadata paths before running Git.

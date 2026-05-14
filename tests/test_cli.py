@@ -165,6 +165,29 @@ def test_add_invalid_skill_name_does_not_touch_source_repo(tmp_path: Path, capsy
     assert "Invalid skill name" in capsys.readouterr().err
 
 
+def test_add_qualified_repo_id_with_control_characters_does_not_touch_source_repo(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    exit_code = handle(
+        parse(["add", "bad\x1b[2J:alpha"]),
+        cwd=project,
+        home=home,
+        git_runner=git_runner,
+    )
+
+    assert exit_code == 1
+    message = capsys.readouterr().err
+    assert "bad\\x1b[2J" in message
+    assert "\x1b" not in message
+
+
 def test_malformed_config_reports_cli_error(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -323,6 +346,23 @@ def test_repo_add_reports_unresolvable_home_without_traceback(tmp_path: Path, ca
     captured = capsys.readouterr()
     assert "error: Could not resolve home directory" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_repo_remove_escapes_control_characters_in_missing_repo(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = handle(
+        parse(["repo", "remove", "missing\x1b[2J"]), cwd=project, home=home
+    )
+
+    assert exit_code == 1
+    message = capsys.readouterr().err
+    assert "missing\\x1b[2J" in message
+    assert "\x1b" not in message
 
 
 def test_repo_remove_updates_config_without_deleting_project_skills(
