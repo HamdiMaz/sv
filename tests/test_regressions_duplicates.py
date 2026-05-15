@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from sv.config import SvPaths, load_config
 from sv.source import default_runner
 from tests.helpers import (
@@ -9,6 +11,9 @@ from tests.helpers import (
     run_git,
     write_source_skill,
 )
+
+
+pytestmark = pytest.mark.integration
 
 
 def test_list_shows_compact_duplicate_rows_with_qualified_references(

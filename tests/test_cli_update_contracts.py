@@ -1,5 +1,7 @@
 import subprocess
 
+import pytest
+
 from sv.source import default_runner
 from tests.helpers import (
     assert_no_raw_control_characters,
@@ -9,6 +11,9 @@ from tests.helpers import (
     run_git,
     write_source_skill,
 )
+
+
+pytestmark = pytest.mark.integration
 
 
 def test_update_updates_sources_and_syncs_project_skills(tmp_path, run_sv):

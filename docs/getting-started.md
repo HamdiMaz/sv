@@ -73,7 +73,7 @@ pi --no-skills --skill .pi/skills <pi args>
 | See source repos | `sv repo list` |
 | Add another source | `sv repo add <owner/repo>` |
 | Remove a source from config | `sv repo remove <repo-id>` |
-| Remove a project skill | `sv remove <skill>` |
+| Remove a project skill | `sv remove find-docs` |
 | Select project skills to remove | `sv remove -l` |
 | Refresh and sync with progress messages | `sv update` |
 

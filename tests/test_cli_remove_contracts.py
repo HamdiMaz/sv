@@ -5,8 +5,6 @@ from tests.helpers import (
     assert_no_partial_sv_dirs,
     assert_no_raw_control_characters,
     assert_no_traceback,
-    configure_source,
-    make_source_repo,
 )
 
 
@@ -122,11 +120,8 @@ def test_remove_interactive_skills_with_no_projects_skills_does_nothing_without_
 
 
 def test_remove_interactive_removes_selected_project_skills_without_source_repo(tmp_path: Path, run_sv):
-    source = make_source_repo(tmp_path, "source-for-remove")
     home = tmp_path / "home"
     project = tmp_path / "project"
-    configure_source(source, project, home)
-
     project_skills = project / ".pi" / "skills"
     local = project_skills / "gamma"
     local.mkdir(parents=True)

@@ -33,3 +33,12 @@ jobs:
 
       - name: Build package
         run: uv build
+
+      - name: Smoke test built wheel
+        run: |
+          tmp_venv="$(mktemp -d)"
+          trap 'rm -rf "$tmp_venv"' EXIT
+          python -m venv "$tmp_venv"
+          uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index dist/sv-0.1.0-py3-none-any.whl
+          "$tmp_venv/bin/sv" --help
+          "$tmp_venv/bin/python" -c 'import sv; assert sv.__version__ == "0.1.0", sv.__version__'

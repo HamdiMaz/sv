@@ -2,61 +2,13 @@
 
 ## Unreleased
 
-- Polished `sv add -l` CLI contract tests to assert non-TTY interactive selection fails safely without project mutation.
-- Polished wrapped CLI output tests for one-column terminals containing overwide Unicode characters and combining marks.
-- Polished security-path tests for invalid `sv repo add` inputs, ensuring they fail without mutating existing config or project files.
-- Polished catalog tests for duplicate repo IDs that use equivalent or conflicting source URLs.
-- Polished source-cache safety tests for filesystem inspection failures before any Git process can run.
-- Polished config tests for legacy compatibility helpers, default source cache paths, fallback repo IDs, and TOML special-character escaping.
-- Polished docs tests to keep the testing guide's full release verification commands aligned with the GitHub Actions release-readiness workflow.
-- Polished docs tests to validate every local Markdown link in README/docs points to an existing in-project file.
-- Polished test coverage startup by lazy-loading shared CLI helper imports and suppressing the known benign `module-not-measured` warning from collection-time package imports.
-- Added a CLI-level `sv run` regression test proving symlinked project `.pi` directories are rejected before launching Pi.
-- Completed T042: ran the full release-readiness gate (ruff, ty, coverage tests, and build) and confirmed no cleanup changes were needed.
-- Completed T041: raised the coverage gate to 95% and added focused coverage for CLI fallbacks, selector edge cases, manifest/source error paths, project rollback failures, and table wrapping.
-- Completed T040: added testing workflow documentation covering release verification, fast local loops, integration and security markers, and coverage reports.
-- Completed T039: split oversized CLI source-command coverage by moving add/list scenarios into focused contract files and removing duplicate sync/update/list/add cases already covered elsewhere.
-- Completed T038: added a parametrized CLI error contract matrix covering malformed configs/manifests, missing or invalid skills, git and Pi launch failures, and unsafe symlink paths without tracebacks or raw control characters.
-- Completed T037: added a local-git end-to-end smoke test covering repo add/list, list, add, source update, sync, remove, and `sv run` with a fake Pi process runner.
-- Completed T036: expanded catalog tests for missing/invalid source contents, hidden skill directories, ordering, and `SourceSkill` display metadata.
-- Completed T035: expanded `SKILL.md` frontmatter parser coverage for comments, whitespace, colon-containing descriptions, duplicate keys, body delimiters, and empty metadata rejection.
-- Completed `T032`: added selector interaction-loop tests with fake TTY streams and `_read_key` injection for first/third selection, cancel, and empty enter, including cursor restoration verification on normal and failure paths.
-- Completed T033: expanded repo normalization and repo-id parser matrix tests in `tests/test_config.py` to cover local absolute/missing path resolution and shared invalid-input behavior for `normalize_repo` and `derive_repo_id`.
-- Completed T034: added config validation and alias parsing edge-case tests in `tests/test_config.py`, including malformed `repos` structures and TOML escaping behavior.
-- Added `tests/test_selector.py` key-decoding coverage for all supported navigation, selection, cancel, EOF, and malformed-escape inputs (`T031`).
-- Completed T030: expanded `tests/test_table.py` with additional table-rendering edge-case coverage for multi-wide symbols, sparse/extra rows under tight widths, and zero/negative width behavior with Unicode content.
-- Completed T029: added `tests/test_cli_run_contracts.py` to lock `sv run` command contracts (argument forwarding, launch failures, and unsafe path rejection).
-- Completed T028: added `tests/test_cli_update_contracts.py` to lock `sv update` progress output and source-refresh failure behavior (including user-facing errors and sync prevention).
-- Added `tests/test_cli_sync_contracts.py` to lock `sv sync` contracts for missing `.pi/skills`, managed updates, source-missing, legacy backfill, ambiguous legacy, and local-only skip behavior.
-- Completed T026: added `tests/test_cli_remove_contracts.py` to lock remove command validation, interactive behavior, and manifest updates.
-
-- Completed T024: added `tests/test_cli_add_contracts.py` to lock `sv add` validation failure behavior for missing skills, invalid skill names, control-character references, and invalid flag combinations.
-- Completed T025: added `sv add` existing-origin contract tests for same-origin reuse, cross-origin conflict guidance, and unknown-origin replacement-safe messaging in `tests/test_cli_add_contracts.py`.
-- Completed T023: added `tests/test_cli_list_contracts.py` to lock `sv list` empty-config, empty-catalog, invalid/unreadable skill, and terminal-width contract behavior.
-- Completed T022: completed sync rollback coverage for stale temp/backup directory cleanup on success and failure paths, and for managed updates followed by local-only skip behavior in `tests/test_project.py`.
-- Completed T021: completed remove rollback coverage with tests for stale `.sv-remove-backup` cleanup on successful removal and restore behavior when backup cleanup fails in `tests/test_project.py`.
-- Completed T020: extended add rollback coverage in `tests/test_project.py` to assert `.sv-add-tmp` cleanup on failures and to verify stale add temp directories are cleaned before successful copy.
-- Completed T019: added manifest atomic-write regression coverage for deterministic ordering, empty-save cleanup, empty-save deletion failures, and invalid-parent path failures in `tests/test_manifest.py`.
-- Completed T015: added `tests/test_security_paths.py` with security-path traversal coverage for hostile skill names and repo IDs, validating SvError behavior and no filesystem mutation on validation failures.
-- Completed T016: added `tests/test_security_project_symlinks.py` with project-side symlink safety coverage for add/remove/list/sync and run paths, including symlinked `.pi`, `.pi/skills`, and project skill directories.
-- Completed T017: expanded `tests/test_security_source_symlinks.py` with stronger source-side symlink coverage, including explicit assertions that symlinked cache and git paths fail before any git runner calls and do not mutate linked outside sentinel files. Coverage still includes repo cache paths and ancestors, git metadata paths, skills roots, skill directories, SKILL.md files, and symlinked source tree entries via `ensure_source_repo`, `ensure_source_repos`, `build_source_catalog`, `parse_skill_file`, and `add_project_skill`. Added a follow-up multi-repo batch-guard test that `ensure_source_repos` halts before any git calls when any configured cache ancestor is symlinked.
-- Completed T018: expanded `tests/test_security_control_characters.py` with a broader control-character injection matrix for table output, selector labels, CLI errors, add-result and sync-result paths, plus requested-source and ambiguous-skip output cases.
-- Added a direct `ensure_source_repo` ancestor-refusal test for source-cache traversal paths, asserting no git calls occur before validation when a symlinked ancestor is detected.
-- Expanded project symlink security coverage to assert symlinked `.pi` handling for `sync_project_skills` and `sv run` through symlinked `project/.pi` and `project/.pi/skills` paths, with sentinel files proving no outside mutation.
-- Completed T014: verified alias-preservation regression coverage for config rewrites and legacy-qualified `repo:skill` lookup in `tests/test_regressions_source_identity.py`.
-- Added source identity regression coverage to ensure equivalent GitHub source forms (`owner/repo`, HTTPS, and SSH variants) normalize consistently and coalesce catalog entries while preserving aliases.
-- Added alias-preservation regression coverage for config rewrites so add/remove operations keep legacy repo aliases and qualified reference resolution remains valid.
-- Added duplicate-bulk add atomicity regression coverage: interactive `sv add -l` and `sv add --all` now fail fast on duplicate skills and do not copy any skills.
-- Added docs integrity tests verifying local README documentation links and top-level headings in `docs/*.md` files.
-- Added docs command parsing tests to ensure documented `sv` commands in README/docs code blocks parse via `build_parser()` (including common examples and explicit non-existent command checks).
-- Added CLI help smoke tests for documented top-level and nested commands (`--help` output for `sv`, `add`, `remove`, `repo*`, `run`, `sync`, and `update`) without filesystem side effects.
-- Added package smoke tests for import/version checks, console-script wiring, and distribution metadata version consistency.
-- Added shared CLI test helpers (`parse_sv`, `run_sv`) for consistent parser and command execution assertions in tests.
-- Centralized git/source helper utilities in `tests/helpers.py` and switched `tests/test_cli_source_commands.py` to use shared helpers for local source/repo test setup.
-- Added shared output and filesystem assertion helpers (`assert_no_traceback`, `assert_no_raw_control_characters`, `assert_no_partial_sv_dirs`) and migrated existing CLI/project tests to use them.
-- Added GitHub Actions release-readiness workflow for pushes and PRs running lint, type checks, coverage tests, and package build.
-- Made the CI workflow install dependencies with `uv sync --locked --dev` for reproducible release checks.
-- Added coverage defaults (`pytest-cov` branch coverage + marker registration for `integration` and `security`) with an initial 85% fail-under gate.
+- Added CI release-readiness checks for linting, type checking, coverage, package builds, and built-wheel smoke validation.
+- Added a 95% coverage gate with documented full-release, fast local, integration, and security test commands.
+- Expanded CLI contract tests across add, list, remove, sync, update, run, help, package, error, and local-Git user-journey paths.
+- Added documentation and example validation for README/docs links, documented `sv` commands, and testing-guide/CI alignment.
+- Added security regression coverage for hostile paths, symlinks, terminal control-character escaping, and Git/Pi process error output.
+- Fixed `sv add` and `sv remove` success messages to escape control characters in rendered project paths.
+- Added rollback and atomic filesystem coverage for add, remove, sync, and manifest-write failure paths.
 - Reduced visual repetition in duplicate-skill UIs by showing each duplicate skill name only once in `sv list`'s duplicate section and removing the redundant skill column from the `sv add <skill>` source-choice table.
 - Grouped duplicate skill names into a single `N sources` row in the main `sv list` table and added descriptions to the duplicate-source section so source choices are clearer without visually repeating skills.
 - Kept `sv list` compact when duplicate skill names exist by moving qualified `Add as` values into a separate duplicate-name section.
@@ -82,8 +34,6 @@
 - Improved `sv add --help` with clearer positional argument guidance and examples for plain, qualified, interactive, and all-skill adds.
 - Added `docs/output.md` explaining table columns, wrapping behavior, duplicate skill names, and exact `repo:skill` references.
 - Improved `sv list` output with qualified `Add as` references, duplicate-name guidance, wrapped table cells, and safer control-character escaping.
-- Added `tests/test_regressions_duplicates.py` regression coverage for `sv list` duplicate-skill UX, including compact main table behavior and duplicate qualified references.
-- Added duplicate add regression coverage for non-interactive duplicate-add failures, chooser-based source selection, and qualified `repo:skill` installs with no accidental partial copies.
 - Fixed `sv add -l` to reject selections containing multiple sources for the same skill before copying any project files.
 - Documented the daily CLI workflow, duplicate skill handling, table columns, and update behavior in `docs/usage.md` and linked it from the README.
 - Fixed qualified `sv add repo:skill` and missing `sv repo remove` error messages to escape control characters from user input before printing.

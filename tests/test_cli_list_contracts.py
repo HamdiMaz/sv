@@ -137,7 +137,6 @@ def test_list_output_respects_terminal_width_when_wrapping(
     assert all(display_width(line) <= columns for line in result.stdout.splitlines())
 
 
-@pytest.mark.integration
 def test_list_and_add_coalesce_equivalent_repo_aliases(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"

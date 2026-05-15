@@ -30,6 +30,12 @@ FULL_RELEASE_COMMANDS = [
     "uv run ty check src tests",
     "uv run pytest --cov=sv --cov-report=term-missing",
     "uv build",
+    'tmp_venv="$(mktemp -d)"',
+    "trap 'rm -rf \"$tmp_venv\"' EXIT",
+    'python -m venv "$tmp_venv"',
+    'uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index dist/sv-0.1.0-py3-none-any.whl',
+    '"$tmp_venv/bin/sv" --help',
+    '"$tmp_venv/bin/python" -c \'import sv; assert sv.__version__ == "0.1.0", sv.__version__\'',
 ]
 
 COMMON_DOC_COMMAND_EXAMPLES = [
@@ -38,7 +44,7 @@ COMMON_DOC_COMMAND_EXAMPLES = [
     "sv add repo:skill",
     "sv add -l",
     "sv add --all",
-    "sv remove",
+    "sv remove find-docs",
     "sv sync",
     "sv update",
     "sv run -- --model fast",
@@ -133,19 +139,39 @@ def _fenced_code_block_after_heading(path: Path, heading: str) -> list[str]:
 def _workflow_release_run_commands() -> list[str]:
     release_commands: list[str] = []
     current_step_name = ""
+    lines = WORKFLOW_PATH.read_text(encoding="utf-8").splitlines()
+    index = 0
 
-    for line in WORKFLOW_PATH.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
+    while index < len(lines):
+        stripped = lines[index].strip()
         if stripped.startswith("- name:"):
             current_step_name = stripped.removeprefix("- name:").strip()
+            index += 1
             continue
         if not stripped.startswith("run:"):
+            index += 1
             continue
 
         normalized_name = current_step_name.lower()
         if normalized_name.startswith("set up") or "install" in normalized_name:
+            index += 1
             continue
-        release_commands.append(stripped.removeprefix("run:").strip())
+
+        run_value = stripped.removeprefix("run:").strip()
+        if run_value != "|":
+            release_commands.append(run_value)
+            index += 1
+            continue
+
+        index += 1
+        while index < len(lines):
+            block_line = lines[index]
+            block_stripped = block_line.strip()
+            if block_stripped.startswith("- name:"):
+                break
+            if block_stripped:
+                release_commands.append(block_stripped)
+            index += 1
 
     return release_commands
 

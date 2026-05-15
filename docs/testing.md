@@ -11,6 +11,12 @@ uv run ruff check .
 uv run ty check src tests
 uv run pytest --cov=sv --cov-report=term-missing
 uv build
+tmp_venv="$(mktemp -d)"
+trap 'rm -rf "$tmp_venv"' EXIT
+python -m venv "$tmp_venv"
+uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index dist/sv-0.1.0-py3-none-any.whl
+"$tmp_venv/bin/sv" --help
+"$tmp_venv/bin/python" -c 'import sv; assert sv.__version__ == "0.1.0", sv.__version__'
 ```
 
 `pytest` is configured in `pyproject.toml` to collect coverage for `sv`, show missing lines in the terminal report, and enforce the current coverage threshold.

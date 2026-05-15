@@ -24,4 +24,3 @@ def test_declared_package_version_is_public_version():
     import sv
 
     assert version("sv") == sv.__version__
-

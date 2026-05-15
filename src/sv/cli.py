@@ -412,6 +412,10 @@ def _escape_control_characters(value: str) -> str:
     return "".join(escaped)
 
 
+def _escape_output_path(path: Path) -> str:
+    return _escape_control_characters(str(path))
+
+
 def _handle_list(catalog: Sequence[SourceSkill]) -> int:
     if not catalog:
         print("No valid skills found in configured source repos.")
@@ -567,9 +571,10 @@ def _print_add_result(result: AddSkillResult) -> None:
         if result.existing_repo_id
         else None
     )
+    target = _escape_output_path(result.target)
     source = f" from {requested_repo}" if requested_repo else ""
     if result.status == "exists":
-        message = f"Pi skill '{result.skill}' already exists at {result.target}"
+        message = f"Pi skill '{result.skill}' already exists at {target}"
         if existing_repo and requested_repo == existing_repo:
             message += f" from {existing_repo}."
         elif existing_repo and requested_repo:
@@ -585,7 +590,7 @@ def _print_add_result(result: AddSkillResult) -> None:
         print(message)
         return
 
-    print(f"Added Pi skill '{result.skill}'{source} to {result.target}")
+    print(f"Added Pi skill '{result.skill}'{source} to {target}")
 
 
 def _handle_remove(skill: str, cwd: Path, adapter: PiAdapter) -> int:
@@ -615,7 +620,8 @@ def _handle_remove_interactive(
 
 
 def _print_remove_result(result: RemoveSkillResult) -> None:
-    print(f"Removed Pi skill '{result.skill}' from {result.target}")
+    target = _escape_output_path(result.target)
+    print(f"Removed Pi skill '{result.skill}' from {target}")
 
 
 def _handle_sync(catalog: Sequence[SourceSkill], cwd: Path, adapter: PiAdapter) -> int:
