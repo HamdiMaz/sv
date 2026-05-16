@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed `sv repo add --skills-path` for already-configured repos to merge new bounded discovery roots, and marked the explicit `--skills-path` PLAN alignment review item fixed.
 - Marked the materialize-selected-folders PLAN alignment review item fixed after verifying selected-folder-only GitHub API streaming and materialization quota coverage.
 - Marked legacy Pi manifest migration PLAN alignment fixed after adding subdirectory sync regression coverage for repo-root legacy manifest reads and canonical manifest writes.
 - Fixed `sv run` from Git subdirectories to validate and pass the detected repository root's Pi skills directory to Pi.

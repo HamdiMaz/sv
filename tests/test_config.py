@@ -812,6 +812,46 @@ def test_remove_repo_does_not_remove_canonical_repo_by_alias(tmp_path: Path):
     )
 
 
+def test_add_repo_existing_repo_merges_new_skills_paths(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+
+    first = add_repo(paths, "Org/Skills")
+    second = add_repo(
+        paths,
+        "https://github.com/Org/Skills.git",
+        skills_paths=("packages/agents/pi/skills", "tools/skills"),
+    )
+    duplicate_path = add_repo(
+        paths,
+        "Org/Skills",
+        skills_paths=("tools/skills", "nested/skills"),
+    )
+    no_new_path = add_repo(paths, "Org/Skills", skills_paths=("nested/skills",))
+
+    assert first.status == "added"
+    assert second.status == "updated"
+    assert duplicate_path.status == "updated"
+    assert no_new_path.status == "exists"
+    assert load_config(paths).repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            skills_paths=(
+                "packages/agents/pi/skills",
+                "tools/skills",
+                "nested/skills",
+            ),
+        ),
+    )
+    assert paths.config_file.read_text() == (
+        "schema_version = 1\n"
+        "[[repos]]\n"
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'skills_paths = ["packages/agents/pi/skills", "tools/skills", "nested/skills"]\n'
+    )
+
+
 def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
 

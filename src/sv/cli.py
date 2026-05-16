@@ -705,6 +705,8 @@ def _print_repo_change_result(result: RepoChangeResult) -> None:
     repo_url = _escape_control_characters(result.repo.url)
     if result.status == "exists":
         print(f"Repo {repo_id} is already configured.")
+    elif result.status == "updated":
+        print(f"Updated repo {repo_id} ({repo_url})")
     else:
         print(f"Added repo {repo_id} ({repo_url})")
 

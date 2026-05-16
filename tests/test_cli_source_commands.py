@@ -59,6 +59,35 @@ def test_repo_add_accepts_repeated_skills_paths_in_order_without_duplicates(
     assert "Added repo owner/repo" in capsys.readouterr().out
 
 
+def test_repo_add_existing_repo_appends_new_skills_paths(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    first = handle(parse(["repo", "add", "owner/repo"]), cwd=project, home=home)
+    capsys.readouterr()
+    second = handle(
+        parse(
+            [
+                "repo",
+                "add",
+                "https://github.com/owner/repo.git",
+                "--skills-path",
+                "packages/agents/pi/skills",
+            ]
+        ),
+        cwd=project,
+        home=home,
+    )
+
+    assert first == 0
+    assert second == 0
+    assert load_config(SvPaths.from_home(home)).repos[0].skills_paths == (
+        "packages/agents/pi/skills",
+    )
+    assert "Updated repo owner/repo" in capsys.readouterr().out
+
+
 def test_repo_add_rejects_invalid_skills_path_with_helpful_error(
     tmp_path: Path, capsys
 ):

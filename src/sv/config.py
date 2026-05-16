@@ -182,9 +182,18 @@ def add_repo(
         config = SvConfig(repos=())
 
     repo_key = repo_source_key(repo_config.url)
-    for existing in config.repos:
+    for index, existing in enumerate(config.repos):
         if existing.id == repo_config.id or repo_source_key(existing.url) == repo_key:
-            return RepoChangeResult(repo=existing, status="exists")
+            merged_skills_paths = _append_unique(
+                existing.skills_paths, repo_config.skills_paths
+            )
+            if merged_skills_paths == existing.skills_paths:
+                return RepoChangeResult(repo=existing, status="exists")
+            updated = replace(existing, skills_paths=merged_skills_paths)
+            repos = list(config.repos)
+            repos[index] = updated
+            _save_config(paths, SvConfig(repos=tuple(repos)))
+            return RepoChangeResult(repo=updated, status="updated")
 
     _save_config(paths, SvConfig(repos=(*config.repos, repo_config)))
     return RepoChangeResult(repo=repo_config, status="added")
