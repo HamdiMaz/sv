@@ -110,6 +110,44 @@ def test_sync_from_git_subdirectory_targets_repo_root(tmp_path, run_sv):
     assert load_manifest(project / ".pi" / "skills")["alpha"].target_path == ".pi/skills/alpha"
 
 
+def test_sync_from_git_subdirectory_migrates_legacy_pi_manifest(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    nested = project / "nested" / "work"
+    nested.mkdir(parents=True)
+    run_git(["init"], project)
+    configure_source(source, project, home)
+    repo_id = load_config(SvPaths.from_home(home)).repos[0].id
+    project_skills = project / ".pi" / "skills"
+    legacy_skill = project_skills / "alpha"
+    legacy_skill.mkdir(parents=True)
+    (legacy_skill / "notes.md").write_text("alpha legacy\n")
+    (project_skills / ".sv-manifest.toml").write_text(
+        "[[skills]]\n"
+        'name = "alpha"\n'
+        f'repo_id = "{repo_id}"\n'
+        f'repo_url = "{source}"\n'
+        'description = "Alpha skill."\n',
+        encoding="utf-8",
+    )
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    result = run_sv(["sync"], cwd=nested, home=home, git_runner=default_runner)
+
+    _assert_sync_success(result)
+    assert "Synced Pi skill 'alpha'." in result.stdout
+    assert (legacy_skill / "notes.md").read_text() == "alpha v2\n"
+    assert (project / ".sv" / "manifest.toml").is_file()
+    assert not (nested / ".pi").exists()
+    assert not (nested / ".sv").exists()
+    manifest_entry = load_manifest(project_skills)["alpha"]
+    assert manifest_entry.repo_id == repo_id
+    assert manifest_entry.target_path == ".pi/skills/alpha"
+
+
 def test_sync_replaces_locally_modified_managed_skill_and_clears_state(tmp_path, run_sv):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
