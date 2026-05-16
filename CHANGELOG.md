@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added regression coverage for the `sv add -l` picker to keep its checkbox rows aligned as Skill/Source/Description columns.
 - Marked the global source manifest PLAN alignment item fixed after verifying refresh state records backend and index-hash metadata.
 - Fixed `sv add -l` picker labels to include an aligned Skill, Source, and Description header and rows in the checkbox selector.
 - Fixed duplicate `sv add <skill>` source-choice formatting to remove the legacy numbered-row option and keep TTY resolution checkbox-only.

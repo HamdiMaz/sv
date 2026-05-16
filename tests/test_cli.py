@@ -1309,6 +1309,54 @@ def test_add_all_and_interactive_report_empty_catalog(tmp_path: Path, capsys):
     assert output.count("No valid skills found in configured source repos.") == 2
 
 
+def test_add_interactive_picker_uses_aligned_skill_source_description_labels(
+    tmp_path: Path,
+):
+    short = _source_skill(tmp_path, "source-a", repo_id="Org/A")
+    long_source = tmp_path / "source-b"
+    long_skill_dir = long_source / "skills" / "longer-name"
+    long_skill_dir.mkdir(parents=True)
+    long = SourceSkill(
+        name="longer-name",
+        description="Longer skill.",
+        repo_id="Org/Longer",
+        repo_url="https://github.com/Org/Longer.git",
+        repo_path=long_source,
+        source_path=long_skill_dir,
+    )
+    calls = []
+
+    def capture_selector(skills, **kwargs):
+        label = kwargs["item_label"]
+        calls.append(
+            (
+                skills,
+                kwargs["header_label"],
+                [label(skill) for skill in skills],
+            )
+        )
+        return []
+
+    exit_code = cli_module._handle_add_interactive(
+        [short, long],
+        cwd=tmp_path / "project",
+        adapter=cli_module.PiAdapter(),
+        skill_selector=capture_selector,
+    )
+
+    assert exit_code == 0
+    assert calls
+    skills, header, labels = calls[0]
+    assert skills == [short, long]
+    assert header == "Skill        Source      Description"
+    assert labels == [
+        "alpha        Org/A       Alpha skill.",
+        "longer-name  Org/Longer  Longer skill.",
+    ]
+    assert labels[0].index("Org/A") == labels[1].index("Org/Longer")
+    assert labels[0].index("Alpha skill.") == labels[1].index("Longer skill.")
+
+
 def test_print_add_result_existing_without_recorded_origin_mentions_requested_repo(
     tmp_path: Path, capsys
 ):
