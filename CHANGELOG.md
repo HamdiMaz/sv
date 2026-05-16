@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Documented `sv search` ranked/fuzzy behavior in the command reference and marked the PLAN alignment review item fixed.
 - Marked the README generated table PLAN alignment review item fixed after verifying marker-only README regeneration coverage.
 - Marked the orphan tracking PLAN alignment review item fixed after adding update-from-subdirectory regression coverage for root manifest orphaning and reattachment.
 - Marked the bounded generic discovery PLAN alignment review item fixed after verifying default and configured discovery roots are covered.

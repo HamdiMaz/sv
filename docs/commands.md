@@ -7,6 +7,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | Command | Use when | Notes |
 | --- | --- | --- |
 | `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values, showing each duplicate skill name once per group. |
+| `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser so Enter can show details. |
 | `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
 | `sv add <repo>:<skill>` | Multiple repos provide the same skill name. | Copy the exact value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Use Space to select and Enter to confirm. |
@@ -37,6 +38,16 @@ schema_version = 1
 include_paths = ["skills", "packages/agents/pi/skills"]
 exclude_paths = ["skills/drafts"]
 ```
+
+## Searching source skills
+
+Use `sv search <query>` when you know part of a skill's purpose, source repo, or path but not the exact skill name:
+
+```bash
+sv search find-docs
+```
+
+Search is case-insensitive across skill name, description, repo, and source path. It uses lightweight fuzzy matching for skill names, repo IDs, aliases, and source paths, while descriptions match by text substring. In non-interactive output, matching skills are sorted by rank. In an interactive terminal, search opens the same read-only browser used by `sv list`, with `/` filtering and Enter for details.
 
 ## Duplicate skill names
 

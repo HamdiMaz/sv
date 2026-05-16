@@ -167,7 +167,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Lightweight backend order | Fixed (FIXED) | `source_backends_for_repo()` now keeps GitHub API backends first even when the local cache path already exists, so later refreshes still try `gh api -> HTTPS -> Git`. |
 | Bounded generic discovery | Fixed (FIXED) | Default bounded roots are limited to `skills/` and direct `*/skills/` folders, configured `--skills-path` roots are included, and deeper unconfigured skill trees are excluded with regression coverage. |
 | Materialize selected folders only | Fixed (FIXED) | GitHub API materialization now streams selected-folder files into an operation temporary directory with file-count, depth, entry, and total-byte limits; local materialization is also quota guarded. |
-| `sv search` | Implemented | Non-TTY ranked output exists; TTY browser path exists. |
+| `sv search` | Implemented (FIXED) | Non-TTY ranked output exists, TTY browser path exists, and command reference docs now cover ranked/fuzzy search behavior. |
 | First-run config behavior | Fixed (FIXED) | Missing or schema-only config non-TTY errors; TTY prompt is pluggable; explicit `repos = []` remains an intentional empty-source config. |
 | Update vs sync semantics | Fixed (FIXED) | Hash/orphan logic exists, and the trusted-source/index-hash skip model is documented for `sv update` and `sv sync`. |
 | Orphan tracking | Fixed (FIXED) | Root/cwd targeting is fixed, and update-from-subdirectory regression coverage verifies orphan state is written to the root manifest and clears when the source reappears. |

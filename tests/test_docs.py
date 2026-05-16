@@ -51,6 +51,7 @@ COMMON_DOC_COMMAND_EXAMPLES = [
     "sv repo add HamdiMaz/Skills",
     "sv repo list",
     "sv repo remove HamdiMaz/Skills",
+    "sv search find-docs",
 ]
 
 
@@ -242,6 +243,16 @@ def test_documented_sv_commands_parse(document_path, line_number, command):
 @pytest.mark.parametrize("command", COMMON_DOC_COMMAND_EXAMPLES)
 def test_common_documented_sv_command_examples_parse(command):
     _parse_sv_command(command)
+
+
+def test_command_reference_documents_search():
+    command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")
+
+    assert "`sv search <query>`" in command_reference
+    assert "ranked" in command_reference
+    assert "name, description, repo, and source path" in command_reference
+    assert "fuzzy matching for skill names, repo IDs, aliases, and source paths" in command_reference
+    assert "descriptions match by text substring" in command_reference
 
 
 def test_no_documented_removed_command_parses(capsys):
