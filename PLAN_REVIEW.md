@@ -161,7 +161,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Explicit `--skills-path` | Fixed (FIXED) | Config validation rejects unsafe paths, and adding `--skills-path` to an already configured repo now merges the new bounded discovery roots instead of ignoring them. |
 | `.sv/index.toml` parser/writer | Implemented | Duplicate names with paths are supported. |
 | `sv index` scanner | Fixed (FIXED) | Recursive scanner supports repeatable `--include`/`--exclude` path flags plus `.sv/index-config.toml` defaults, with tests covering CLI/config integration and scan filtering. |
-| README generated table | Implemented | Marker-only updates are present. |
+| README generated table | Fixed (FIXED) | Marker-only updates are present and covered, preserving user README content outside sv markers while regenerating only the skill table. |
 | `sv init` | Implemented (FIXED) | Nested folder initialization inside an existing worktree now creates a real, detectable skill-vault Git repository; regression tests cover both init and status detection. |
 | Vault mode targeting | Fixed (FIXED) | Root-vault add/remove/update/sync target the vault `skills/` directory, nested init/context detection is fixed, and regression coverage verifies vault targeting from subdirectories plus README/index refreshes. |
 | Lightweight backend order | Fixed (FIXED) | `source_backends_for_repo()` now keeps GitHub API backends first even when the local cache path already exists, so later refreshes still try `gh api -> HTTPS -> Git`. |

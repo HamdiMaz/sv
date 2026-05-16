@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Marked the README generated table PLAN alignment review item fixed after verifying marker-only README regeneration coverage.
 - Marked the orphan tracking PLAN alignment review item fixed after adding update-from-subdirectory regression coverage for root manifest orphaning and reattachment.
 - Marked the bounded generic discovery PLAN alignment review item fixed after verifying default and configured discovery roots are covered.
 - Marked the update-vs-sync PLAN alignment review item fixed after verifying the trusted-source/index-hash skip model is documented for both commands.
