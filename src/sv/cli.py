@@ -2307,6 +2307,8 @@ def _handle_remove_interactive(
         skill_selector,
         skills,
         item_label=lambda skill: _skill_removal_label(entries_by_name[skill]),
+        item_columns=lambda skill: _skill_removal_columns(entries_by_name[skill]),
+        header_columns=["Skill", "Target", "Source/Status"],
     )
     if not selected_skills:
         print("No skills selected.")
@@ -2345,10 +2347,16 @@ def _context_target_kind(context: LocalContext) -> str:
 
 
 def _skill_removal_label(entry: ManifestEntry) -> str:
-    name = _escape_control_characters(entry.name)
-    target = _escape_control_characters(entry.target_path or "")
-    source_status = _removal_source_status(entry)
+    name, target, source_status = _skill_removal_columns(entry)
     return f"Skill: {name} | Target: {target} | Source/Status: {source_status}"
+
+
+def _skill_removal_columns(entry: ManifestEntry) -> list[str]:
+    return [
+        _escape_control_characters(entry.name),
+        _escape_control_characters(entry.target_path or ""),
+        _removal_source_status(entry),
+    ]
 
 
 def _removal_source_status(entry: ManifestEntry) -> str:

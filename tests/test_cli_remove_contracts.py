@@ -359,11 +359,12 @@ def test_remove_interactive_lists_managed_rows_and_ignores_unmanaged(tmp_path: P
 
     assert result.exit_code == 0
     assert selector_calls[0][0] == ["alpha"]
-    label = selector_calls[0][1]["item_label"]("alpha")
-    assert "Skill" in label
-    assert "Target" in label
-    assert "Source/Status" in label
-    assert ".pi/skills/alpha" in label
-    assert "orphan" in label
+    kwargs = selector_calls[0][1]
+    assert kwargs["header_columns"] == ["Skill", "Target", "Source/Status"]
+    assert kwargs["item_columns"]("alpha") == [
+        "alpha",
+        ".pi/skills/alpha",
+        "Org/Skills:skills/alpha (orphan)",
+    ]
     assert not managed.exists()
     assert manual.exists()

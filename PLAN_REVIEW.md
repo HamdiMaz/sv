@@ -175,7 +175,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Duplicate `sv add <skill>` resolution | Implemented (FIXED) | Non-TTY choices exist; TTY duplicate source selection uses the checkbox picker and source-choice tables no longer support numeric row prefixes. |
 | `sv add -l` picker | Fixed (FIXED) | Uses checkbox selector with structured Skill/Source/Description columns and aligned headers/rows instead of an unaligned single-column label list. |
 | `sv add --all --repo` | Partially implemented | Repo filter exists; duplicate TTY resolution missing. |
-| Managed removal flows | Mostly implemented | Root/cwd issue affects normal project removal from subdirs. |
+| Managed removal flows | Fixed (FIXED) | Root/cwd targeting is covered, and `sv remove -l` now uses structured Skill/Target/Source-Status picker columns for the managed-removal TTY flow. |
 | `sv repo -l` and `svx` | Implemented | Scripts/help metadata added. |
 | TTY list/search/repo browser | Implemented (FIXED) | Read-only table browser exists, the multi-select picker uses aligned Skill/Source/Description rows, and duplicate source choosing now uses the same aligned picker UX. |
 
