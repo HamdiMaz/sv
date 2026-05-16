@@ -5,6 +5,7 @@ from pathlib import Path
 
 from sv.errors import SvError
 from sv.project import normalize_skill_name
+from sv.terminal import escape_terminal_controls
 
 
 class InvalidSkillError(SvError):
@@ -34,6 +35,10 @@ def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata
             f"Failed to read SKILL.md for skill '{expected_folder}': {exc}"
         ) from exc
 
+    return parse_skill_text(text, expected_folder=expected_folder)
+
+
+def parse_skill_text(text: str, *, expected_folder: str) -> SkillMetadata:
     if not text.startswith("---\n"):
         raise InvalidSkillError(
             f"Skill '{expected_folder}' must start with frontmatter."
@@ -98,11 +103,4 @@ def _unquote(value: str) -> str:
 
 
 def _escape_control_characters(value: str) -> str:
-    escaped: list[str] = []
-    for char in value:
-        codepoint = ord(char)
-        if codepoint < 0x20 or 0x7F <= codepoint < 0xA0:
-            escaped.append(f"\\x{codepoint:02x}")
-        else:
-            escaped.append(char)
-    return "".join(escaped)
+    return escape_terminal_controls(value)

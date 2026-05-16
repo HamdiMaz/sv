@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 from sv.config import SvPaths
-from sv.source import default_runner
+from sv.source import SourceBackendError, default_runner
 from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
@@ -45,6 +45,107 @@ def _write_config(home: Path, text: str) -> None:
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True, exist_ok=True)
     paths.config_file.write_text(text)
+
+
+class _FailingBackend:
+    def __init__(self, name: str, detail: str, hint: str | None = None):
+        self.name = name
+        self._detail = detail
+        self._hint = hint
+
+    def read_index(self):
+        raise SourceBackendError("reading .sv/index.toml", self._detail, hint=self._hint)
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        raise AssertionError("read_index failure should stop this backend")
+
+    def read_file(self, path: str):
+        raise AssertionError("read_index failure should stop this backend")
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("read_index failure should stop this backend")
+
+
+def test_missing_git_during_init_is_actionable_and_traceback_free(tmp_path: Path, run_sv) -> None:
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def missing_git(args, cwd=None):
+        raise FileNotFoundError("git\x1b[2J")
+
+    result = run_sv(["init", "vault"], cwd=project, home=home, git_runner=missing_git)
+
+    assert result.exit_code == 1
+    assert "Git is required but was not found on PATH." in result.stderr
+    assert "Install Git" in result.stderr
+    assert_no_traceback(result.stderr)
+    _assert_cli_stderr_has_no_raw_control_characters(result.stderr)
+
+
+def test_auth_rate_limit_failures_explain_api_and_git_fallbacks(
+    tmp_path: Path, run_sv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_config(
+        home,
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n',
+    )
+
+    def fake_backends(repo, paths, runner=None, *, update=True):
+        return (
+            _FailingBackend(
+                "github-gh-api",
+                "API rate limit exceeded for 1.2.3.4\x1b[2J",
+                "Run 'gh auth login' or set GH_TOKEN before retrying.",
+            ),
+            _FailingBackend(
+                "git-treeless-partial",
+                "Git is required but was not found on PATH.",
+            ),
+        )
+
+    monkeypatch.setattr("sv.cli.source_backends_for_repo", fake_backends)
+
+    result = run_sv(["list"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "sv could not refresh Org/Skills" in result.stderr
+    assert "GitHub API auth/rate limits" in result.stderr
+    assert "lightweight Git fallback" in result.stderr
+    assert "gh auth login" in result.stderr
+    assert "GH_TOKEN" in result.stderr
+    assert_no_traceback(result.stderr)
+    _assert_cli_stderr_has_no_raw_control_characters(result.stderr)
+
+
+@pytest.mark.integration
+def test_duplicate_choice_error_has_no_raw_control_characters(
+    tmp_path: Path, run_sv
+) -> None:
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+
+    result = run_sv(
+        ["add", "alpha"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Multiple source skills match 'alpha'" in result.stderr
+    assert_no_traceback(result.stderr)
+    _assert_cli_stderr_has_no_raw_control_characters(result.stderr)
 
 
 def _malformed_config(tmp_path: Path) -> CliErrorScenario:
@@ -90,6 +191,12 @@ def _git_failure(tmp_path: Path) -> CliErrorScenario:
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    _write_config(
+        home,
+        '[[repos]]\n'
+        'id = "HamdiMaz/Skills"\n'
+        'url = "https://github.com/HamdiMaz/Skills.git"\n',
+    )
 
     def git_runner(args, cwd=None):
         if args == ["git", "--version"]:
@@ -109,7 +216,7 @@ def _git_failure(tmp_path: Path) -> CliErrorScenario:
         home=home,
         project=project,
         git_runner=git_runner,
-        expected_fragment="Cloning source repo failed: fatal: clone failed \\x1b[31mred",
+        expected_fragment="fatal: clone failed \\x1b[31mred",
     )
 
 

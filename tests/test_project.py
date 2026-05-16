@@ -5,17 +5,21 @@ import shutil
 import pytest
 
 from tests.helpers import assert_no_partial_sv_dirs
+from sv import project as project_module
 from sv.agents import PiAdapter
 from sv.catalog import SourceSkill
 from sv.errors import SvError
+from sv.hashing import sha256_skill_directory
 from sv.manifest import ManifestEntry, load_manifest, save_manifest
 from sv.project import (
     add_all_project_skills,
     add_project_skill,
+    add_vault_skill,
     list_project_skills,
     normalize_skill_name,
     remove_project_skill,
     sync_project_skills,
+    update_project_skills,
 )
 
 
@@ -95,6 +99,86 @@ def test_add_project_skill_existing_skill_does_not_write_manifest(tmp_path: Path
     assert result.status == "exists"
     assert load_manifest(project_skills) == {}
     assert (existing / "notes.md").read_text() == "local\n"
+
+
+def test_refresh_project_skill_states_detects_local_edit_by_hash(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    original_manifest_entry = load_manifest(project_skills)["alpha"]
+
+    local_skill = project_skills / "alpha"
+    (local_skill / "notes.md").write_text("alpha local edit\n")
+
+    project_module.refresh_project_skill_states([entry], project_skills)
+
+    refreshed = load_manifest(project_skills)["alpha"]
+    assert refreshed.installed_content_hash == original_manifest_entry.installed_content_hash
+    assert refreshed.local_content_hash == sha256_skill_directory(
+        local_skill, expected_name="alpha"
+    )
+    assert refreshed.modified is True
+    assert refreshed.update_available is False
+
+
+def test_refresh_project_skill_states_marks_update_available_by_source_hash(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    original_manifest_entry = load_manifest(project_skills)["alpha"]
+
+    (entry.source_path / "notes.md").write_text("alpha remote v2\n")
+
+    project_module.refresh_project_skill_states([entry], project_skills)
+
+    refreshed = load_manifest(project_skills)["alpha"]
+    assert refreshed.installed_content_hash == original_manifest_entry.installed_content_hash
+    assert refreshed.local_content_hash == original_manifest_entry.installed_content_hash
+    assert refreshed.source_content_hash == sha256_skill_directory(
+        entry.source_path, expected_name="alpha"
+    )
+    assert refreshed.modified is False
+    assert refreshed.update_available is True
+
+
+def test_refresh_project_skill_states_marks_and_clears_orphan_candidate(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+
+    project_module.refresh_project_skill_states([], project_skills)
+
+    orphaned = load_manifest(project_skills)["alpha"]
+    assert orphaned.orphan is True
+    assert orphaned.update_available is False
+
+    project_module.refresh_project_skill_states([entry], project_skills)
+
+    assert load_manifest(project_skills)["alpha"].orphan is False
+
+
+def test_refresh_vault_skill_states_detects_local_edit_by_hash(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    vault_skills = tmp_path / "vault" / "skills"
+    add_vault_skill(entry, vault_skills)
+    original_manifest_entry = load_manifest(vault_skills)["alpha"]
+
+    local_skill = vault_skills / "alpha"
+    (local_skill / "notes.md").write_text("alpha vault edit\n")
+
+    project_module.refresh_vault_skill_states([entry], vault_skills)
+
+    refreshed = load_manifest(vault_skills)["alpha"]
+    assert refreshed.target_kind == "skill-vault"
+    assert refreshed.target_agent is None
+    assert refreshed.target_path == "skills/alpha"
+    assert refreshed.installed_content_hash == original_manifest_entry.installed_content_hash
+    assert refreshed.local_content_hash == sha256_skill_directory(
+        local_skill, expected_name="alpha"
+    )
+    assert refreshed.modified is True
 
 
 def test_add_project_skill_existing_file_raises_error(tmp_path: Path):
@@ -304,6 +388,39 @@ def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
 def test_normalize_skill_name_rejects_path_like_skill_names(skill: str):
     with pytest.raises(SvError, match="Invalid skill name"):
         normalize_skill_name(skill)
+
+
+def test_project_private_source_hash_helpers_prefer_known_values_and_handle_missing(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    known = SourceSkill(
+        name=entry.name,
+        description=entry.description,
+        repo_id=entry.repo_id,
+        repo_url=entry.repo_url,
+        repo_path=entry.repo_path,
+        source_path=entry.source_path,
+        source_relative_path=entry.source_relative_path,
+        source_content_hash="sha256:known-content",
+        source_skill_file_hash="sha256:known-skill-file",
+    )
+    missing = SourceSkill(
+        name="missing",
+        description="Missing skill.",
+        repo_id=entry.repo_id,
+        repo_url=entry.repo_url,
+        repo_path=entry.repo_path,
+        source_path=tmp_path / "source" / "skills" / "missing",
+        source_relative_path="skills/missing",
+    )
+
+    assert project_module._known_source_content_hash(None) is None
+    assert project_module._known_source_content_hash(known) == "sha256:known-content"
+    assert project_module._known_source_skill_file_hash(None) is None
+    assert project_module._known_source_skill_file_hash(known) == "sha256:known-skill-file"
+    assert project_module._available_source_content_hash(known) == "sha256:known-content"
+    assert project_module._available_source_content_hash(missing) is None
 
 
 def test_list_project_skills_returns_sorted_skill_directories(tmp_path: Path):
@@ -596,6 +713,136 @@ def test_remove_project_skill_rejects_symlinked_pi_dir(tmp_path: Path):
     assert (outside_skill / "notes.md").read_text() == "outside\n"
 
 
+def test_update_project_skills_preserves_local_edits_and_marks_state(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    local_skill = project_skills / "managed"
+    (local_skill / "notes.md").write_text("managed local edit\n")
+    (entry.source_path / "notes.md").write_text("managed remote v2\n")
+
+    result = update_project_skills([entry], project_skills)
+
+    assert result.updated == []
+    assert [(skip.skill, skip.reason) for skip in result.skipped] == [
+        ("managed", "modified")
+    ]
+    assert (local_skill / "notes.md").read_text() == "managed local edit\n"
+    manifest_entry = load_manifest(project_skills)["managed"]
+    assert manifest_entry.modified is True
+    assert manifest_entry.update_available is True
+
+
+def test_update_project_skills_replaces_unmodified_skill_when_source_changed(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    local_skill = project_skills / "managed"
+    (entry.source_path / "notes.md").write_text("managed remote v2\n")
+
+    result = update_project_skills([entry], project_skills)
+
+    assert result.updated == ["managed"]
+    assert result.skipped == []
+    assert (local_skill / "notes.md").read_text() == "managed remote v2\n"
+    manifest_entry = load_manifest(project_skills)["managed"]
+    assert manifest_entry.modified is False
+    assert manifest_entry.update_available is False
+
+
+def test_update_project_skills_updates_legacy_entry_with_recorded_source_hash(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    local_skill = project_skills / "managed"
+    original_hash = load_manifest(project_skills)["managed"].installed_content_hash
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id=entry.repo_id,
+                repo_url=entry.repo_url,
+                source_path=entry.source_relative_path,
+                description=entry.description,
+                source_content_hash=original_hash,
+            )
+        },
+    )
+    (entry.source_path / "notes.md").write_text("managed remote v2\n")
+
+    result = update_project_skills([entry], project_skills)
+
+    assert result.updated == ["managed"]
+    assert result.skipped == []
+    assert (local_skill / "notes.md").read_text() == "managed remote v2\n"
+    manifest_entry = load_manifest(project_skills)["managed"]
+    assert manifest_entry.installed_content_hash == sha256_skill_directory(
+        local_skill, expected_name="managed"
+    )
+    assert manifest_entry.modified is False
+
+
+def test_update_project_skills_backfills_hashless_entry_matching_current_source(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    local_skill = project_skills / "managed"
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
+
+    result = update_project_skills([entry], project_skills)
+
+    assert result.updated == []
+    assert [(skip.skill, skip.reason) for skip in result.skipped] == [
+        ("managed", "unchanged")
+    ]
+    local_hash = sha256_skill_directory(local_skill, expected_name="managed")
+    manifest_entry = load_manifest(project_skills)["managed"]
+    assert manifest_entry.source_content_hash == local_hash
+    assert manifest_entry.installed_content_hash == local_hash
+    assert manifest_entry.local_content_hash == local_hash
+    assert manifest_entry.modified is False
+
+
+def test_update_project_skills_skips_hash_unchanged_source_without_materializing(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    installed_hash = load_manifest(project_skills)["managed"].installed_content_hash
+
+    def fail_materialize(destination: Path) -> None:
+        raise AssertionError("unchanged source should not be materialized")
+
+    indexed_entry = SourceSkill(
+        name="managed",
+        description="Managed skill.",
+        repo_id=entry.repo_id,
+        repo_url=entry.repo_url,
+        repo_path=tmp_path / "missing-source-cache",
+        source_path=tmp_path / "missing-source-cache" / "skills" / "managed",
+        source_relative_path="skills/managed",
+        source_backend="fake-index",
+        source_content_hash=installed_hash,
+        _materializer=fail_materialize,
+    )
+
+    result = update_project_skills([indexed_entry], project_skills)
+
+    assert result.updated == []
+    assert [(skip.skill, skip.reason) for skip in result.skipped] == [
+        ("managed", "unchanged")
+    ]
+    assert (project_skills / "managed" / "notes.md").read_text() == "managed remote\n"
+
+
 def test_sync_project_skills_updates_manifest_tracked_origin(tmp_path: Path):
     entry = make_source_skill(tmp_path / "source", "managed")
     project_skills = tmp_path / "project" / ".pi" / "skills"
@@ -614,6 +861,30 @@ def test_sync_project_skills_updates_manifest_tracked_origin(tmp_path: Path):
     assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
 
 
+def test_sync_project_skills_updates_hashes_after_successful_replacement(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    local_skill = project_skills / "managed"
+    (local_skill / "notes.md").write_text("managed local edit\n")
+    project_module.refresh_project_skill_states([entry], project_skills)
+    assert load_manifest(project_skills)["managed"].modified is True
+    (entry.source_path / "notes.md").write_text("managed remote v2\n")
+
+    sync_project_skills([entry], project_skills)
+
+    replaced_hash = sha256_skill_directory(local_skill, expected_name="managed")
+    manifest_entry = load_manifest(project_skills)["managed"]
+    assert (local_skill / "notes.md").read_text() == "managed remote v2\n"
+    assert manifest_entry.source_content_hash == replaced_hash
+    assert manifest_entry.installed_content_hash == replaced_hash
+    assert manifest_entry.local_content_hash == replaced_hash
+    assert manifest_entry.modified is False
+    assert manifest_entry.update_available is False
+
+
 def test_sync_project_skills_updates_manifest_tracked_origin_from_repo_alias(
     tmp_path: Path,
 ):
@@ -627,7 +898,9 @@ def test_sync_project_skills_updates_manifest_tracked_origin_from_repo_alias(
         repo_aliases=("Mirror/Skills",),
     )
     entry.source_path.mkdir(parents=True)
-    (entry.source_path / "SKILL.md").write_text("remote\n")
+    (entry.source_path / "SKILL.md").write_text(
+        "---\nname: managed\ndescription: Managed skill.\n---\n"
+    )
     (entry.source_path / "notes.md").write_text("managed remote\n")
     project_skills = tmp_path / "project" / ".pi" / "skills"
     local = project_skills / "managed"
@@ -652,6 +925,48 @@ def test_sync_project_skills_updates_manifest_tracked_origin_from_repo_alias(
     assert result.skipped == []
     assert (local / "notes.md").read_text() == "managed remote\n"
     assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
+
+
+def test_sync_project_skills_treats_missing_recorded_source_path_as_missing(
+    tmp_path: Path,
+):
+    source_root = tmp_path / "source"
+    source_path = source_root / "team" / "skills" / "managed"
+    source_path.mkdir(parents=True)
+    (source_path / "notes.md").write_text("managed remote from team\n")
+    entry = SourceSkill(
+        name="managed",
+        description="Managed skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=source_root,
+        source_path=source_path,
+        source_relative_path="team/skills/managed",
+    )
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    local = project_skills / "managed"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("managed local\n")
+    save_manifest(
+        project_skills,
+        {
+            "managed": ManifestEntry(
+                name="managed",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/managed",
+                description="Managed skill.",
+            )
+        },
+    )
+
+    result = sync_project_skills([entry], project_skills)
+
+    assert result.updated == []
+    assert [(skip.skill, skip.reason, skip.repo_ids) for skip in result.skipped] == [
+        ("managed", "source-missing", ("Org/Skills",))
+    ]
+    assert (local / "notes.md").read_text() == "managed local\n"
 
 
 def test_sync_project_skills_skips_recorded_origin_when_repo_id_url_changes(
@@ -733,7 +1048,9 @@ def test_sync_project_skills_updates_manifest_tracked_origin_from_repo_url_fallb
         source_path=tmp_path / "source" / "skills" / "managed",
     )
     entry.source_path.mkdir(parents=True)
-    (entry.source_path / "SKILL.md").write_text("remote\n")
+    (entry.source_path / "SKILL.md").write_text(
+        "---\nname: managed\ndescription: Managed skill.\n---\n"
+    )
     (entry.source_path / "notes.md").write_text("managed remote\n")
     project_skills = tmp_path / "project" / ".pi" / "skills"
     local = project_skills / "managed"
@@ -760,19 +1077,22 @@ def test_sync_project_skills_updates_manifest_tracked_origin_from_repo_url_fallb
     assert load_manifest(project_skills)["managed"].repo_id == "Org/Skills"
 
 
-def test_sync_project_skills_backfills_unique_untracked_skill(tmp_path: Path):
-    entry = make_source_skill(tmp_path / "source", "legacy")
+def test_sync_project_skills_keeps_unique_untracked_skill_unmanaged(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "manual")
     project_skills = tmp_path / "project" / ".pi" / "skills"
-    legacy = project_skills / "legacy"
-    legacy.mkdir(parents=True)
-    (legacy / "notes.md").write_text("legacy local\n")
+    manual = project_skills / "manual"
+    manual.mkdir(parents=True)
+    (manual / "notes.md").write_text("manual local\n")
 
     result = sync_project_skills([entry], project_skills)
 
-    assert result.updated == ["legacy"]
-    assert result.backfilled == ["legacy"]
-    assert (legacy / "notes.md").read_text() == "legacy remote\n"
-    assert load_manifest(project_skills)["legacy"].repo_id == "Org/Skills"
+    assert result.updated == []
+    assert result.backfilled == []
+    assert [(skip.skill, skip.reason, skip.repo_ids) for skip in result.skipped] == [
+        ("manual", "local-only", ())
+    ]
+    assert (manual / "notes.md").read_text() == "manual local\n"
+    assert load_manifest(project_skills) == {}
 
 
 def test_sync_project_skills_skips_ambiguous_untracked_skill(tmp_path: Path):
@@ -792,6 +1112,52 @@ def test_sync_project_skills_skips_ambiguous_untracked_skill(tmp_path: Path):
     ]
     assert (local / "notes.md").read_text() == "keep local\n"
     assert load_manifest(project_skills) == {}
+
+
+def test_sync_project_skills_reports_ambiguous_same_repo_paths(tmp_path: Path):
+    source_root = tmp_path / "source"
+    first_path = source_root / "team-a" / "skills" / "shared"
+    second_path = source_root / "team-b" / "skills" / "shared"
+    first_path.mkdir(parents=True)
+    second_path.mkdir(parents=True)
+    first = SourceSkill(
+        name="shared",
+        description="Shared skill A.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=source_root,
+        source_path=first_path,
+        source_relative_path="team-a/skills/shared",
+    )
+    second = SourceSkill(
+        name="shared",
+        description="Shared skill B.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=source_root,
+        source_path=second_path,
+        source_relative_path="team-b/skills/shared",
+    )
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    local = project_skills / "shared"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("local shared\n")
+
+    result = sync_project_skills([first, second], project_skills)
+
+    assert result.updated == []
+    assert [
+        (skip.skill, skip.reason, skip.source_references) for skip in result.skipped
+    ] == [
+        (
+            "shared",
+            "ambiguous",
+            (
+                "Org/Skills:team-a/skills/shared",
+                "Org/Skills:team-b/skills/shared",
+            ),
+        )
+    ]
 
 
 def test_sync_project_skills_cleans_temp_and_backup_dirs_after_success(
@@ -880,6 +1246,7 @@ def test_sync_project_skills_preserves_local_skill_when_copy_fails(
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
     (managed_local / "notes.md").write_text("local v1\n")
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
 
     def fail_copytree(source, target):
         raise OSError("copy failed")
@@ -901,6 +1268,7 @@ def test_sync_project_skills_restores_local_skill_when_replace_fails(
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
     (managed_local / "notes.md").write_text("local v1\n")
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
     original_rename = Path.rename
 
     def fail_temp_rename(path, target):
@@ -925,6 +1293,7 @@ def test_sync_project_skills_restores_local_skill_when_manifest_update_fails(
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
     (managed_local / "notes.md").write_text("local v1\n")
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
 
     def fail_upsert(project_skills_dir, manifest_entry):
         raise SvError("manifest write failed")
@@ -935,7 +1304,7 @@ def test_sync_project_skills_restores_local_skill_when_manifest_update_fails(
         sync_project_skills([entry], project_skills)
 
     assert (managed_local / "notes.md").read_text() == "local v1\n"
-    assert load_manifest(project_skills) == {}
+    assert load_manifest(project_skills) == {"managed": entry_manifest(entry)}
     assert_no_partial_sv_dirs(project_skills)
 
 
@@ -996,6 +1365,7 @@ def test_sync_project_skills_reports_manifest_failure_when_restore_fails(
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
     (managed_local / "notes.md").write_text("local v1\n")
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
     backup_target = project_skills / ".managed.sv-sync-backup"
     original_rename = Path.rename
 
@@ -1025,6 +1395,7 @@ def test_sync_project_skills_restores_backup_when_os_error_happens_after_backup(
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
     (managed_local / "notes.md").write_text("local v1\n")
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
     temp_target = project_skills / ".managed.sv-sync-tmp"
     original_rename = Path.rename
 
@@ -1053,6 +1424,7 @@ def test_sync_project_skills_reports_outer_backup_restore_failure(
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
     (managed_local / "notes.md").write_text("local v1\n")
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
     temp_target = project_skills / ".managed.sv-sync-tmp"
     backup_target = project_skills / ".managed.sv-sync-backup"
     original_rename = Path.rename
@@ -1093,6 +1465,7 @@ def test_sync_project_skills_reports_backup_restore_failure_after_os_error(
     managed_local = project_skills / "managed"
     managed_local.mkdir(parents=True)
     (managed_local / "notes.md").write_text("local v1\n")
+    save_manifest(project_skills, {"managed": entry_manifest(entry)})
     temp_target = project_skills / ".managed.sv-sync-tmp"
     backup_target = project_skills / ".managed.sv-sync-backup"
     original_rename = Path.rename

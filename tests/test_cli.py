@@ -1,5 +1,7 @@
 from argparse import Namespace
 from pathlib import Path
+import os
+import subprocess
 
 import pytest
 
@@ -18,6 +20,659 @@ from tests.helpers import (
 
 def parse(argv):
     return parse_sv(argv)
+
+
+def _existing_repo_git_runner(args, cwd=None):
+    if list(args) == ["git", "rev-parse", "--is-inside-work-tree"]:
+        return subprocess.CompletedProcess(list(args), 0, "true\n", "")
+    raise AssertionError(f"unexpected git call: {args}")
+
+
+def _write_skill(skill_dir: Path, name: str, description: str = "Alpha skill.") -> None:
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",
+        encoding="utf-8",
+    )
+
+
+def test_index_command_uses_cli_and_configured_scan_paths(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / ".sv").mkdir()
+    (project / ".sv" / "index-config.toml").write_text(
+        'schema_version = 1\ninclude_paths = ["skills", "team/skills"]\n',
+        encoding="utf-8",
+    )
+    _write_skill(project / "skills" / "alpha", "alpha", "Alpha skill.")
+    _write_skill(project / "team" / "skills" / "beta", "beta", "Beta skill.")
+    _write_skill(project / "team" / "skills" / "draft", "draft", "Draft skill.")
+    _write_skill(project / "other" / "gamma", "gamma", "Gamma skill.")
+
+    result = run_sv(
+        parse(["index", "--exclude", "team/skills/draft"]),
+        cwd=project,
+        home=home,
+    )
+
+    assert result.exit_code == 0
+    index_text = (project / ".sv" / "index.toml").read_text(encoding="utf-8")
+    assert 'source_path = "skills/alpha"' in index_text
+    assert 'source_path = "team/skills/beta"' in index_text
+    assert "team/skills/draft" not in index_text
+    assert "other/gamma" not in index_text
+
+
+def test_init_command_scaffolds_current_directory_as_empty_skill_vault(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "vault"
+    project.mkdir()
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        if list(args) == ["git", "rev-parse", "--is-inside-work-tree"]:
+            return subprocess.CompletedProcess(list(args), 1, "false\n", "")
+        if list(args) == ["git", "init"]:
+            assert cwd is not None
+            (cwd / ".git").mkdir()
+            return subprocess.CompletedProcess(list(args), 0, "", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 0
+    assert git_calls == [(["git", "init"], project)]
+    assert (project / ".git").is_dir()
+    assert (project / "skills").is_dir()
+    assert list((project / "skills").iterdir()) == []
+    index_text = (project / ".sv" / "index.toml").read_text(encoding="utf-8")
+    assert 'kind = "skill-vault"' in index_text
+    assert "[[skills]]" not in index_text
+    assert (project / ".sv" / "manifest.toml").read_text(encoding="utf-8") == (
+        "schema_version = 1\n"
+    )
+    assert (project / "README.md").read_text(encoding="utf-8") == (
+        "<!-- sv:skills:start -->\n"
+        "| Skill | Description |\n"
+        "| --- | --- |\n"
+        "<!-- sv:skills:end -->\n"
+    )
+    assert "Initialized skill-vault repo" in result.stdout
+
+
+def test_init_command_scaffolds_named_folder(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "team-skills"
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        if list(args) == ["git", "rev-parse", "--is-inside-work-tree"]:
+            return subprocess.CompletedProcess(list(args), 1, "false\n", "")
+        if list(args) == ["git", "init"]:
+            assert cwd is not None
+            (cwd / ".git").mkdir()
+            return subprocess.CompletedProcess(list(args), 0, "", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(
+        parse(["init", "team-skills"]), cwd=workspace, home=home, git_runner=git_runner
+    )
+
+    assert result.exit_code == 0
+    assert target.is_dir()
+    assert (target / ".git").is_dir()
+    assert (target / "skills").is_dir()
+    assert (target / ".sv" / "index.toml").is_file()
+    assert 'kind = "skill-vault"' in (target / ".sv" / "index.toml").read_text(
+        encoding="utf-8"
+    )
+    assert git_calls == [(["git", "init"], target)]
+
+
+def test_init_command_does_not_reinitialize_existing_git_repo(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "existing"
+    (project / ".git").mkdir(parents=True)
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        return _existing_repo_git_runner(args, cwd)
+
+    result = run_sv(parse(["init"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 0
+    assert git_calls == [(["git", "rev-parse", "--is-inside-work-tree"], project)]
+    assert (project / ".git").is_dir()
+    assert (project / "skills").is_dir()
+    assert (project / ".sv" / "index.toml").is_file()
+
+
+def test_init_command_initializes_nested_folder_inside_existing_worktree(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    target = project / "nested"
+    target.mkdir(parents=True)
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        if list(args) == ["git", "init"]:
+            assert cwd is not None
+            (cwd / ".git").mkdir()
+            return subprocess.CompletedProcess(list(args), 0, "", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 0
+    assert git_calls == [(["git", "init"], target)]
+    assert (target / ".git").exists()
+    assert (target / "skills").is_dir()
+
+
+def test_init_command_does_not_overwrite_existing_manifest(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    manifest = project / ".sv" / "manifest.toml"
+    manifest.parent.mkdir()
+    original_manifest = (
+        "schema_version = 1\n"
+        "\n"
+        "[[skills]]\n"
+        'name = "alpha"\n'
+        'source_repo_id = "Org/Skills"\n'
+        'source_repo_url = "https://github.com/Org/Skills.git"\n'
+        'source_path = "skills/alpha"\n'
+        'description = "Alpha skill."\n'
+    )
+    manifest.write_text(original_manifest, encoding="utf-8")
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 0
+    assert manifest.read_text(encoding="utf-8") == original_manifest
+
+
+def test_init_command_rejects_manifest_directory(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / ".sv" / "manifest.toml").mkdir(parents=True)
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Sv manifest path" in result.stderr
+    assert "exists but is not a file" in result.stderr
+
+
+def test_init_command_does_not_overwrite_existing_skill_vault_index(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    index_file = project / ".sv" / "index.toml"
+    index_file.parent.mkdir()
+    original_index = (
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "skills = []\n"
+    )
+    index_file.write_text(original_index, encoding="utf-8")
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 0
+    assert index_file.read_text(encoding="utf-8") == original_index
+
+
+def test_init_command_rejects_existing_non_vault_index(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    index_file = project / ".sv" / "index.toml"
+    index_file.parent.mkdir()
+    index_file.write_text(
+        "schema_version = 1\n"
+        'kind = "project-index"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "skills = []\n",
+        encoding="utf-8",
+    )
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "is not a skill-vault index" in result.stderr
+
+
+def test_init_command_reports_target_file_without_git_call(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "vault").write_text("not a directory\n", encoding="utf-8")
+
+    def git_runner(args, cwd=None):
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init", "vault"]), cwd=workspace, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 1
+    assert "Failed to create target folder" in result.stderr
+
+
+def test_init_command_reports_existing_skills_file(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / "skills").write_text("not a directory\n", encoding="utf-8")
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Failed to create skills directory" in result.stderr
+
+
+def test_init_command_rejects_invalid_existing_git_metadata(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+
+    def git_runner(args, cwd=None):
+        if list(args) == ["git", "rev-parse", "--is-inside-work-tree"]:
+            return subprocess.CompletedProcess(list(args), 1, "", "invalid git")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 1
+    assert "Existing Git metadata could not be validated" in result.stderr
+
+
+def test_init_command_reports_git_init_failure_with_escaped_output(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def git_runner(args, cwd=None):
+        return subprocess.CompletedProcess(list(args), 1, "", "denied\x1b[2J")
+
+    result = run_sv(parse(["init"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 1
+    assert "Failed to initialize Git repo" in result.stderr
+    assert "denied\\x1b[2J" in result.stderr
+    assert "\x1b" not in result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_init_command_rejects_symlinked_target(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    real_target = tmp_path / "real-target"
+    workspace.mkdir()
+    real_target.mkdir()
+    (workspace / "vault").symlink_to(real_target, target_is_directory=True)
+
+    result = run_sv(parse(["init", "vault"]), cwd=workspace, home=home)
+
+    assert result.exit_code == 1
+    assert "Refusing to initialize symlinked target folder" in result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_init_command_rejects_symlinked_git_metadata(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    outside_git = tmp_path / "outside-git"
+    project.mkdir()
+    outside_git.mkdir()
+    (project / ".git").symlink_to(outside_git, target_is_directory=True)
+
+    result = run_sv(parse(["init"]), cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked Git metadata path" in result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_init_command_rejects_symlinked_skills_directory(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    outside_skills = tmp_path / "outside-skills"
+    (project / ".git").mkdir(parents=True)
+    outside_skills.mkdir()
+    (project / "skills").symlink_to(outside_skills, target_is_directory=True)
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked skills directory" in result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_init_command_rejects_symlinked_sv_directory(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    outside_sv = tmp_path / "outside-sv"
+    (project / ".git").mkdir(parents=True)
+    outside_sv.mkdir()
+    (outside_sv / "index.toml").write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "skills = []\n",
+        encoding="utf-8",
+    )
+    (outside_sv / "manifest.toml").write_text("schema_version = 1\n", encoding="utf-8")
+    (project / ".sv").symlink_to(outside_sv, target_is_directory=True)
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked sv metadata directory" in result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_init_command_rejects_symlinked_index(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    outside_index = tmp_path / "outside-index.toml"
+    (project / ".git").mkdir(parents=True)
+    (project / ".sv").mkdir()
+    outside_index.write_text("", encoding="utf-8")
+    (project / ".sv" / "index.toml").symlink_to(outside_index)
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked sv index" in result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_init_command_rejects_symlinked_manifest(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    outside_manifest = tmp_path / "outside-manifest.toml"
+    (project / ".git").mkdir(parents=True)
+    (project / ".sv").mkdir()
+    outside_manifest.write_text("", encoding="utf-8")
+    (project / ".sv" / "manifest.toml").symlink_to(outside_manifest)
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked sv manifest" in result.stderr
+
+
+def test_init_command_preserves_existing_readme_content(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    readme = project / "README.md"
+    readme.write_text("# Team Skills\n\nHuman notes.\n", encoding="utf-8")
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 0
+    assert readme.read_text(encoding="utf-8") == (
+        "# Team Skills\n"
+        "\n"
+        "Human notes.\n"
+        "\n"
+        "<!-- sv:skills:start -->\n"
+        "| Skill | Description |\n"
+        "| --- | --- |\n"
+        "<!-- sv:skills:end -->\n"
+    )
+
+
+def test_init_command_appends_readme_block_after_double_newline(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    readme = project / "README.md"
+    readme.write_text("# Team Skills\n\n", encoding="utf-8")
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 0
+    assert readme.read_text(encoding="utf-8").startswith(
+        "# Team Skills\n\n<!-- sv:skills:start -->\n"
+    )
+
+
+def test_init_command_reports_malformed_readme_markers(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / "README.md").write_text(
+        "# Team\n<!-- sv:skills:start -->\nstale\n", encoding="utf-8"
+    )
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "README must contain exactly one sv skill table start marker" in result.stderr
+    assert not (project / ".sv" / "index.toml").exists()
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_init_command_reports_reversed_readme_markers(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / "README.md").write_text(
+        "# Team\n"
+        "<!-- sv:skills:end -->\n"
+        "stale\n"
+        "<!-- sv:skills:start -->\n",
+        encoding="utf-8",
+    )
+
+    result = run_sv(
+        parse(["init"]),
+        cwd=project,
+        home=home,
+        git_runner=_existing_repo_git_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "README sv skill table end marker appears before start marker" in result.stderr
+    assert not (project / ".sv" / "index.toml").exists()
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_index_command_writes_project_index_and_warns_for_invalid_skills(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    valid = project / ".pi" / "skills" / "alpha"
+    valid.mkdir(parents=True)
+    (valid / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        encoding="utf-8",
+    )
+    invalid = project / "skills" / "broken"
+    invalid.mkdir(parents=True)
+    (invalid / "SKILL.md").write_text(
+        "---\nname: broken\n---\n",
+        encoding="utf-8",
+    )
+
+    result = run_sv(parse(["index"]), cwd=project, home=home)
+
+    assert result.exit_code == 0
+    index_file = project / ".sv" / "index.toml"
+    assert index_file.is_file()
+    text = index_file.read_text(encoding="utf-8")
+    assert 'kind = "project-index"' in text
+    assert 'name = "alpha"' in text
+    assert 'source_path = ".pi/skills/alpha"' in text
+    assert 'content_hash = "sha256:' in text
+    assert "broken" not in text
+    assert "warning:" in result.stderr
+    assert "broken" in result.stderr
+    assert "Wrote sv index with 1 skill" in result.stdout
+
+
+def test_index_command_updates_readme_only_for_skill_vaults(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    skill = project / "skills" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        encoding="utf-8",
+    )
+    (project / ".sv").mkdir(parents=True)
+    (project / ".sv" / "index.toml").write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "skills = []\n",
+        encoding="utf-8",
+    )
+    readme = project / "README.md"
+    readme.write_text(
+        "# Vault\n"
+        "\n"
+        "Before.\n"
+        "<!-- sv:skills:start -->\n"
+        "stale\n"
+        "<!-- sv:skills:end -->\n"
+        "After.\n",
+        encoding="utf-8",
+    )
+
+    result = run_sv(parse(["index"]), cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert readme.read_text(encoding="utf-8") == (
+        "# Vault\n"
+        "\n"
+        "Before.\n"
+        "<!-- sv:skills:start -->\n"
+        "| Skill | Description |\n"
+        "| --- | --- |\n"
+        "| alpha | Alpha skill. |\n"
+        "<!-- sv:skills:end -->\n"
+        "After.\n"
+    )
+
+    normal_project = tmp_path / "normal-project"
+    normal_skill = normal_project / "skills" / "beta"
+    normal_skill.mkdir(parents=True)
+    (normal_skill / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: Beta skill.\n---\n",
+        encoding="utf-8",
+    )
+    normal_readme = normal_project / "README.md"
+    normal_readme.write_text(
+        "# Normal\n"
+        "<!-- sv:skills:start -->\n"
+        "user-controlled text\n"
+        "<!-- sv:skills:end -->\n",
+        encoding="utf-8",
+    )
+
+    result = run_sv(parse(["index"]), cwd=normal_project, home=home)
+
+    assert result.exit_code == 0
+    assert normal_readme.read_text(encoding="utf-8") == (
+        "# Normal\n"
+        "<!-- sv:skills:start -->\n"
+        "user-controlled text\n"
+        "<!-- sv:skills:end -->\n"
+    )
 
 
 def test_print_add_result_escapes_existing_manifest_repo_id(
@@ -284,10 +939,10 @@ def test_remove_interactive_removes_selected_project_skills_without_source_repo(
     )
 
     assert exit_code == 0
-    assert selector_calls == [["alpha", "beta"]]
+    assert selector_calls == []
     assert (project_skills / "alpha" / "notes.md").read_text() == "alpha\n"
-    assert not (project_skills / "beta").exists()
-    assert "Removed Pi skill 'beta'" in capsys.readouterr().out
+    assert (project_skills / "beta" / "notes.md").read_text() == "beta\n"
+    assert "No Pi skills found to remove." in capsys.readouterr().out
 
 
 def test_remove_interactive_reports_no_project_skills(tmp_path: Path, capsys):
@@ -537,6 +1192,28 @@ def test_main_parses_arguments_and_uses_current_project_paths(monkeypatch, tmp_p
     assert parsed_calls == [("repo", "list", project, home)]
 
 
+def test_svx_main_dispatches_to_repo_add_flow(monkeypatch, tmp_path: Path):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    parsed_calls = []
+
+    monkeypatch.setattr(cli_module.Path, "cwd", lambda: project)
+    monkeypatch.setattr(cli_module.Path, "home", lambda: home)
+
+    def fake_handle(args, cwd, home):
+        parsed_calls.append(
+            (args.command, args.repo_command, args.repo, args.skills_paths, cwd, home)
+        )
+        return 0
+
+    monkeypatch.setattr(cli_module, "handle", fake_handle)
+
+    assert cli_module.svx_main(["owner/repo", "--skills-path", "custom/skills"]) == 0
+    assert parsed_calls == [
+        ("repo", "add", "owner/repo", ["custom/skills"], project, home)
+    ]
+
+
 def test_remove_without_skill_reports_actionable_error(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -545,7 +1222,7 @@ def test_remove_without_skill_reports_actionable_error(tmp_path: Path, capsys):
     exit_code = handle(parse(["remove"]), cwd=project, home=home)
 
     assert exit_code == 1
-    assert "Specify a skill name or use -l." in capsys.readouterr().err
+    assert "Specify a skill name or use -l/--all." in capsys.readouterr().err
 
 
 def test_unknown_commands_are_reported_without_tracebacks(tmp_path: Path, capsys):
@@ -668,7 +1345,7 @@ def test_remove_interactive_cancel_leaves_project_skills_unchanged(
 
     assert exit_code == 0
     assert (skill / "notes.md").read_text() == "alpha\n"
-    assert "No skills selected." in capsys.readouterr().out
+    assert "No Pi skills found to remove." in capsys.readouterr().out
 
 
 def test_choose_skill_returns_none_without_tty(monkeypatch, tmp_path: Path):
@@ -682,40 +1359,32 @@ def test_choose_skill_returns_none_without_tty(monkeypatch, tmp_path: Path):
     assert cli_module._choose_skill([_source_skill(tmp_path, "source")]) is None
 
 
-def test_choose_skill_reprompts_until_valid_selection(monkeypatch, tmp_path: Path):
+def test_choose_skill_reprompts_until_single_checkbox_selection(
+    monkeypatch, tmp_path: Path, capsys
+):
     skill = _source_skill(tmp_path, "source")
-    choices = iter(["bad", "3", "1"])
+    selections = iter([[skill, skill], [skill]])
 
-    class TtyOutput:
-        def __init__(self):
-            self.text = ""
-
-        def isatty(self):
-            return True
-
-        def write(self, text):
-            self.text += text
-
-        def flush(self):
-            return None
-
-    output = TtyOutput()
-    monkeypatch.setattr(cli_module.sys, "stdin", output)
-    monkeypatch.setattr(cli_module.sys, "stdout", output)
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(choices))
+    monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli_module.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_module,
+        "select_skills",
+        lambda matches, *, item_label: next(selections),
+    )
 
     assert cli_module._choose_skill([skill]) == skill
-    assert "Enter a number from 1 to 1" in output.text
+    assert "Select exactly one source skill, or q to cancel." in capsys.readouterr().out
 
 
-def test_choose_skill_accepts_quit(monkeypatch, tmp_path: Path):
-    class TtyInput:
-        def isatty(self):
-            return True
-
-    monkeypatch.setattr(cli_module.sys, "stdin", TtyInput())
-    monkeypatch.setattr(cli_module.sys, "stdout", TtyInput())
-    monkeypatch.setattr("builtins.input", lambda _prompt: "q")
+def test_choose_skill_accepts_empty_checkbox_selection(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli_module.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        cli_module,
+        "select_skills",
+        lambda matches, *, item_label: [],
+    )
 
     assert cli_module._choose_skill([_source_skill(tmp_path, "source")]) is None
 
@@ -733,3 +1402,93 @@ def _source_skill(tmp_path: Path, repo_folder: str, *, repo_id: str = "Org/Skill
         repo_path=source,
         source_path=skill_dir,
     )
+
+
+def test_cli_rejects_invalid_add_argument_combinations(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    cases = [
+        (["add", "-l", "alpha"], "Use -l by itself"),
+        (["add", "-l", "--all"], "Use -l by itself"),
+        (["add", "--repo", "source"], "Use --repo only with --all"),
+        (["add", "alpha", "--all"], "Use either a skill name or --all"),
+        (["add"], "Specify a skill name"),
+    ]
+    for argv, message in cases:
+        result = run_sv(parse(argv), cwd=project, home=home)
+        assert result.exit_code == 1
+        assert message in result.stderr
+
+
+def test_cli_rejects_invalid_remove_argument_combinations(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    cases = [
+        (["remove", "-l", "alpha"], "Use -l by itself"),
+        (["remove", "-l", "--all"], "Use -l by itself"),
+        (["remove", "alpha", "--all"], "Use either a skill name or --all"),
+        (["remove", "alpha", "--yes"], "Use --yes only with -l or --all"),
+        (["remove"], "Specify a skill name"),
+    ]
+    for argv, message in cases:
+        result = run_sv(parse(argv), cwd=project, home=home)
+        assert result.exit_code == 1
+        assert message in result.stderr
+
+
+def test_cli_list_and_search_without_source_config_print_guidance(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    list_result = run_sv(parse(["list"]), cwd=project, home=home)
+    search_result = run_sv(parse(["search", "alpha"]), cwd=project, home=home)
+
+    assert list_result.exit_code == 1
+    assert "No skill source repos are configured" in list_result.stderr
+    assert search_result.exit_code == 1
+    assert "No skill source repos are configured" in search_result.stderr
+
+
+def test_cli_global_status_records_not_run_at_home(tmp_path: Path):
+    assert cli_module._should_record_global_source_state(tmp_path / "project", tmp_path / "home")
+    assert not cli_module._should_record_global_source_state(tmp_path / "home", tmp_path / "home")
+
+
+def test_cli_prompt_for_initial_sources_handles_cancel_custom_repo_and_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    from sv.config import RecommendedSource
+
+    paths = cli_module.SvPaths.from_home(tmp_path / "home")
+    source = RecommendedSource(repo="Org/Skills", description="Recommended")
+    monkeypatch.setattr(cli_module, "recommended_sources", lambda: [source])
+
+    choices = iter(["bad", "m", "bad/repo", "1"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(choices))
+    calls: list[str] = []
+
+    def fake_add_repo(_paths, repo):
+        calls.append(repo)
+        if repo == "bad/repo":
+            raise SvError("bad source")
+        return cli_module.RepoChangeResult(status="added", repo=cli_module.RepoConfig(id=repo, url=f"https://github.com/{repo}.git"))
+
+    monkeypatch.setattr(cli_module, "add_repo", fake_add_repo)
+    monkeypatch.setattr(cli_module, "load_config", lambda _paths: cli_module.SvConfig(repos=(cli_module.RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git"),)))
+
+    config = cli_module._prompt_for_initial_sources(paths)
+
+    assert [repo.id for repo in config.repos] == ["Org/Skills"]
+    assert calls == ["bad/repo", "Org/Skills"]
+    output = capsys.readouterr().out
+    assert "Could not add source repo: bad source" in output
+
+    monkeypatch.setattr(cli_module, "recommended_sources", lambda: [])
+    monkeypatch.setattr("builtins.input", lambda _prompt: "q")
+    with pytest.raises(SvError, match="No skill source repos"):
+        cli_module._prompt_for_initial_sources(paths)

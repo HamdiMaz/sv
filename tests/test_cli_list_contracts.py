@@ -1,4 +1,5 @@
 from pathlib import Path
+import base64
 import shutil
 import subprocess
 
@@ -6,6 +7,7 @@ import pytest
 
 from sv.cli import build_parser, handle
 from sv.config import SvPaths, derive_repo_id, load_config
+import sv.source as source_module
 from sv.source import default_runner
 from tests.helpers import (
     configure_source,
@@ -18,6 +20,147 @@ from tests.helpers import (
 
 def parse(argv):
     return build_parser().parse_args(argv)
+
+
+def test_list_uses_github_index_without_cloning_or_downloading_skill_folders(
+    tmp_path: Path,
+    run_sv,
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    paths = SvPaths.from_home(home)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+    )
+    index_text = """
+    schema_version = 1
+    kind = "skill-vault"
+    generated_by = "sv"
+    generated_at = "2026-05-15T00:00:00Z"
+
+    [[skills]]
+    name = "alpha"
+    description = "Alpha from remote index."
+    source_path = "skills/alpha"
+    content_hash = "sha256:alpha"
+    skill_file_hash = "sha256:alpha-skill"
+    """
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def git_runner(args, cwd=None):
+        command = list(args)
+        calls.append((command, cwd))
+        if command == [
+            "gh",
+            "api",
+            "/repos/Org/Skills/contents/.sv/index.toml",
+            "--jq",
+            ".content",
+        ]:
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=base64.b64encode(index_text.encode("utf-8")).decode("ascii"),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {command}")
+
+    result = run_sv(["list"], cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout
+    assert "Alpha from remote index." in result.stdout
+    assert result.stderr == ""
+    assert calls == [
+        (
+            [
+                "gh",
+                "api",
+                "/repos/Org/Skills/contents/.sv/index.toml",
+                "--jq",
+                ".content",
+            ],
+            None,
+        )
+    ]
+
+
+def test_list_reports_future_index_schema_even_when_another_repo_has_entries(
+    tmp_path: Path,
+    run_sv,
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    paths = SvPaths.from_home(home)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n\n'
+        '[[repos]]\n'
+        'id = "Org/Future"\n'
+        'url = "https://github.com/Org/Future.git"\n'
+    )
+    valid_index = """
+    schema_version = 1
+    kind = "skill-vault"
+    generated_by = "sv"
+    generated_at = "2026-05-15T00:00:00Z"
+
+    [[skills]]
+    name = "alpha"
+    description = "Alpha from remote index."
+    source_path = "skills/alpha"
+    content_hash = "sha256:alpha"
+    skill_file_hash = "sha256:alpha-skill"
+    """
+    future_index = """
+    schema_version = 999
+    kind = "skill-vault"
+    generated_by = "future-sv"
+    generated_at = "2026-05-15T00:00:00Z"
+    """
+
+    def git_runner(args, cwd=None):
+        command = list(args)
+        if command == [
+            "gh",
+            "api",
+            "/repos/Org/Skills/contents/.sv/index.toml",
+            "--jq",
+            ".content",
+        ]:
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=base64.b64encode(valid_index.encode("utf-8")).decode("ascii"),
+                stderr="",
+            )
+        if command == [
+            "gh",
+            "api",
+            "/repos/Org/Future/contents/.sv/index.toml",
+            "--jq",
+            ".content",
+        ]:
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=base64.b64encode(future_index.encode("utf-8")).decode("ascii"),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {command}")
+
+    result = run_sv(["list"], cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 1
+    assert "schema_version 999" in result.stderr
+    assert "update sv" in result.stderr
 
 
 def test_list_with_explicit_empty_repos_prints_next_step_and_skips_git(
@@ -106,8 +249,9 @@ def test_list_fails_clearly_on_unreadable_skill_metadata(tmp_path: Path, run_sv)
 
     result = run_sv(["list"], cwd=project, home=home, git_runner=default_runner)
 
-    assert result.exit_code == 1
-    assert "error: Failed to read SKILL.md for skill 'broken'" in result.stderr
+    assert result.exit_code == 0
+    assert "broken" not in result.stdout
+    assert "Failed to read SKILL.md for skill 'broken'" in result.stderr
 
 
 @pytest.mark.parametrize("columns", [80, 40, 20, 5])
@@ -137,7 +281,9 @@ def test_list_output_respects_terminal_width_when_wrapping(
     assert all(display_width(line) <= columns for line in result.stdout.splitlines())
 
 
-def test_list_and_add_coalesce_equivalent_repo_aliases(tmp_path: Path, capsys):
+def test_list_and_add_coalesce_equivalent_repo_aliases(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -151,6 +297,11 @@ def test_list_and_add_coalesce_equivalent_repo_aliases(tmp_path: Path, capsys):
     (repo_path / ".git").mkdir(parents=True)
     write_source_skill(repo_path, "alpha", "Alpha skill.", "alpha v1\n")
 
+    def fail_https_api(url, headers):
+        raise OSError("offline")
+
+    monkeypatch.setattr(source_module, "_default_github_http_get", fail_https_api)
+
     def git_runner(args, cwd=None):
         if args == ["git", "--version"]:
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="git\n")
@@ -160,8 +311,14 @@ def test_list_and_add_coalesce_equivalent_repo_aliases(tmp_path: Path, capsys):
                 returncode=0,
                 stdout="https://github.com/Org/Skills.git\n",
             )
-        if args == ["git", "pull", "--ff-only"]:
+        if args[:2] == ["git", "fetch"]:
             return subprocess.CompletedProcess(args=args, returncode=0)
+        if args[:2] == ["git", "sparse-checkout"]:
+            return subprocess.CompletedProcess(args=args, returncode=0)
+        if args[:2] == ["git", "checkout"]:
+            return subprocess.CompletedProcess(args=args, returncode=0)
+        if args[:2] == ["gh", "api"]:
+            raise FileNotFoundError("gh")
         raise AssertionError(f"unexpected git call: {args}")
 
     assert handle(parse(["list"]), cwd=project, home=home, git_runner=git_runner) == 0
@@ -312,6 +469,37 @@ def test_list_shows_skill_name_once_per_duplicate_group(tmp_path: Path, capsys):
 
 
 @pytest.mark.integration
+def test_add_accepts_path_qualified_reference_for_same_repo_duplicate(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    team_alpha = source / "team" / "skills" / "alpha"
+    team_alpha.mkdir(parents=True)
+    (team_alpha / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Team alpha.\n---\n\n# alpha\n"
+    )
+    (team_alpha / "notes.md").write_text("alpha from team path\n")
+    run_git(["add", "team/skills/alpha"], source)
+    run_git(["commit", "-m", "add team alpha"], source)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    repo_id = load_config(SvPaths.from_home(home)).repos[0].id
+
+    result = run_sv(
+        ["add", f"{repo_id}:team/skills/alpha"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+
+    assert result.exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == (
+        "alpha from team path\n"
+    )
+
+
 def test_list_shows_duplicate_references_without_widening_main_skill_table(
     tmp_path: Path, capsys
 ):

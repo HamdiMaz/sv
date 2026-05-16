@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Fixed duplicate `sv add <skill>` source-choice formatting to remove the legacy numbered-row option and keep TTY resolution checkbox-only.
+- Fixed GitHub source refresh backend ordering to keep API backends ahead of Git fallback even when a local source cache already exists.
+- Documented the trusted-source model behind `sv sync`/`sv update` remote index-hash shortcuts so users know when full materialization is skipped.
+- Fixed GitHub API folder materialization to stream into a temporary destination with file-count, depth, and byte limits instead of accumulating every file in memory.
+- Fixed terminal output sanitization to render Unicode format controls, including bidi and zero-width characters, as literal escapes before display.
+- Fixed Git and GitHub CLI subprocesses to use a bounded timeout and noninteractive prompt settings so source refreshes fail instead of hanging.
+- Fixed repo URL validation to reject cleartext HTTP and credential-bearing HTTP(S)/SSH URLs before config persistence or Git execution.
+- Expanded coverage tests for hashing helpers, source/index/project utilities, table input edge cases, and `svx` CLI forwarding.
+- Added meaningful regression coverage for hashing safety checks, materialization rollback helpers, index/README validation paths, source utility helpers, table navigation/input handling, and CLI argument validation.
+- Added `sv index` include/exclude scan paths through repeatable CLI flags and `.sv/index-config.toml` defaults.
+- Fixed type-checking diagnostics in table formatting, GitHub API item parsing, and optional error-hint assertions.
+- Fixed global source refresh state to record the actual successful lightweight backend and remote index hash instead of always reporting `git` with no index hash.
+- Fixed source refreshes to fail closed when any configured repo cannot refresh instead of silently operating on a partial catalog.
+- Fixed `sv add --all` to resolve duplicate source skills through the interactive duplicate chooser before copying, while preserving non-TTY duplicate failures.
+- Fixed project commands run from Git subdirectories to target the detected repository root instead of creating nested `.pi`/`.sv` state under the current subdirectory.
+- Fixed the TTY browsing contract test lint failure by removing an unused `SvPaths` import.
+- Fixed `sv init <folder>` inside an existing Git worktree to create a nested, detectable skill-vault Git repository.
+- Fixed `sv status` outside a project to show `unknown` for legacy global source states without a recorded backend instead of crashing.
 - Added CI release-readiness checks for linting, type checking, coverage, package builds, and built-wheel smoke validation.
 - Added a 95% coverage gate with documented full-release, fast local, integration, and security test commands.
 - Expanded CLI contract tests across add, list, remove, sync, update, run, help, package, error, and local-Git user-journey paths.

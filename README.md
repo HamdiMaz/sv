@@ -144,7 +144,7 @@ Update project skills from their recorded source repos:
 sv sync
 ```
 
-`sv sync` pulls configured source repos, then replaces matching project skill folders with the source copy. Local edits inside synced skill folders are overwritten. Legacy skills without manifest entries are adopted and overwritten only when exactly one configured repo provides that skill name; ambiguous or local-only skills are skipped with a clear message.
+`sv sync` refreshes configured sources, then replaces matching project skill folders with the source copy. Local edits inside synced skill folders are overwritten. Legacy skills without manifest entries are adopted and overwritten only when exactly one configured repo provides that skill name; ambiguous or local-only skills are skipped with a clear message.
 
 Update source repo caches and then sync project skills with explicit progress messages:
 
@@ -153,6 +153,8 @@ sv update
 ```
 
 `sv sync` and `sv update` both refresh configured source repos before syncing project skills. Use `sv update` when you want the refresh-and-sync operation to be explicit in command output. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
+
+Treat configured source repositories and their generated `.sv/index.toml` files as trusted inputs. When a refreshed source index reports the same content hash already recorded in the project manifest, `sv sync`/`sv update` can skip re-materializing that skill as an optimization; a stale or malicious index can therefore hide source changes until the index is regenerated or the source is removed and re-added.
 
 Run Pi with global skill discovery disabled and only project skills enabled:
 

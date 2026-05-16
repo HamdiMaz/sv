@@ -13,8 +13,8 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |
 | `sv remove <skill>` | You want to remove one project skill. | Updates `.pi/skills/.sv-manifest.toml`. |
 | `sv remove -l` | You want to remove several project skills interactively. | Lists installed project skills, not source skills. |
-| `sv sync` | You want installed skills refreshed from their recorded sources. | Pulls sources first; overwrites managed skill folders. |
-| `sv update` | You want explicit refresh-and-sync output. | Equivalent to refresh sources plus `sv sync`, with progress messages. |
+| `sv sync` | You want installed skills refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |
+| `sv update` | You want explicit refresh-and-sync output. | Equivalent to refresh sources plus `sv sync`, with progress messages and the same trusted-index behavior; a stale or malicious index can hide source changes until regenerated or re-added. |
 | `sv run -- <pi args>` | You want Pi to use only project-local skills. | Runs `pi --no-skills --skill .pi/skills ...`. |
 
 ## Source repo commands
@@ -27,6 +27,16 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
 
 `sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects.
+
+## Index publishing
+
+Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`:
+
+```toml
+schema_version = 1
+include_paths = ["skills", "packages/agents/pi/skills"]
+exclude_paths = ["skills/drafts"]
+```
 
 ## Duplicate skill names
 

@@ -3,8 +3,8 @@ import tomllib
 
 import pytest
 
+from sv import config as config_module
 from sv.config import (
-    DEFAULT_REPO,
     RepoConfig,
     SvConfig,
     SvPaths,
@@ -37,7 +37,6 @@ def test_normalize_repo_keeps_ssh_url():
     [
         ("HamdiMaz/Skills", "https://github.com/HamdiMaz/Skills.git"),
         ("https://github.com/HamdiMaz/Skills/", "https://github.com/HamdiMaz/Skills/"),
-        ("http://github.com/HamdiMaz/Skills.git", "http://github.com/HamdiMaz/Skills.git"),
         ("git@github.com:HamdiMaz/Skills.git", "git@github.com:HamdiMaz/Skills.git"),
         ("ssh://git@github.com/HamdiMaz/Skills.git", "ssh://git@github.com/HamdiMaz/Skills.git"),
         ("file:///tmp/skill-source", "file:///tmp/skill-source"),
@@ -78,7 +77,6 @@ def test_derive_repo_id_uses_owner_repo_for_github_ssh_url():
     [
         ("HamdiMaz/Skills", "HamdiMaz/Skills"),
         ("https://github.com/HamdiMaz/Skills/", "HamdiMaz/Skills"),
-        ("http://github.com/HamdiMaz/Skills.git", "HamdiMaz/Skills"),
         ("git@github.com:HamdiMaz/Skills.git", "HamdiMaz/Skills"),
         ("ssh://git@github.com/HamdiMaz/Skills.git", "HamdiMaz/Skills"),
     ],
@@ -184,6 +182,12 @@ def test_normalize_repo_rejects_empty_value():
     ("raw_repo", "match"),
     [
         ("--upload-pack=/tmp/fake", "repo cannot start with '-'"),
+        ("http://github.com/HamdiMaz/Skills.git", "repo URL must use HTTPS"),
+        ("HTTP://github.com/HamdiMaz/Skills.git", "repo URL must use HTTPS"),
+        ("https://token@example.com/skills.git", "repo URL cannot contain credentials"),
+        ("HTTPS://token@example.com/skills.git", "repo URL cannot contain credentials"),
+        ("ssh://git:secret@github.com/HamdiMaz/Skills.git", "repo URL cannot contain credentials"),
+        ("SSH://git:secret@github.com/HamdiMaz/Skills.git", "repo URL cannot contain credentials"),
         ("https://example.com/skills\trepo.git", "repo cannot contain control characters"),
         ("https://example.com/skills\nrepo.git", "repo cannot contain control characters"),
         ("\x00repo", "repo cannot contain control characters"),
@@ -211,12 +215,10 @@ def test_paths_include_sources_root_default_repo_and_per_repo_cache(tmp_path: Pa
     )
 
 
-def test_load_config_uses_default_repo_when_config_missing(tmp_path: Path):
+def test_load_config_returns_empty_repos_when_config_missing(tmp_path: Path):
     config = load_config(SvPaths.from_home(tmp_path))
 
-    assert config == SvConfig(
-        repos=(RepoConfig(id="HamdiMaz/Skills", url=DEFAULT_REPO),)
-    )
+    assert config == SvConfig(repos=())
 
 
 def test_single_repo_compatibility_property_returns_first_repo_url():
@@ -255,6 +257,19 @@ def test_load_config_reports_malformed_toml_as_sv_error(tmp_path: Path):
 
     with pytest.raises(SvError, match="Failed to read sv config"):
         load_config(paths)
+
+
+def test_load_config_rejects_future_schema_with_update_message(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text("schema_version = 99\nrepos = []\n")
+
+    with pytest.raises(SvError) as exc_info:
+        load_config(paths)
+
+    message = str(exc_info.value)
+    assert "Unsupported sv config schema_version 99" in message
+    assert "update sv" in message.lower()
 
 
 def test_load_config_reports_invalid_repo_entries_as_sv_error(tmp_path: Path):
@@ -331,6 +346,86 @@ def test_load_config_deduplicates_duplicate_aliases(tmp_path: Path):
             aliases=("Mirror/Skills", "Mirror/Second"),
         ),
     )
+
+
+def test_load_config_reads_repo_skills_paths(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'skills_paths = ["packages/agents/pi/skills", "tools/skills"]\n'
+    )
+
+    config = load_config(paths)
+
+    assert config.repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            skills_paths=("packages/agents/pi/skills", "tools/skills"),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "skills_path",
+    [
+        "",
+        "/absolute/skills",
+        "../outside",
+        "skills/../outside",
+        "skills\\u001b/bad",
+    ],
+)
+def test_load_config_rejects_unsafe_repo_skills_paths(
+    tmp_path: Path, skills_path: str
+):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        f'skills_paths = ["{skills_path}"]\n'
+    )
+
+    with pytest.raises(
+        SvError, match="skills path 1 contains unsafe path components"
+    ):
+        load_config(paths)
+
+
+def test_load_config_rejects_skills_paths_not_a_list(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'skills_paths = "skills"\n'
+    )
+
+    with pytest.raises(
+        SvError,
+        match="repo entry 1 field 'skills_paths' must be a list",
+    ):
+        load_config(paths)
+
+
+def test_load_config_rejects_non_string_skills_paths(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'skills_paths = [123]\n'
+    )
+
+    with pytest.raises(SvError, match="repo entry 1 skills path 1 must be a string"):
+        load_config(paths)
 
 
 def test_load_config_rejects_unsafe_aliases(tmp_path: Path):
@@ -442,6 +537,47 @@ def test_load_config_rejects_option_like_repo_entry_url(tmp_path: Path):
         load_config(paths)
 
 
+@pytest.mark.parametrize(
+    ("repo_url", "match"),
+    [
+        ("http://github.com/Org/Skills.git", "repo URL must use HTTPS"),
+        ("HTTP://github.com/Org/Skills.git", "repo URL must use HTTPS"),
+        ("https://token@example.com/skills.git", "repo URL cannot contain credentials"),
+        ("HTTPS://token@example.com/skills.git", "repo URL cannot contain credentials"),
+    ],
+)
+def test_load_config_rejects_cleartext_and_credentialed_repo_urls(
+    tmp_path: Path, repo_url: str, match: str
+):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(f'[[repos]]\nid = "Org/Skills"\nurl = "{repo_url}"\n')
+
+    with pytest.raises(SvError, match=match):
+        load_config(paths)
+
+
+def test_save_config_preserves_existing_config_when_atomic_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    paths = SvPaths.from_home(tmp_path)
+    add_repo(paths, "Org/Skills")
+    original = paths.config_file.read_text()
+
+    def fail_write(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise SvError("write failed")
+
+    monkeypatch.setattr(config_module, "atomic_write_text", fail_write)
+
+    with pytest.raises(SvError, match="write failed"):
+        add_repo(paths, "Other/Skills")
+
+    assert paths.config_file.read_text() == original
+    assert load_config(paths).repos == (
+        RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git"),
+    )
+
+
 def test_save_config_escapes_toml_special_characters(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     special_url = (
@@ -478,6 +614,23 @@ def test_save_config_escapes_toml_special_characters(tmp_path: Path):
     parsed = tomllib.loads(saved)
     assert parsed["repos"][0]["url"] == special_url
     assert parsed["repos"][0]["aliases"] == list(aliases)
+
+
+def test_save_config_round_trips_repo_skills_paths(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(
+        id="Org/Skills",
+        url="https://github.com/Org/Skills.git",
+        skills_paths=("packages/agents/pi/skills", "tools/skills"),
+    )
+
+    _save_config(paths, SvConfig(repos=(repo,)))
+
+    saved = paths.config_file.read_text()
+    assert (
+        'skills_paths = ["packages/agents/pi/skills", "tools/skills"]' in saved
+    )
+    assert load_config(paths).repos == (repo,)
 
 
 def test_load_config_coalesces_identical_duplicate_repo_entries(tmp_path: Path):
@@ -533,6 +686,37 @@ def test_load_config_coalesces_duplicate_repo_urls_with_different_ids(tmp_path: 
             id="Org/Skills",
             url="https://github.com/Org/Skills.git",
             aliases=("Mirror/Skills",),
+        ),
+    )
+
+
+def test_load_config_merges_duplicate_repo_url_skills_paths(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'skills_paths = ["packages/agents/pi/skills", "tools/skills"]\n'
+        '\n'
+        '[[repos]]\n'
+        'id = "Mirror/Skills"\n'
+        'url = "git@github.com:Org/Skills.git"\n'
+        'skills_paths = ["tools/skills", "nested/skills"]\n'
+    )
+
+    config = load_config(paths)
+
+    assert config.repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            aliases=("Mirror/Skills",),
+            skills_paths=(
+                "packages/agents/pi/skills",
+                "tools/skills",
+                "nested/skills",
+            ),
         ),
     )
 

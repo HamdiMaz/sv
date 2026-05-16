@@ -149,9 +149,9 @@ def test_render_can_remove_cursor_highlight_after_selection_finishes():
     _render(state, stdout, highlight_cursor=False)
 
     assert stdout.getvalue().splitlines() == [
-        "\x1b[38;5;220m\x1b[1m[x] 1- alpha\x1b[0m",
-        "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m2-\x1b[0m beta",
-        "\x1b[38;5;245mShowing 1-2 of 2 • ↑/↓ move • ←/→ page • Space select • Enter confirm • q cancel\x1b[0m",
+        "\x1b[38;5;220m\x1b[1m[x] alpha\x1b[0m",
+        "\x1b[38;5;252m[ ]\x1b[0m beta",
+        "\x1b[38;5;245mShowing 1-2 of 2 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel\x1b[0m",
     ]
 
 
@@ -167,13 +167,25 @@ def test_render_outputs_inline_colored_five_item_list_without_alternate_screen()
     assert "\x1b[?1049h" not in output
     assert "\x1b[2J" not in output
     assert output.splitlines() == [
-        "\x1b[48;5;24m\x1b[38;5;231m\x1b[1m[ ] 1- skill 1\x1b[0m",
-        "\x1b[38;5;220m\x1b[1m[x] 2- skill 2\x1b[0m",
-        "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m3-\x1b[0m skill 3",
-        "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m4-\x1b[0m skill 4",
-        "\x1b[38;5;252m[ ]\x1b[0m \x1b[38;5;245m5-\x1b[0m skill 5",
-        "\x1b[38;5;245mShowing 1-5 of 6 • ↑/↓ move • ←/→ page • Space select • Enter confirm • q cancel\x1b[0m",
+        "\x1b[48;5;24m\x1b[38;5;231m\x1b[1m[ ] skill 1\x1b[0m",
+        "\x1b[38;5;220m\x1b[1m[x] skill 2\x1b[0m",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 3",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 4",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 5",
+        "\x1b[38;5;245mShowing 1-5 of 6 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel\x1b[0m",
     ]
+
+
+def test_render_uses_checkboxes_without_numeric_row_prefixes():
+    state = SelectionState(["alpha", "beta"])
+    stdout = StringIO()
+
+    _render(state, stdout, highlight_cursor=False)
+
+    lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert lines[:2] == ["[ ] alpha", "[ ] beta"]
+    assert "1-" not in lines[0]
+    assert "2-" not in lines[1]
 
 
 def test_render_uses_custom_item_labels():
@@ -480,7 +492,7 @@ def test_render_marks_selected_cursor_with_selected_highlight():
 
     first_line = stdout.getvalue().splitlines()[0]
     assert first_line.startswith("\x1b[48;5;220m")
-    assert "[x] 1- alpha" in first_line
+    assert "[x] alpha" in first_line
 
 
 def test_render_handles_combining_marks_and_one_column_terminal(monkeypatch):
@@ -497,6 +509,55 @@ def test_render_handles_combining_marks_and_one_column_terminal(monkeypatch):
 
 def test_read_key_returns_unknown_for_regular_characters():
     assert _read_key_from_bytes(b"x") == "unknown"
+
+
+def test_read_key_starts_slash_filtering():
+    assert _read_key_from_bytes(b"/") == "filter"
+
+
+def test_selection_state_filters_visible_items_without_losing_selection():
+    state = SelectionState(["alpha", "beta", "gamma"])
+    state.move_down()
+    state.toggle_current()
+
+    state.set_filter("ga")
+
+    assert state.filter_query == "ga"
+    assert state.cursor == 0
+    assert [skill for _, skill in state.visible_items()] == ["gamma"]
+    assert state.selected_items() == ["beta"]
+
+
+def test_render_footer_shows_slash_filter_query():
+    state = SelectionState(["alpha", "beta", "gamma"])
+    state.set_filter("ga")
+    stdout = StringIO()
+
+    _render(state, stdout)
+
+    lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert lines == [
+        "[ ] gamma",
+        "Showing 1-1 of 1 matching 3 • filter: ga • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel",
+    ]
+
+
+def test_select_skills_applies_slash_filter_key(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["filter:ga", "space", "enter"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
+
+    selected = select_skills(
+        ["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output
+    )
+
+    assert selected == ["gamma"]
 
 
 def _read_key_from_bytes(data: bytes) -> str:

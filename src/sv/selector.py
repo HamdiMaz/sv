@@ -10,6 +10,7 @@ from typing import Generic, TextIO, TypeVar
 import unicodedata
 
 from sv.errors import SvError
+from sv.terminal import escape_terminal_controls
 
 T = TypeVar("T")
 
@@ -37,29 +38,28 @@ class SelectionState(Generic[T]):
     cursor: int = 0
     viewport_start: int = 0
     selected: set[int] = field(default_factory=set)
+    filter_query: str = ""
+    filter_text: Callable[[T], str] = str
 
     def __post_init__(self) -> None:
         if self.viewport_size < 1:
             raise ValueError("viewport_size must be at least 1")
 
-        last_index = max(len(self.items) - 1, 0)
-        self.cursor = min(max(self.cursor, 0), last_index)
-        self.viewport_start = min(
-            max(self.viewport_start, 0), max(len(self.items) - self.viewport_size, 0)
-        )
+        self.filter_query = _sanitize_label(self.filter_query).strip()
         self.selected = {
             index for index in self.selected if 0 <= index < len(self.items)
         }
-        self._scroll_to_cursor()
+        self._clamp_view()
 
     @property
     def visible_end(self) -> int:
-        return min(self.viewport_start + self.viewport_size, len(self.items))
+        return min(self.viewport_start + self.viewport_size, len(self._filtered_indices()))
 
     def visible_items(self) -> list[tuple[int, T]]:
+        filtered_indices = self._filtered_indices()
         return [
             (index, self.items[index])
-            for index in range(self.viewport_start, self.visible_end)
+            for index in filtered_indices[self.viewport_start : self.visible_end]
         ]
 
     def move_up(self) -> None:
@@ -69,7 +69,7 @@ class SelectionState(Generic[T]):
         self._scroll_to_cursor()
 
     def move_down(self) -> None:
-        if self.cursor >= len(self.items) - 1:
+        if self.cursor >= len(self._filtered_indices()) - 1:
             return
         self.cursor += 1
         self._scroll_to_cursor()
@@ -83,24 +83,56 @@ class SelectionState(Generic[T]):
         self.viewport_start -= page_size
 
     def page_next(self) -> None:
-        if not self.items or self.visible_end >= len(self.items):
+        if not self._filtered_indices() or self.visible_end >= len(self._filtered_indices()):
             return
 
-        last_index = len(self.items) - 1
+        last_index = len(self._filtered_indices()) - 1
         self.cursor = min(self.cursor + self.viewport_size, last_index)
         self.viewport_start += self.viewport_size
 
     def toggle_current(self) -> None:
-        if not self.items:
+        current_index = self._current_item_index()
+        if current_index is None:
             return
 
-        if self.cursor in self.selected:
-            self.selected.remove(self.cursor)
+        if current_index in self.selected:
+            self.selected.remove(current_index)
         else:
-            self.selected.add(self.cursor)
+            self.selected.add(current_index)
 
     def selected_items(self) -> list[T]:
         return [self.items[index] for index in sorted(self.selected)]
+
+    def set_filter(self, query: str) -> None:
+        self.filter_query = _sanitize_label(query).strip()
+        self.cursor = 0
+        self.viewport_start = 0
+        self._clamp_view()
+
+    def _current_item_index(self) -> int | None:
+        filtered_indices = self._filtered_indices()
+        if not filtered_indices:
+            return None
+        return filtered_indices[self.cursor]
+
+    def _filtered_indices(self) -> list[int]:
+        query = self.filter_query.casefold()
+        if not query:
+            return list(range(len(self.items)))
+        return [
+            index
+            for index, item in enumerate(self.items)
+            if query in _sanitize_label(self.filter_text(item)).casefold()
+        ]
+
+    def _clamp_view(self) -> None:
+        item_count = len(self._filtered_indices())
+        last_index = max(item_count - 1, 0)
+        self.cursor = min(max(self.cursor, 0), last_index)
+        self.viewport_start = min(
+            max(self.viewport_start, 0), max(item_count - self.viewport_size, 0)
+        )
+        self._scroll_to_cursor()
 
     def _scroll_to_cursor(self) -> None:
         if self.cursor < self.viewport_start:
@@ -118,6 +150,7 @@ def select_skills(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     item_label: Callable[[T], str] = str,
+    filter_text: Callable[[T], str] | None = None,
 ) -> list[T]:
     """Prompt for skills with arrow-key navigation and spacebar selection."""
     input_stream = sys.stdin if stdin is None else stdin
@@ -137,7 +170,11 @@ def select_skills(
             "Interactive skill selection requires a Unix-like terminal."
         ) from exc
 
-    state = SelectionState(skills, viewport_size=viewport_size)
+    state = SelectionState(
+        skills,
+        viewport_size=viewport_size,
+        filter_text=item_label if filter_text is None else filter_text,
+    )
     try:
         fd = input_stream.fileno()
         original_settings = termios.tcgetattr(fd)
@@ -169,6 +206,10 @@ def select_skills(
                 state.page_next()
             elif key == "space":
                 state.toggle_current()
+            elif key == "filter":
+                state.set_filter(_read_filter_query(fd))
+            elif key.startswith("filter:"):
+                state.set_filter(key.partition(":")[2])
             elif key == "enter":
                 _render(
                     state,
@@ -237,11 +278,17 @@ def _render(
 
 
 def _format_help_line(state: SelectionState[T]) -> str:
-    if state.items:
-        text = (
-            f"Showing {state.viewport_start + 1}-{state.visible_end} of "
-            f"{len(state.items)} • ↑/↓ move • ←/→ page • Space select • Enter confirm • q cancel"
-        )
+    filtered_count = len(state._filtered_indices())
+    if state.items and filtered_count:
+        text = f"Showing {state.viewport_start + 1}-{state.visible_end} of {filtered_count}"
+        if state.filter_query:
+            text += f" matching {len(state.items)} • filter: {state.filter_query}"
+        text += " • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel"
+    elif state.items:
+        text = f"Showing 0-0 of 0 matching {len(state.items)}"
+        if state.filter_query:
+            text += f" • filter: {state.filter_query}"
+        text += " • / filter • q cancel"
     else:
         text = "No skills to show • q cancel"
     return f"{_FG_MUTED}{_fit_text(text, _terminal_width())}{_RESET}"
@@ -252,9 +299,9 @@ def _format_skill_line(
 ) -> str:
     terminal_width = _terminal_width()
     is_selected = index in state.selected
-    is_cursor = highlight_cursor and index == state.cursor
+    is_cursor = highlight_cursor and index == state._current_item_index()
     checked = "[x]" if is_selected else "[ ]"
-    prefix = f"{checked} {index + 1}- "
+    prefix = f"{checked} "
     prefix_width = _display_width(prefix)
     label = _fit_label(skill, max(terminal_width - prefix_width, 0))
     line = _fit_text(f"{prefix}{label}", terminal_width)
@@ -268,7 +315,7 @@ def _format_skill_line(
     if _display_width(line) < prefix_width:
         return f"{_FG_TEXT}{line}{_RESET}"
 
-    return f"{_FG_TEXT}{checked}{_RESET} {_FG_MUTED}{index + 1}-{_RESET} {label}"
+    return f"{_FG_TEXT}{checked}{_RESET} {label}"
 
 
 def _terminal_width() -> int:
@@ -305,14 +352,7 @@ def _fit_text(value: str, max_width: int) -> str:
 
 
 def _sanitize_label(value: str) -> str:
-    escaped: list[str] = []
-    for char in str(value):
-        codepoint = ord(char)
-        if codepoint < 0x20 or 0x7F <= codepoint < 0xA0:
-            escaped.append(f"\\x{codepoint:02x}")
-        else:
-            escaped.append(char)
-    return "".join(escaped)
+    return escape_terminal_controls(value)
 
 
 def _display_width(value: str) -> int:
@@ -335,11 +375,29 @@ def _read_key(fd: int) -> str:
         return "enter"
     if char == b" ":
         return "space"
+    if char == b"/":
+        return "filter"
     if char.lower() == b"q":
         return "quit"
     if char == b"\x1b":
         return _read_escape_sequence(fd)
     return "unknown"
+
+
+def _read_filter_query(fd: int) -> str:
+    query = bytearray()
+    while True:
+        char = os.read(fd, 1)
+        if char in {b"", b"\r", b"\n"}:
+            break
+        if char == b"\x1b":
+            return ""
+        if char in {b"\x7f", b"\b"}:
+            if query:
+                query.pop()
+            continue
+        query.extend(char)
+    return query.decode(errors="replace")
 
 
 def _read_escape_sequence(fd: int) -> str:

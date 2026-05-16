@@ -1,6 +1,27 @@
 import unicodedata
 
-from sv.table import format_table
+from io import StringIO
+import re
+import sys
+
+import pytest
+
+from sv.errors import SvError
+from sv.table import (
+    TableState,
+    _read_escape_sequence,
+    _read_filter_query,
+    _read_key,
+    _render_interactive_table,
+    browse_table,
+    format_table,
+)
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def visible_text(value: str) -> str:
+    return ANSI_RE.sub("", value)
 
 
 def display_width(value: str) -> int:
@@ -10,6 +31,355 @@ def display_width(value: str) -> int:
             continue
         width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
     return width
+
+
+class TtyStream(StringIO):
+    def isatty(self):
+        return True
+
+    def fileno(self):
+        return 0
+
+
+class NonTty(StringIO):
+    def isatty(self):
+        return False
+
+
+class FakeTermios:
+    TCSADRAIN = 1
+    error = OSError
+
+    @staticmethod
+    def tcgetattr(fd):
+        return ["settings"]
+
+    @staticmethod
+    def tcsetattr(fd, when, settings):
+        return None
+
+
+class FakeTty:
+    @staticmethod
+    def setcbreak(fd):
+        return None
+
+
+class FailingSetCbreakTty:
+    @staticmethod
+    def setcbreak(fd):
+        raise OSError("no cbreak")
+
+
+class FailingRestoreTermios:
+    TCSADRAIN = 1
+    error = OSError
+
+    @staticmethod
+    def tcgetattr(fd):
+        return ["settings"]
+
+    @staticmethod
+    def tcsetattr(fd, when, settings):
+        raise OSError("restore failed")
+
+
+def test_interactive_table_renders_headers_highlighted_row_and_footer(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "90")
+    state = TableState(
+        ["Skill", "Description"],
+        [
+            ["alpha", "Short."],
+            ["beta", "This description is intentionally very long."],
+        ],
+    )
+    stdout = StringIO()
+
+    line_count = _render_interactive_table(state, stdout)
+
+    lines = stdout.getvalue().splitlines()
+    visible_lines = [visible_text(line) for line in lines]
+    assert line_count == 5
+    assert visible_lines[0] == "Skill  Description"
+    assert visible_lines[1] == "-----  --------------------------------------------"
+    assert visible_lines[2] == "alpha  Short."
+    assert lines[2].startswith("\x1b[48;5;24m")
+    assert visible_lines[3] == "beta   This description is intentionally very long."
+    assert visible_lines[4] == "Showing 1-2 of 2 • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
+
+
+def test_interactive_table_truncates_every_line_when_columns_exceed_width(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "2")
+    state = TableState(["A", "B", "C"], [["alpha", "beta", "gamma"]])
+    stdout = StringIO()
+
+    _render_interactive_table(state, stdout)
+
+    visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert all(display_width(line) <= 2 for line in visible_lines)
+
+
+def test_interactive_table_truncates_rows_to_one_line(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "32")
+    state = TableState(
+        ["Skill", "Description"],
+        [["alpha", "This description is much too long for one terminal line."]],
+    )
+    stdout = StringIO()
+
+    _render_interactive_table(state, stdout)
+
+    visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert all(display_width(line) <= 32 for line in visible_lines)
+    assert visible_lines[2].endswith("...")
+
+
+def test_interactive_table_sanitizes_initial_filter_query_in_footer():
+    state = TableState(["Skill"], [["alpha"]], filter_query="\x1b[2J")
+    stdout = StringIO()
+
+    _render_interactive_table(state, stdout, highlight_cursor=False)
+
+    output = stdout.getvalue()
+    assert "\x1b[2J" not in output
+    assert "\\x1b[2J" in output
+
+
+def test_table_state_keeps_raw_rows_for_details_while_rendering_safely():
+    state = TableState(["Skill", "Description"], [["alpha", "line one\nline two"]])
+    stdout = StringIO()
+
+    _render_interactive_table(state, stdout, highlight_cursor=False)
+
+    assert state.current_row() == ["alpha", "line one\nline two"]
+    output = stdout.getvalue()
+    assert "line one\nline two" not in output
+    assert "line one\\x0aline two" in output
+
+
+def test_table_state_navigation_pages_clamps_and_handles_empty_results():
+    with pytest.raises(ValueError, match="viewport_size"):
+        TableState(["Skill"], [], viewport_size=0)
+
+    state = TableState(
+        ["Skill"],
+        [["alpha"], ["beta"], ["gamma"], ["delta"]],
+        viewport_size=2,
+    )
+
+    assert state.visible_end == 2
+    assert state.current_row() == ["alpha"]
+    state.move_up()
+    assert state.current_row() == ["alpha"]
+    state.move_down()
+    state.move_down()
+    assert state.current_row() == ["gamma"]
+    assert state.viewport_start == 1
+    state.page_previous()
+    assert state.current_row() == ["beta"]
+    state.page_next()
+    assert state.current_row() == ["delta"]
+    state.page_next()
+    assert state.current_row() == ["delta"]
+
+    state.set_filter("no-match")
+    assert state.visible_rows() == []
+    assert state.current_row() is None
+    state.move_down()
+    state.page_next()
+    state.page_previous()
+    assert state.current_row() is None
+
+
+def test_table_state_slash_filtering_keeps_matching_rows_and_footer():
+    state = TableState(
+        ["Skill", "Repo"],
+        [["alpha", "Org/A"], ["beta", "Org/B"], ["gamma", "Org/C"]],
+    )
+
+    state.set_filter("org/c")
+    stdout = StringIO()
+    _render_interactive_table(state, stdout, highlight_cursor=False)
+
+    visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert visible_lines[2] == "gamma  Org/C"
+    assert visible_lines[-1] == "Showing 1-1 of 1 matching 3 • filter: org/c • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
+
+
+def test_browse_table_enter_invokes_detail_hook_and_q_goes_back(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["down", "enter", "quit"])
+    details: list[list[str]] = []
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    def show_detail(row):
+        details.append(list(row))
+        output.write("DETAIL\n")
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."], ["beta", "Details."]],
+        stdin=TtyStream(),
+        stdout=output,
+        on_detail=show_detail,
+    )
+
+    assert selected is None
+    assert details == [["beta", "Details."]]
+    rendered = output.getvalue()
+    assert "\x1b[5F\x1b[JDETAIL\n" in rendered
+
+
+def test_browse_table_applies_slash_filter_key(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["filter:ga", "enter"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill"],
+        [["alpha"], ["beta"], ["gamma"]],
+        stdin=TtyStream(),
+        stdout=output,
+    )
+
+    assert selected == ["gamma"]
+
+
+def test_browse_table_runs_custom_key_actions_and_stays_in_view(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["action:a", "quit"])
+    actions: list[list[str]] = []
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        key_actions={"a": lambda row: actions.append(list(row))},
+    )
+
+    assert selected is None
+    assert actions == [["alpha", "Short."]]
+
+
+def test_browse_table_can_clear_on_back_without_leaving_final_table(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["quit"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill"],
+        [["alpha"]],
+        stdin=TtyStream(),
+        stdout=output,
+        clear_on_exit=True,
+    )
+
+    assert selected is None
+    assert output.getvalue().endswith("\x1b[4F\x1b[J\x1b[?25h")
+
+
+def test_browse_table_requires_tty_streams():
+    with pytest.raises(SvError, match="requires a TTY"):
+        browse_table(["Skill"], [["alpha"]], stdin=NonTty(), stdout=NonTty())
+
+
+def test_browse_table_reports_cbreak_setup_errors(monkeypatch):
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FailingSetCbreakTty)
+
+    with pytest.raises(SvError, match="could not configure terminal input"):
+        browse_table(["Skill"], [["alpha"]], stdin=TtyStream(), stdout=TtyStream())
+
+
+def test_browse_table_reports_terminal_restore_errors(monkeypatch):
+    key_inputs = iter(["quit"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FailingRestoreTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    with pytest.raises(SvError, match="could not restore terminal settings"):
+        browse_table(["Skill"], [["alpha"]], stdin=TtyStream(), stdout=TtyStream())
+
+
+def test_read_key_decodes_actions_quit_enter_eof_unknown_and_invalid_utf8(monkeypatch):
+    values = iter([b"x", b"Q", b"\r", b"", b"\x01", b"\xff"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(values))
+
+    assert _read_key(0) == "action:x"
+    assert _read_key(0) == "quit"
+    assert _read_key(0) == "enter"
+    assert _read_key(0) == "eof"
+    assert _read_key(0) == "unknown"
+    assert _read_key(0) == "unknown"
+
+
+def test_read_filter_query_handles_backspace_escape_and_replacement(monkeypatch):
+    values = iter([b"a", b"b", b"\x7f", b"\xff", b"\n", b"ignored"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(values))
+
+    assert _read_filter_query(0) == "a�"
+
+    escape_values = iter([b"a", b"\x1b", b"ignored"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(escape_values))
+
+    assert _read_filter_query(0) == ""
+
+
+@pytest.mark.parametrize(
+    ("sequence", "expected"),
+    [
+        ([b"[", b"A"], "up"),
+        ([b"[", b"B"], "down"),
+        ([b"[", b"C"], "right"),
+        ([b"[", b"D"], "left"),
+        ([b"[", b"Z"], "unknown"),
+        ([b"X"], "escape"),
+    ],
+)
+def test_read_escape_sequence_decodes_arrows_and_unknown_sequences(
+    monkeypatch, sequence, expected
+):
+    values = iter(sequence)
+    monkeypatch.setattr("sv.table._has_input", lambda _fd: True)
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(values))
+
+    assert _read_escape_sequence(0) == expected
+
+
+def test_read_escape_sequence_treats_lone_escape_as_escape(monkeypatch):
+    monkeypatch.setattr("sv.table._has_input", lambda _fd: False)
+
+    assert _read_escape_sequence(0) == "escape"
 
 
 def test_format_table_aligns_columns():

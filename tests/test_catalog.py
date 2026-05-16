@@ -3,17 +3,406 @@ import os
 
 import pytest
 
-from sv.catalog import SourceSkill, build_source_catalog, find_qualified_catalog_entry
+from sv.catalog import (
+    SourceSkill,
+    build_source_catalog,
+    build_source_catalog_from_backends,
+    search_source_catalog,
+    find_qualified_catalog_entry,
+)
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
+from sv.source import SourceBackendError, FakeSourceBackend
 
 
 def make_skill(repo_path: Path, name: str, description: str) -> None:
-    skill_dir = repo_path / "skills" / name
+    make_skill_at(repo_path, Path("skills") / name, name, description)
+
+
+def make_skill_at(
+    repo_path: Path, relative_path: Path | str, name: str, description: str
+) -> None:
+    skill_dir = repo_path / relative_path
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n"
     )
+
+
+class FailingBackend:
+    name = "broken-backend"
+
+    def read_file(self, path: str) -> bytes:
+        raise AssertionError("catalog should move to the next backend")
+
+    def read_index(self) -> bytes | None:
+        return None
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        raise SourceBackendError(
+            "listing candidate SKILL.md files",
+            "simulated outage",
+            hint="try again later",
+        )
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("catalog should not materialize folders during discovery")
+
+
+class UnsafeCandidateBackend:
+    name = "unsafe-backend"
+
+    def read_file(self, path: str) -> bytes:
+        raise AssertionError("unsafe candidate paths should fail before reading")
+
+    def read_index(self) -> bytes | None:
+        return None
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        return ["../evil/SKILL.md"]
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("catalog should not materialize folders during discovery")
+
+
+class IndexedBackend:
+    name = "indexed-backend"
+
+    def __init__(self, index_text: str):
+        self.index_text = index_text
+        self.read_file_calls: list[str] = []
+        self.list_candidate_calls = 0
+
+    def read_file(self, path: str) -> bytes:
+        self.read_file_calls.append(path)
+        raise AssertionError("indexed catalog discovery should not read skill files")
+
+    def read_index(self) -> bytes | None:
+        return self.index_text.encode("utf-8")
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        self.list_candidate_calls += 1
+        raise AssertionError("indexed catalog discovery should not run generic discovery")
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("catalog should not materialize folders during discovery")
+
+
+def test_search_source_catalog_uses_case_insensitive_ranked_text_and_fuzzy_matches(
+    tmp_path: Path,
+):
+    catalog = [
+        SourceSkill(
+            name="find-docs",
+            description="Retrieves current documentation.",
+            repo_id="Org/Primary",
+            repo_url="https://github.com/Org/Primary.git",
+            repo_path=tmp_path / "primary",
+            source_path=tmp_path / "primary" / "skills" / "find-docs",
+        ),
+        SourceSkill(
+            name="docs-helper",
+            description="Finds docs for release notes.",
+            repo_id="Org/Secondary",
+            repo_url="https://github.com/Org/Secondary.git",
+            repo_path=tmp_path / "secondary",
+            source_path=tmp_path / "secondary" / "skills" / "docs-helper",
+        ),
+        SourceSkill(
+            name="deep-skill",
+            description="Specialized helper.",
+            repo_id="Team/Deep",
+            repo_url="https://github.com/Team/Deep.git",
+            repo_path=tmp_path / "deep",
+            source_path=tmp_path / "deep" / "packages" / "pi" / "skills" / "deep-skill",
+            source_relative_path="packages/pi/skills/deep-skill",
+        ),
+    ]
+
+    assert [entry.name for entry in search_source_catalog(catalog, "DOCS")] == [
+        "docs-helper",
+        "find-docs",
+    ]
+    assert [entry.name for entry in search_source_catalog(catalog, "fd")] == [
+        "find-docs"
+    ]
+    assert [entry.name for entry in search_source_catalog(catalog, "tmdeep")] == [
+        "deep-skill"
+    ]
+    assert [entry.name for entry in search_source_catalog(catalog, "packages/pi")] == [
+        "deep-skill"
+    ]
+    assert search_source_catalog(catalog, "   ") == []
+    assert search_source_catalog(catalog, "q") == []
+
+
+def test_build_source_catalog_from_backend_uses_index_without_reading_skill_files(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    backend = IndexedBackend(
+        """
+        schema_version = 1
+        kind = "skill-vault"
+        generated_by = "sv"
+        generated_at = "2026-05-15T00:00:00Z"
+
+        [[skills]]
+        name = "alpha"
+        description = "Alpha from index."
+        source_path = "skills/alpha"
+        content_hash = "sha256:alpha"
+        skill_file_hash = "sha256:alpha-skill"
+
+        [[skills]]
+        name = "deep"
+        description = "Deep from index."
+        source_path = "packages/pi/skills/deep"
+        content_hash = "sha256:deep"
+        skill_file_hash = "sha256:deep-skill"
+        """
+    )
+
+    result = build_source_catalog_from_backends([repo], paths, {repo.id: (backend,)})
+
+    assert [
+        (entry.name, entry.description, entry.source_relative_path)
+        for entry in result.entries
+    ] == [
+        ("alpha", "Alpha from index.", "skills/alpha"),
+        ("deep", "Deep from index.", "packages/pi/skills/deep"),
+    ]
+    assert [entry.source_backend for entry in result.entries] == [
+        "indexed-backend",
+        "indexed-backend",
+    ]
+    assert [entry.source_content_hash for entry in result.entries] == [
+        "sha256:alpha",
+        "sha256:deep",
+    ]
+    assert [entry.source_skill_file_hash for entry in result.entries] == [
+        "sha256:alpha-skill",
+        "sha256:deep-skill",
+    ]
+    assert backend.read_file_calls == []
+    assert backend.list_candidate_calls == 0
+    assert result.failures == ()
+
+
+def test_build_source_catalog_from_backend_reports_future_index_schema(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Future", url="https://github.com/Org/Future.git")
+    backend = IndexedBackend(
+        """
+        schema_version = 999
+        kind = "skill-vault"
+        generated_by = "future-sv"
+        generated_at = "2026-05-15T00:00:00Z"
+        """
+    )
+
+    result = build_source_catalog_from_backends([repo], paths, {repo.id: (backend,)})
+
+    assert result.entries == ()
+    assert len(result.failures) == 1
+    assert "update sv" in result.failure_report()
+    assert "schema_version 999" in result.failure_report()
+    assert backend.list_candidate_calls == 0
+
+
+def test_build_source_catalog_from_backend_falls_back_when_index_missing(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    backend = FakeSourceBackend(
+        {
+            "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        }
+    )
+
+    result = build_source_catalog_from_backends([repo], paths, {repo.id: (backend,)})
+
+    assert [(entry.name, entry.source_relative_path) for entry in result.entries] == [
+        ("alpha", "skills/alpha"),
+    ]
+    assert result.failures == ()
+
+
+def test_build_source_catalog_from_backend_discovers_valid_skills_without_git(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(
+        id="Org/Skills",
+        url="https://github.com/Org/Skills.git",
+        skills_paths=("packages/agents/pi/skills",),
+    )
+    backend = FakeSourceBackend(
+        {
+            "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+            "team/skills/beta/SKILL.md": "---\nname: beta\ndescription: Beta skill.\n---\n",
+            "packages/agents/pi/skills/deep/SKILL.md": (
+                "---\nname: deep\ndescription: Deep skill.\n---\n"
+            ),
+            "too/deep/skills/ignored/SKILL.md": "---\nname: ignored\ndescription: Ignored.\n---\n",
+            "skills/bad/SKILL.md": "---\nname: other\ndescription: Bad.\n---\n",
+        }
+    )
+
+    result = build_source_catalog_from_backends(
+        [repo], paths, {repo.id: (backend,)}
+    )
+
+    assert [
+        (entry.name, entry.source_relative_path, entry.source_backend)
+        for entry in result.entries
+    ] == [
+        ("alpha", "skills/alpha", "fake"),
+        ("beta", "team/skills/beta", "fake"),
+        ("deep", "packages/agents/pi/skills/deep", "fake"),
+    ]
+    assert result.failures == ()
+
+
+def test_build_source_catalog_from_backend_warns_and_skips_invalid_candidates(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    backend = FakeSourceBackend(
+        {
+            "skills/valid/SKILL.md": "---\nname: valid\ndescription: Valid skill.\n---\n",
+            "skills/missing-description/SKILL.md": (
+                "---\nname: missing-description\n---\n"
+            ),
+            "team/skills/wrong-name/SKILL.md": (
+                "---\nname: other\ndescription: Wrong name.\n---\n"
+            ),
+            "skills/not-frontmatter/SKILL.md": "# no frontmatter\n",
+            "skills/not-utf8/SKILL.md": b"\xff\xfe\x00",
+        }
+    )
+    warnings: list[str] = []
+
+    result = build_source_catalog_from_backends(
+        [repo], paths, {repo.id: (backend,)}, warn=warnings.append
+    )
+
+    assert [(entry.name, entry.source_relative_path) for entry in result.entries] == [
+        ("valid", "skills/valid"),
+    ]
+    assert result.failures == ()
+    assert len(warnings) == 4
+    assert all(
+        warning.startswith("warning: skipping invalid skill at ")
+        for warning in warnings
+    )
+    warning_text = "\n".join(warnings)
+    assert "skills/missing-description" in warning_text
+    assert "missing description" in warning_text
+    assert "team/skills/wrong-name" in warning_text
+    assert "does not match folder" in warning_text
+    assert "skills/not-frontmatter" in warning_text
+    assert "frontmatter" in warning_text
+    assert "skills/not-utf8" in warning_text
+    assert "not valid UTF-8" in warning_text
+
+
+def test_build_source_catalog_from_backend_collects_failures_and_tries_next(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    working_backend = FakeSourceBackend(
+        {
+            "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        }
+    )
+
+    result = build_source_catalog_from_backends(
+        [repo], paths, {repo.id: (FailingBackend(), working_backend)}
+    )
+
+    assert [entry.name for entry in result.entries] == ["alpha"]
+    assert len(result.failures) == 1
+    assert result.failures[0].user_message == (
+        "broken-backend backend failed for Org/Skills while listing candidate SKILL.md files: "
+        "simulated outage. try again later"
+    )
+
+
+def test_build_source_catalog_from_backend_reports_all_backend_failures(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+
+    result = build_source_catalog_from_backends(
+        [repo], paths, {repo.id: (FailingBackend(),)}
+    )
+
+    assert result.entries == ()
+    assert [failure.backend for failure in result.failures] == ["broken-backend"]
+    assert "simulated outage" in result.failure_report()
+
+
+def test_build_source_catalog_from_backend_reports_unsafe_candidate_path(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+
+    result = build_source_catalog_from_backends(
+        [repo], paths, {repo.id: (UnsafeCandidateBackend(),)}
+    )
+
+    assert result.entries == ()
+    assert [failure.backend for failure in result.failures] == ["unsafe-backend"]
+    assert "unsafe path components" in result.failure_report()
+
+
+def test_build_source_catalog_from_backend_rejects_symlinked_source_cache_path(
+    tmp_path: Path,
+):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    outside_org = tmp_path / "outside-org"
+    outside_org.mkdir()
+    paths.sources_dir.mkdir(parents=True)
+    os.symlink(outside_org, paths.sources_dir / "Org")
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        build_source_catalog_from_backends(
+            [repo], paths, {repo.id: (FakeSourceBackend({}),)}
+        )
+
+
+def test_build_source_catalog_from_backend_rejects_symlinked_source_descendant(
+    tmp_path: Path,
+):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    repo_path.mkdir(parents=True)
+    outside_skills = tmp_path / "outside-skills"
+    outside_skills.mkdir()
+    os.symlink(outside_skills, repo_path / "skills")
+    backend = FakeSourceBackend(
+        {
+            "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha.\n---\n",
+        }
+    )
+
+    with pytest.raises(SvError, match="Source skills path must not contain symlinks"):
+        build_source_catalog_from_backends([repo], paths, {repo.id: (backend,)})
 
 
 def test_build_source_catalog_returns_valid_skills_with_repo_context(tmp_path: Path):
@@ -62,6 +451,67 @@ def test_build_source_catalog_sorts_by_skill_name_then_repo_id(tmp_path: Path):
         ("same", "B/Skills"),
         ("zeta", "B/Skills"),
     ]
+
+
+def test_build_source_catalog_discovers_bounded_and_configured_skill_roots(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(
+        id="Org/Skills",
+        url="https://github.com/Org/Skills.git",
+        skills_paths=("packages/agents/pi/skills",),
+    )
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill_at(repo_path, "skills/alpha", "alpha", "Root alpha.")
+    make_skill_at(repo_path, "team/skills/team-alpha", "team-alpha", "Team alpha.")
+    make_skill_at(
+        repo_path,
+        "packages/agents/pi/skills/deep-alpha",
+        "deep-alpha",
+        "Deep alpha.",
+    )
+    make_skill_at(repo_path, "too/deep/skills/ignored", "ignored", "Ignored.")
+    make_skill_at(repo_path, ".pi/skills/project-local", "project-local", "Ignored.")
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [(entry.name, entry.source_relative_path) for entry in catalog] == [
+        ("alpha", "skills/alpha"),
+        ("deep-alpha", "packages/agents/pi/skills/deep-alpha"),
+        ("team-alpha", "team/skills/team-alpha"),
+    ]
+    assert [entry.source_path for entry in catalog] == [
+        repo_path / "skills" / "alpha",
+        repo_path / "packages" / "agents" / "pi" / "skills" / "deep-alpha",
+        repo_path / "team" / "skills" / "team-alpha",
+    ]
+
+
+def test_same_repo_duplicate_skills_have_path_aware_labels_and_references(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill_at(repo_path, "skills/alpha", "alpha", "Root alpha.")
+    make_skill_at(repo_path, "team/skills/alpha", "alpha", "Team alpha.")
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [(entry.name, entry.source_relative_path) for entry in catalog] == [
+        ("alpha", "skills/alpha"),
+        ("alpha", "team/skills/alpha"),
+    ]
+    assert catalog[0].display_label == "alpha  Org/Skills  Root alpha."
+    assert catalog[1].display_label == (
+        "alpha  Org/Skills:team/skills/alpha  Team alpha."
+    )
+    assert find_qualified_catalog_entry(catalog, "Org/Skills:alpha") == catalog[0]
+    assert (
+        find_qualified_catalog_entry(catalog, "Org/Skills:team/skills/alpha")
+        == catalog[1]
+    )
 
 
 def test_build_source_catalog_ignores_exact_repeated_repo_entries(tmp_path: Path):
@@ -166,6 +616,38 @@ def test_source_skill_exposes_relative_path_and_display_label(tmp_path: Path):
 
     assert entry.source_relative_path == "skills/alpha"
     assert entry.display_label == "alpha  Org/Skills  Alpha skill."
+
+
+def test_build_source_catalog_skips_unsafe_top_level_candidate_root_names(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    repo_path = paths.source_repo_for(repo.id)
+    make_skill(repo_path, "valid", "Valid skill.")
+    make_skill_at(repo_path, "bad:name/skills/ignored", "ignored", "Ignored.")
+    make_skill_at(repo_path, "skills/skills/nested", "nested", "Nested.")
+
+    catalog = build_source_catalog([repo], paths)
+
+    assert [(entry.name, entry.source_relative_path) for entry in catalog] == [
+        ("valid", "skills/valid"),
+    ]
+
+    configured_catalog = build_source_catalog(
+        [
+            RepoConfig(
+                id="Org/Skills",
+                url="https://github.com/Org/Skills.git",
+                skills_paths=("skills/skills",),
+            )
+        ],
+        paths,
+    )
+
+    assert ("nested", "skills/skills/nested") in [
+        (entry.name, entry.source_relative_path) for entry in configured_catalog
+    ]
 
 
 def test_build_source_catalog_skips_invalid_skills(tmp_path: Path):
@@ -278,6 +760,27 @@ def test_build_source_catalog_rejects_symlinked_skills_root(tmp_path: Path):
     os.symlink(outside_skills, repo_path / "skills")
 
     with pytest.raises(SvError, match="Source skills path must not be a symlink"):
+        build_source_catalog([repo], paths)
+
+
+def test_build_source_catalog_rejects_symlinked_configured_root_ancestor(
+    tmp_path: Path,
+):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(
+        id="Org/Skills",
+        url="https://github.com/Org/Skills.git",
+        skills_paths=("linked/skills",),
+    )
+    repo_path = paths.source_repo_for(repo.id)
+    repo_path.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    (outside / "skills" / "alpha").mkdir(parents=True)
+    os.symlink(outside, repo_path / "linked")
+
+    with pytest.raises(SvError, match="Source skills path must not contain symlinks"):
         build_source_catalog([repo], paths)
 
 

@@ -8,6 +8,7 @@ from sv.catalog import SourceSkill, build_source_catalog
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 from sv.project import add_project_skill
+from sv.hashing import sha256_file, sha256_skill_directory
 from sv.skills import parse_skill_file
 from sv.source import ensure_source_repo, ensure_source_repos
 from tests.helpers import write_source_skill
@@ -252,6 +253,59 @@ def test_parse_skill_file_rejects_symlinked_skill_file(tmp_path: Path) -> None:
         parse_skill_file(skill_file, expected_folder="alpha")
 
     assert outside.read_text() == "outside\n"
+
+
+def test_sha256_file_rejects_symlinked_file(tmp_path: Path) -> None:
+    outside = tmp_path / "outside-file"
+    outside.write_text("outside\n")
+    skill_file = tmp_path / "SKILL.md"
+    os.symlink(outside, skill_file, target_is_directory=False)
+
+    with pytest.raises(SvError, match="must not be a symlink"):
+        sha256_file(skill_file)
+
+    assert outside.read_text() == "outside\n"
+
+
+def test_sha256_file_rejects_symlinked_parent(tmp_path: Path) -> None:
+    outside = tmp_path / "outside-parent"
+    outside.mkdir()
+    outside_file = outside / "alpha.txt"
+    outside_file.write_text("outside\n")
+    linked_parent = tmp_path / "linked-parent"
+    os.symlink(outside, linked_parent, target_is_directory=True)
+
+    with pytest.raises(SvError, match="must not contain symlinks"):
+        sha256_file(linked_parent / "alpha.txt")
+
+    assert outside_file.read_text() == "outside\n"
+
+
+def test_sha256_skill_directory_rejects_symlink_inside_tree(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    outside = tmp_path / "outside-data"
+    outside.write_text("outside\n")
+    os.symlink(outside, skill_dir / "secret.txt", target_is_directory=False)
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        sha256_skill_directory(skill_dir)
+
+    assert outside.read_text() == "outside\n"
+
+
+def test_sha256_skill_directory_rejects_symlinked_parent(tmp_path: Path) -> None:
+    outside = tmp_path / "outside-parent"
+    outside_skill = outside / "alpha"
+    outside_skill.mkdir(parents=True)
+    (outside_skill / "SKILL.md").write_text("outside\n")
+    linked_parent = tmp_path / "linked-parent"
+    os.symlink(outside, linked_parent, target_is_directory=True)
+
+    with pytest.raises(SvError, match="must not contain symlinks"):
+        sha256_skill_directory(linked_parent / "alpha")
+
+    assert (outside_skill / "SKILL.md").read_text() == "outside\n"
 
 
 def test_add_project_skill_rejects_symlink_inside_source_skill_tree(tmp_path: Path) -> None:

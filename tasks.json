@@ -1,0 +1,1579 @@
+{
+  "schema_version": 1,
+  "source_plan": "PLAN.md",
+  "generated_at": "2026-05-15",
+  "scope": "Epic 1 first implementation target only: discovery, indexing, vault mode, state, update/sync/status/remove semantics, and TTY UX while preserving current Pi behavior.",
+  "task_selection": {
+    "status_field": "status",
+    "completion_field": "passes",
+    "default_status": "pending",
+    "done_status": "done",
+    "dependency_field": "depends_on",
+    "priority_field": "priority"
+  },
+  "global_constraints": [
+    "Implement exactly one task per agent run.",
+    "Read PLAN.md and relevant source/tests before editing.",
+    "Preserve existing Pi-only project behavior unless the task explicitly changes it.",
+    "Use tests-first development for behavior changes where practical.",
+    "Keep path and symlink security protections at least as strict as current behavior.",
+    "Do not implement deferred Epic 2 cross-agent adapter behavior in this task set.",
+    "Do not implement deferred Epic 3/4 release, installer, governance, or branch-protection work in this task set.",
+    "Do not commit changes."
+  ],
+  "tasks": [
+    {
+      "id": "T001",
+      "priority": 10,
+      "phase": "contracts",
+      "title": "Lock current Pi behavior with baseline contract tests",
+      "status": "done",
+      "passes": true,
+      "depends_on": [],
+      "files_hint": [
+        "tests/",
+        "src/sv/cli.py",
+        "src/sv/project.py",
+        "src/sv/manifest.py"
+      ],
+      "objective": "Add or tighten tests around current behavior that Epic 1 must preserve before refactoring begins.",
+      "steps": [
+        "Inspect existing CLI, catalog, project, source, manifest, and security tests.",
+        "Add missing contract tests for current Pi target paths, add/remove/sync behavior, duplicate source handling, and legacy manifest behavior.",
+        "Avoid implementation rewrites except minimal fixes needed for the new tests to reflect existing intended behavior."
+      ],
+      "acceptance": [
+        "Tests document current .pi/skills install/remove/sync expectations.",
+        "Tests document current source repo and duplicate-skill behavior.",
+        "Security-sensitive path and symlink expectations remain covered."
+      ],
+      "checks": [
+        "Run the focused tests you changed",
+        "Run the smallest relevant existing test subset"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T18:39:34Z",
+      "updated_at": "2026-05-15T18:47:35Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T18:47:35Z"
+    },
+    {
+      "id": "T002",
+      "priority": 20,
+      "phase": "foundations",
+      "title": "Add versioned TOML document helpers",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T001"
+      ],
+      "files_hint": [
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Create shared helpers for reading and writing simple versioned TOML files used by indexes and manifests.",
+      "steps": [
+        "Introduce small internal utilities for schema_version checks, TOML string escaping, atomic text writes, and user-friendly parse errors.",
+        "Support explicit handling for unsupported future schemas and safe old-schema migration hooks.",
+        "Move duplicated TOML escaping only when doing so is low-risk and well covered."
+      ],
+      "acceptance": [
+        "Future schema versions produce actionable update messages instead of low-level tracebacks.",
+        "Atomic writes avoid leaving partially written state files.",
+        "Existing config and manifest tests continue to pass."
+      ],
+      "checks": [
+        "Run focused TOML/helper tests",
+        "Run existing config and manifest tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T18:51:30Z",
+      "updated_at": "2026-05-15T19:06:10Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T19:06:10Z"
+    },
+    {
+      "id": "T003",
+      "priority": 30,
+      "phase": "foundations",
+      "title": "Add safe content hashing utilities",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T002"
+      ],
+      "files_hint": [
+        "src/sv/",
+        "tests/test_security_paths.py",
+        "tests/test_security_source_symlinks.py"
+      ],
+      "objective": "Provide deterministic file and directory hashing for skill content without weakening path safety.",
+      "steps": [
+        "Implement sha256 hashing helpers for files and skill directories.",
+        "Use stable relative paths, file modes where appropriate, and deterministic traversal ordering.",
+        "Reject or surface symlinks and unsafe paths consistently with existing project/source security behavior."
+      ],
+      "acceptance": [
+        "Identical skill trees hash identically regardless of filesystem iteration order.",
+        "Changed file content changes the directory hash.",
+        "Symlink and unsafe path cases are rejected or skipped according to existing security rules."
+      ],
+      "checks": [
+        "Run focused hash tests",
+        "Run security path/symlink tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T19:20:58Z",
+      "updated_at": "2026-05-15T19:33:42Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T19:33:42Z"
+    },
+    {
+      "id": "T004",
+      "priority": 40,
+      "phase": "foundations",
+      "title": "Add atomic skill materialization helpers",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T003"
+      ],
+      "files_hint": [
+        "src/sv/project.py",
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Centralize atomic install/replace behavior for selected skill folders so later backend work can reuse it.",
+      "steps": [
+        "Extract or introduce helpers for temp-directory copy, target rename, rollback, and cleanup.",
+        "Keep add/remove/sync rollback behavior at least as safe as current project.py behavior.",
+        "Make helpers usable with materialized temp folders from future backends."
+      ],
+      "acceptance": [
+        "A failed copy leaves the existing target skill intact.",
+        "A failed manifest update rolls back the filesystem replacement.",
+        "Existing add/remove/sync tests still pass."
+      ],
+      "checks": [
+        "Run focused project filesystem tests",
+        "Run add/remove/sync contract tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T19:33:42Z",
+      "updated_at": "2026-05-15T19:44:36Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T19:44:36Z"
+    },
+    {
+      "id": "T005",
+      "priority": 50,
+      "phase": "foundations",
+      "title": "Generalize source skill catalog models around source paths",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T004"
+      ],
+      "files_hint": [
+        "src/sv/catalog.py",
+        "src/sv/project.py",
+        "tests/test_catalog.py"
+      ],
+      "objective": "Stop assuming every source skill lives at skills/<name> while preserving existing output.",
+      "steps": [
+        "Update SourceSkill or introduce a catalog entry model with explicit source_path and source_relative_path fields.",
+        "Ensure same-name entries from the same repo can be distinguished by source path.",
+        "Keep current simple skills/<name> repos working."
+      ],
+      "acceptance": [
+        "Catalog entries can represent skills in skills/, */skills/, and configured deep roots.",
+        "Display labels and qualified references have enough source path information for duplicate resolution.",
+        "Existing catalog duplicate tests continue to pass or are updated to the new path-aware contract."
+      ],
+      "checks": [
+        "Run catalog tests",
+        "Run duplicate regression tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T19:44:36Z",
+      "updated_at": "2026-05-15T20:05:53Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T20:05:53Z"
+    },
+    {
+      "id": "T006",
+      "priority": 60,
+      "phase": "state",
+      "title": "Implement canonical project .sv/manifest.toml model",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T005"
+      ],
+      "files_hint": [
+        "src/sv/manifest.py",
+        "src/sv/project.py",
+        "tests/test_manifest.py"
+      ],
+      "objective": "Create the canonical project manifest at .sv/manifest.toml with schema_version and fields needed by update/sync/status.",
+      "steps": [
+        "Add reader/writer for project-root .sv/manifest.toml without deleting the legacy reader yet.",
+        "Track managed skills with target kind, target agent when applicable, target path, source repo details, source path, hashes, description, and state flags where available.",
+        "Keep serialization deterministic for clean diffs."
+      ],
+      "acceptance": [
+        ".sv/manifest.toml round-trips valid managed skill entries.",
+        "Future schema errors are actionable.",
+        "Empty manifests are handled cleanly."
+      ],
+      "checks": [
+        "Run manifest tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T20:05:53Z",
+      "updated_at": "2026-05-15T20:19:24Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T20:19:24Z"
+    },
+    {
+      "id": "T007",
+      "priority": 70,
+      "phase": "state",
+      "title": "Read and migrate legacy Pi manifests on next write",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T006"
+      ],
+      "files_hint": [
+        "src/sv/manifest.py",
+        "src/sv/project.py",
+        "tests/test_manifest.py",
+        "tests/test_project.py"
+      ],
+      "objective": "Maintain compatibility with .pi/skills/.sv-manifest.toml while moving writes to .sv/manifest.toml.",
+      "steps": [
+        "Load canonical project manifest first when present.",
+        "Fall back to the legacy Pi manifest when canonical state does not exist.",
+        "On the next manifest write, persist canonical .sv/manifest.toml with migrated entries."
+      ],
+      "acceptance": [
+        "Existing legacy projects continue to sync/update/remove correctly.",
+        "The next write creates canonical state without losing origin data.",
+        "Manual/unmanaged skills remain unmanaged."
+      ],
+      "checks": [
+        "Run manifest migration tests",
+        "Run project tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T20:19:24Z",
+      "updated_at": "2026-05-15T20:27:46Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T20:27:46Z"
+    },
+    {
+      "id": "T008",
+      "priority": 80,
+      "phase": "state",
+      "title": "Switch project add/remove to canonical manifest writes",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T007"
+      ],
+      "files_hint": [
+        "src/sv/project.py",
+        "src/sv/cli.py",
+        "tests/test_cli_add_contracts.py",
+        "tests/test_cli_remove_contracts.py"
+      ],
+      "objective": "Update normal project install/remove flows to use .sv/manifest.toml as the canonical managed-skill state.",
+      "steps": [
+        "Update add_project_skill and remove_project_skill to write canonical manifest entries after successful file operations.",
+        "Ensure manifest writes still roll back filesystem changes on failure.",
+        "Keep Pi target directory behavior unchanged for normal projects."
+      ],
+      "acceptance": [
+        "Normal project sv add writes .sv/manifest.toml.",
+        "Normal project sv remove removes only the matching managed manifest entry.",
+        "Legacy manifests are not required for new writes."
+      ],
+      "checks": [
+        "Run add/remove contract tests",
+        "Run manifest tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T20:27:46Z",
+      "updated_at": "2026-05-15T20:35:27Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T20:35:27Z"
+    },
+    {
+      "id": "T009",
+      "priority": 90,
+      "phase": "state",
+      "title": "Add global source-state manifest",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T008"
+      ],
+      "files_hint": [
+        "src/sv/config.py",
+        "src/sv/source.py",
+        "src/sv/manifest.py",
+        "tests/"
+      ],
+      "objective": "Create ~/.sv/manifest.toml support for per-source catalog/backend/index refresh state.",
+      "steps": [
+        "Add schema-versioned global manifest reader/writer under SvPaths.",
+        "Track configured repo id/url, last refresh metadata, backend name, index/catalog hashes, and health details as available.",
+        "Do not store project installation state in the global manifest."
+      ],
+      "acceptance": [
+        "Global source state round-trips deterministic TOML.",
+        "Missing global manifest is treated as empty state.",
+        "Source state is separate from project managed-skill state."
+      ],
+      "checks": [
+        "Run new global manifest tests",
+        "Run config tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T20:35:27Z",
+      "updated_at": "2026-05-15T20:56:59Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T20:56:59Z"
+    },
+    {
+      "id": "T010",
+      "priority": 100,
+      "phase": "config",
+      "title": "Support configured explicit source skills paths",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T009"
+      ],
+      "files_hint": [
+        "src/sv/config.py",
+        "tests/test_config.py"
+      ],
+      "objective": "Allow repos to store repeated explicit skills-path roots for deep generic repositories.",
+      "steps": [
+        "Add a tuple/list of skills_paths to RepoConfig with safe relative path validation.",
+        "Parse and write skills_paths in ~/.sv/config.toml.",
+        "Preserve backwards compatibility with existing config files and repo aliases."
+      ],
+      "acceptance": [
+        "Repeated skills_paths round-trip through config.",
+        "Absolute paths, parent traversal, empty paths, and control characters are rejected.",
+        "Existing config files without skills_paths continue to load."
+      ],
+      "checks": [
+        "Run config tests",
+        "Run security path tests if touched"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T20:56:59Z",
+      "updated_at": "2026-05-15T21:06:49Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T21:06:49Z"
+    },
+    {
+      "id": "T011",
+      "priority": 110,
+      "phase": "config",
+      "title": "Add sv repo add --skills-path CLI handling",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T010"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/config.py",
+        "tests/test_cli_source_commands.py"
+      ],
+      "objective": "Expose repeated --skills-path flags on sv repo add while keeping repo list output simple.",
+      "steps": [
+        "Update argparse for sv repo add to accept repeated --skills-path values.",
+        "Store paths in RepoConfig through add_repo.",
+        "Keep sv repo list focused on repo/url/cache and do not expose indexed/generic mode by default."
+      ],
+      "acceptance": [
+        "sv repo add owner/repo --skills-path packages/agents/pi/skills stores the path.",
+        "Multiple --skills-path flags are preserved in order without duplicates if that is the chosen config behavior.",
+        "Invalid skills paths produce helpful CLI errors."
+      ],
+      "checks": [
+        "Run source command CLI tests",
+        "Run config tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T21:06:49Z",
+      "updated_at": "2026-05-15T21:11:43Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T21:11:43Z"
+    },
+    {
+      "id": "T012",
+      "priority": 120,
+      "phase": "index",
+      "title": "Implement .sv/index.toml parser and writer",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T011"
+      ],
+      "files_hint": [
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Add schema-versioned index support for skill-vault and project-index repos.",
+      "steps": [
+        "Create index data models for schema_version, kind, generated metadata, and skills entries.",
+        "Parse skill entries with name, description, source_path, content_hash, and skill_file_hash.",
+        "Write deterministic TOML and handle unsupported future schema versions clearly."
+      ],
+      "acceptance": [
+        "Valid skill-vault and project-index files parse successfully.",
+        "Duplicate skill names with different source_path entries are allowed.",
+        "Unsupported future schema prompts users to update sv."
+      ],
+      "checks": [
+        "Run index parser/writer tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T21:11:43Z",
+      "updated_at": "2026-05-15T21:19:48Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T21:19:48Z"
+    },
+    {
+      "id": "T013",
+      "priority": 130,
+      "phase": "index",
+      "title": "Add sv index recursive scanner",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T012"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/skills.py",
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Implement sv index to recursively scan a Git repo for valid SKILL.md files and write .sv/index.toml.",
+      "steps": [
+        "Add sv index command and handler.",
+        "Scan recursively while skipping .git, .sv, .venv, node_modules, dist, build, __pycache__, and other common cache/build directories.",
+        "Include known agent project skill directories such as .pi/skills and manually-created valid skills.",
+        "Warn and skip invalid skills."
+      ],
+      "acceptance": [
+        "sv index writes .sv/index.toml with valid entries and hashes.",
+        "Invalid skills warn and do not stop indexing unless a hard filesystem error occurs.",
+        "Duplicate names with different source paths are included."
+      ],
+      "checks": [
+        "Run index command tests",
+        "Run skills parser tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T21:19:48Z",
+      "updated_at": "2026-05-15T21:28:21Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T21:28:21Z"
+    },
+    {
+      "id": "T014",
+      "priority": 140,
+      "phase": "index",
+      "title": "Implement README generated skill table updater",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T013"
+      ],
+      "files_hint": [
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Update only the sv-generated README block for skill-vault repositories.",
+      "steps": [
+        "Add helper for markers <!-- sv:skills:start --> and <!-- sv:skills:end -->.",
+        "Generate a Markdown table with Skill and Description columns from current valid indexed skills.",
+        "Preserve all user-authored README content outside the markers."
+      ],
+      "acceptance": [
+        "Existing README text outside markers is unchanged.",
+        "Missing markers can be created where sv init needs them.",
+        "Only skill-vault mode updates README automatically."
+      ],
+      "checks": [
+        "Run README updater tests",
+        "Run index tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T21:28:21Z",
+      "updated_at": "2026-05-15T21:37:16Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T21:37:16Z"
+    },
+    {
+      "id": "T015",
+      "priority": 150,
+      "phase": "init-vault",
+      "title": "Implement sv init for skill-vault repos",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T014"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Add sv init [folder] to create a skill-vault repository scaffold.",
+      "steps": [
+        "Create target folder if needed and initialize Git if target is not already a Git repo.",
+        "Create skills/, .sv/index.toml with kind skill-vault, .sv/manifest.toml as needed, and README markers/table.",
+        "Do not create a sample skill."
+      ],
+      "acceptance": [
+        "sv init works in the current folder.",
+        "sv init folder-name creates and initializes the target folder.",
+        "Existing Git repos are not reinitialized destructively."
+      ],
+      "checks": [
+        "Run init tests",
+        "Run CLI help tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T21:37:16Z",
+      "updated_at": "2026-05-15T22:03:13Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T22:03:13Z"
+    },
+    {
+      "id": "T016",
+      "priority": 160,
+      "phase": "init-vault",
+      "title": "Detect skill-vault mode and route targets",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T015"
+      ],
+      "files_hint": [
+        "src/sv/project.py",
+        "src/sv/cli.py",
+        "src/sv/agents.py",
+        "tests/"
+      ],
+      "objective": "Use .sv/index.toml kind=skill-vault to install/remove root vault skills instead of Pi project skills.",
+      "steps": [
+        "Add context detection for nearest Git root and .sv/index.toml kind.",
+        "In skill-vault mode, route add/remove/update/sync targets to skills/<skill> at repo root.",
+        "In normal project mode, preserve current Pi target behavior."
+      ],
+      "acceptance": [
+        "Vault sv add installs to root skills/<skill>.",
+        "Normal project sv add still installs to .pi/skills/<skill>.",
+        "Command output makes vault target behavior obvious."
+      ],
+      "checks": [
+        "Run vault tests",
+        "Run normal project add/remove tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T22:03:13Z",
+      "updated_at": "2026-05-15T22:37:26Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T22:37:26Z"
+    },
+    {
+      "id": "T017",
+      "priority": 170,
+      "phase": "init-vault",
+      "title": "Refresh index and README after mutating commands",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T016"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/project.py",
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Keep existing .sv/index.toml and skill-vault README generated blocks current after local skill changes.",
+      "steps": [
+        "After add/remove/update/sync, refresh .sv/index.toml only when it already exists or the repo is a skill-vault.",
+        "Refresh README generated block only when kind=skill-vault.",
+        "Do not implicitly create .sv/index.toml for normal project operations unless it already exists."
+      ],
+      "acceptance": [
+        "Normal project add without existing index does not create .sv/index.toml.",
+        "Normal project add with existing index refreshes it.",
+        "Vault mutations refresh both index and README generated block."
+      ],
+      "checks": [
+        "Run vault tests",
+        "Run index refresh tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T22:37:26Z",
+      "updated_at": "2026-05-15T22:44:55Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T22:44:55Z"
+    },
+    {
+      "id": "T018",
+      "priority": 180,
+      "phase": "backends",
+      "title": "Introduce lightweight source backend interface",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T017"
+      ],
+      "files_hint": [
+        "src/sv/source.py",
+        "src/sv/catalog.py",
+        "tests/test_source.py",
+        "tests/test_catalog.py"
+      ],
+      "objective": "Create backend abstractions so list/search can avoid persistent full clones.",
+      "steps": [
+        "Define interfaces for reading remote files, listing candidate SKILL.md files, reading indexes, and materializing selected folders.",
+        "Represent backend names and failure details for user-facing messages and global state.",
+        "Keep a fake backend path easy to test without network."
+      ],
+      "acceptance": [
+        "Source discovery can be tested without invoking git or network commands.",
+        "Backend failures are collected and reported actionably.",
+        "No full-clone fallback is introduced by the abstraction."
+      ],
+      "checks": [
+        "Run source backend tests",
+        "Run catalog tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T22:44:55Z",
+      "updated_at": "2026-05-15T22:57:57Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T22:57:57Z"
+    },
+    {
+      "id": "T019",
+      "priority": 190,
+      "phase": "backends",
+      "title": "Implement GitHub gh api backend",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T018"
+      ],
+      "files_hint": [
+        "src/sv/source.py",
+        "tests/test_source.py"
+      ],
+      "objective": "Use gh api as the lightest backend when available and authenticated for GitHub sources.",
+      "steps": [
+        "Parse supported GitHub repo URLs into owner/repo references.",
+        "Use gh api to read .sv/index.toml, candidate SKILL.md files, and selected folder contents.",
+        "Detect gh absence/auth/rate-limit failures and return structured fallback reasons."
+      ],
+      "acceptance": [
+        "gh api backend is selected before HTTPS and Git fallbacks when usable.",
+        "Private repos can use existing gh auth.",
+        "Rate-limit/auth messages recommend gh auth login or GH_TOKEN where helpful."
+      ],
+      "checks": [
+        "Run source backend tests with fake runner"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T22:57:57Z",
+      "updated_at": "2026-05-15T23:13:18Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T23:13:18Z"
+    },
+    {
+      "id": "T020",
+      "priority": 200,
+      "phase": "backends",
+      "title": "Implement direct GitHub HTTPS API fallback",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T019"
+      ],
+      "files_hint": [
+        "src/sv/source.py",
+        "tests/test_source.py"
+      ],
+      "objective": "Support unauthenticated or token-authenticated GitHub API reads without gh.",
+      "steps": [
+        "Read .sv/index.toml and candidate SKILL.md files through GitHub HTTPS API endpoints.",
+        "Honor GH_TOKEN or equivalent environment token if already present without prompting.",
+        "On rate limits or auth failures, return structured fallback reasons for Git backends."
+      ],
+      "acceptance": [
+        "HTTPS backend can list indexed and bounded generic skills in tests using fake HTTP responses.",
+        "Rate-limit fallback behavior is covered.",
+        "No full folder downloads occur during list/search."
+      ],
+      "checks": [
+        "Run source backend tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T23:13:18Z",
+      "updated_at": "2026-05-15T23:23:57Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T23:23:57Z"
+    },
+    {
+      "id": "T021",
+      "priority": 210,
+      "phase": "backends",
+      "title": "Implement lightweight Git fallback without full clones",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T020"
+      ],
+      "files_hint": [
+        "src/sv/source.py",
+        "tests/test_source.py",
+        "tests/test_security_source_symlinks.py"
+      ],
+      "objective": "Provide treeless/blobless sparse Git fallback paths while never silently full-cloning.",
+      "steps": [
+        "Use partial clone, sparse checkout, archive-style extraction, or equivalent lightweight Git commands for metadata and selected folder materialization.",
+        "Prefer treeless partial Git, then blobless sparse Git, matching PLAN.md backend order as closely as practical.",
+        "Fail helpfully if lightweight methods fail instead of running git clone without filters."
+      ],
+      "acceptance": [
+        "Tests assert no plain full-clone command is used silently.",
+        "Git fallback can fetch index/SKILL.md metadata and selected folders in fake-runner tests.",
+        "Source cache symlink protections remain intact."
+      ],
+      "checks": [
+        "Run source backend tests",
+        "Run source security tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T23:23:57Z",
+      "updated_at": "2026-05-15T23:41:07Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-15T23:41:07Z"
+    },
+    {
+      "id": "T022",
+      "priority": 220,
+      "phase": "discovery",
+      "title": "Wire indexed discovery into list/search catalogs",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T021"
+      ],
+      "files_hint": [
+        "src/sv/source.py",
+        "src/sv/catalog.py",
+        "src/sv/cli.py",
+        "tests/"
+      ],
+      "objective": "Use .sv/index.toml as the trusted fast path for sv list and sv search.",
+      "steps": [
+        "For each configured source, try .sv/index.toml first through the backend chain.",
+        "If present and supported, build catalog entries from the index without downloading full skill folders.",
+        "If a previously indexed source loses its index, fall back to generic discovery next refresh."
+      ],
+      "acceptance": [
+        "Indexed GitHub source lists skills without full clone or full folder downloads.",
+        "Unsupported future index schema tells the user to update sv.",
+        "Missing index falls back to generic discovery instead of hard failing."
+      ],
+      "checks": [
+        "Run discovery/backend tests",
+        "Run list contract tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-15T23:41:07Z",
+      "updated_at": "2026-05-16T00:00:14Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T00:00:14Z"
+    },
+    {
+      "id": "T023",
+      "priority": 230,
+      "phase": "discovery",
+      "title": "Implement generic bounded fallback discovery",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T022"
+      ],
+      "files_hint": [
+        "src/sv/source.py",
+        "src/sv/catalog.py",
+        "tests/test_catalog.py",
+        "tests/test_source.py"
+      ],
+      "objective": "Discover valid skills in generic repos by reading only bounded candidate SKILL.md files.",
+      "steps": [
+        "Search default roots skills/ and */skills/ plus configured skills_paths.",
+        "Fetch only candidate SKILL.md files during list/search.",
+        "Validate frontmatter name/description, folder-name match, and safe paths before showing entries."
+      ],
+      "acceptance": [
+        "Generic discovery finds skills/ and one-level */skills/ layouts.",
+        "Deep layouts require an index or explicit --skills-path config.",
+        "Invalid candidate skills warn/skip and are not listed."
+      ],
+      "checks": [
+        "Run generic discovery tests",
+        "Run skills parser tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T00:00:14Z",
+      "updated_at": "2026-05-16T00:25:19Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T00:25:19Z"
+    },
+    {
+      "id": "T024",
+      "priority": 240,
+      "phase": "materialization",
+      "title": "Materialize only selected skill folders",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T023"
+      ],
+      "files_hint": [
+        "src/sv/source.py",
+        "src/sv/project.py",
+        "src/sv/catalog.py",
+        "tests/"
+      ],
+      "objective": "Ensure sv add, update, and sync download only the selected skill folder before atomic install/replace.",
+      "steps": [
+        "Add backend materialization into an operation temp directory for a selected catalog entry.",
+        "Validate safe paths and SKILL.md after materialization and before install/replace.",
+        "Compute content hashes before updating manifests."
+      ],
+      "acceptance": [
+        "Adding one skill does not persistently cache full skill folders by default.",
+        "Materialized folders are validated before local files are changed.",
+        "Manifest state updates only after successful filesystem operations."
+      ],
+      "checks": [
+        "Run materialization tests",
+        "Run add/sync contract tests",
+        "Run security path tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T00:25:19Z",
+      "updated_at": "2026-05-16T00:45:09Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T00:45:09Z"
+    },
+    {
+      "id": "T025",
+      "priority": 250,
+      "phase": "commands",
+      "title": "Add sv search command with ranked non-TTY output",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T024"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/catalog.py",
+        "tests/"
+      ],
+      "objective": "Implement sv search <query> over source catalog metadata with scriptable output first.",
+      "steps": [
+        "Search skill name, description, repo id, and source path.",
+        "Use case-insensitive text matching with lightweight fuzzy ranking.",
+        "Print plain ranked results in non-TTY mode using existing table conventions."
+      ],
+      "acceptance": [
+        "sv search <query> returns ranked matching source entries.",
+        "Repo id and source path can match results.",
+        "No full skill folders are downloaded for search."
+      ],
+      "checks": [
+        "Run search tests",
+        "Run list/catalog tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T00:45:09Z",
+      "updated_at": "2026-05-16T00:57:30Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T00:57:30Z"
+    },
+    {
+      "id": "T026",
+      "priority": 260,
+      "phase": "commands",
+      "title": "Implement first-run source configuration behavior",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T025"
+      ],
+      "files_hint": [
+        "src/sv/config.py",
+        "src/sv/cli.py",
+        "tests/"
+      ],
+      "objective": "Handle missing global repo config according to TTY and non-TTY rules without hardcoding permanent release defaults.",
+      "steps": [
+        "When no config exists in a TTY, prompt with pluggable recommended sources.",
+        "When no config exists in non-TTY, fail helpfully with sv repo add <repo> guidance.",
+        "Treat repos = [] as explicit no-source configuration."
+      ],
+      "acceptance": [
+        "Non-TTY no-config commands do not silently use HamdiMaz/Skills as a permanent default.",
+        "repos = [] disables all sources and is not treated as missing config.",
+        "Recommended source list is centralized/configurable for release-time decisions."
+      ],
+      "checks": [
+        "Run config tests",
+        "Run list/search CLI tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T00:57:30Z",
+      "updated_at": "2026-05-16T01:08:39Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T01:08:39Z"
+    },
+    {
+      "id": "T027",
+      "priority": 270,
+      "phase": "update-sync-status",
+      "title": "Track local hashes and modified/update states",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T026"
+      ],
+      "files_hint": [
+        "src/sv/manifest.py",
+        "src/sv/project.py",
+        "tests/"
+      ],
+      "objective": "Use content hashes to distinguish unchanged, locally modified, update-available, and orphan candidates.",
+      "steps": [
+        "Store installed source content hash and last checked local content hash in canonical manifest entries.",
+        "Compare current local content hash to last installed/synced hash before update/sync decisions.",
+        "Keep state flags deterministic and visible to later status output."
+      ],
+      "acceptance": [
+        "Unchanged managed skills are recognized by hash.",
+        "Local edits are detected without comparing timestamps.",
+        "Hash fields update only after successful installs/replacements."
+      ],
+      "checks": [
+        "Run hash/state tests",
+        "Run manifest tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T01:08:39Z",
+      "updated_at": "2026-05-16T01:23:10Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T01:23:10Z"
+    },
+    {
+      "id": "T028",
+      "priority": 280,
+      "phase": "update-sync-status",
+      "title": "Implement sv update preserve-local-edits semantics",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T027"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/project.py",
+        "tests/test_cli_update_contracts.py"
+      ],
+      "objective": "Change sv update to refresh source metadata and update only unmodified managed local skills.",
+      "steps": [
+        "Refresh source metadata through lightweight backends.",
+        "Skip replacement when local content hash differs from the last installed/synced hash.",
+        "Mark modified and update-available states when relevant, then refresh index/README when applicable."
+      ],
+      "acceptance": [
+        "sv update updates unchanged managed skills when remote changed.",
+        "sv update does not overwrite local user edits.",
+        "sv update skips unchanged remote skills without unnecessary downloads/replacements."
+      ],
+      "checks": [
+        "Run update contract tests",
+        "Run materialization tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T01:23:10Z",
+      "updated_at": "2026-05-16T01:49:18Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T01:49:18Z"
+    },
+    {
+      "id": "T029",
+      "priority": 290,
+      "phase": "update-sync-status",
+      "title": "Implement sv sync force-reset semantics",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T028"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/project.py",
+        "tests/test_cli_sync_contracts.py"
+      ],
+      "objective": "Make sv sync restore sv-managed skills to latest source state even when local edits exist.",
+      "steps": [
+        "Refresh source metadata through lightweight backends.",
+        "For existing source entries, materialize latest selected skill folders and replace local managed folders even if modified.",
+        "Clear modified/update-available state after successful replacement."
+      ],
+      "acceptance": [
+        "sv sync replaces locally modified managed skills from source.",
+        "sv sync does not remove orphan local files automatically.",
+        "Manifest hashes and state reflect the new source after replacement."
+      ],
+      "checks": [
+        "Run sync contract tests",
+        "Run update tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T01:49:18Z",
+      "updated_at": "2026-05-16T01:55:26Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T01:55:26Z"
+    },
+    {
+      "id": "T030",
+      "priority": 300,
+      "phase": "update-sync-status",
+      "title": "Implement orphan tracking and reattachment",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T029"
+      ],
+      "files_hint": [
+        "src/sv/project.py",
+        "src/sv/manifest.py",
+        "tests/"
+      ],
+      "objective": "Mark missing source skills as orphan without deleting local files and reattach when they reappear.",
+      "steps": [
+        "During update/sync/status, detect manifest-managed skills whose recorded repo/path/name no longer exists in the refreshed catalog.",
+        "Persist orphan state in .sv/manifest.toml and show it in relevant command output.",
+        "When the same repo/path/name reappears, clear orphan state and resume normal behavior."
+      ],
+      "acceptance": [
+        "Orphan local files are never deleted automatically.",
+        "sv update and sv sync mark missing sources as orphan.",
+        "Reappearing sources reattach without manual manifest editing."
+      ],
+      "checks": [
+        "Run orphan tests",
+        "Run update/sync tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T01:55:26Z",
+      "updated_at": "2026-05-16T02:06:14Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T02:06:14Z"
+    },
+    {
+      "id": "T031",
+      "priority": 310,
+      "phase": "update-sync-status",
+      "title": "Implement sv status for project context",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T030"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/project.py",
+        "tests/"
+      ],
+      "objective": "Add context-aware sv status output for normal project repos.",
+      "steps": [
+        "Find nearest Git root and inspect .sv/manifest.toml and .sv/index.toml.",
+        "For normal projects, show installed sv-managed skills with agent/target path, source, local modified state, remote update availability, and orphan state.",
+        "Keep unmanaged/manual skills out of managed bulk operation output unless explicitly relevant."
+      ],
+      "acceptance": [
+        "sv status in a normal project shows managed Pi skills and state flags.",
+        "Modified/update-available/orphan states are understandable.",
+        "Manual unmanaged skills are not presented as managed."
+      ],
+      "checks": [
+        "Run status project tests",
+        "Run manifest/state tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T02:06:14Z",
+      "updated_at": "2026-05-16T02:22:01Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T02:22:01Z"
+    },
+    {
+      "id": "T032",
+      "priority": 320,
+      "phase": "update-sync-status",
+      "title": "Implement sv status for vault and global contexts",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T031"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/",
+        "tests/"
+      ],
+      "objective": "Complete sv status behavior for skill-vault repos and outside-project contexts.",
+      "steps": [
+        "In skill-vault repos, show root vault skills, source, edits, updates, orphan state, index freshness, and README generated-block freshness.",
+        "Outside any Git/project context, show global source status from ~/.sv/manifest.toml.",
+        "Keep output scriptable in non-TTY mode."
+      ],
+      "acceptance": [
+        "sv status in a vault reports index and README freshness.",
+        "sv status outside a project reports configured source health.",
+        "Context detection is covered by tests."
+      ],
+      "checks": [
+        "Run status vault/global tests",
+        "Run CLI tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T02:22:01Z",
+      "updated_at": "2026-05-16T02:36:59Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T02:36:59Z"
+    },
+    {
+      "id": "T033",
+      "priority": 330,
+      "phase": "commands",
+      "title": "Improve duplicate add resolution with source paths",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T032"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/catalog.py",
+        "tests/"
+      ],
+      "objective": "Resolve duplicate skill names by repo/path/description without forcing normal users to type paths in TTY mode.",
+      "steps": [
+        "When sv add <skill> has multiple source matches, show interactive choices in TTY and fail with exact scriptable choices in non-TTY.",
+        "For same-repo same-name duplicates, show full source path in choices.",
+        "Retain qualified references for non-interactive use."
+      ],
+      "acceptance": [
+        "TTY duplicate sv add offers a clear chooser.",
+        "Non-TTY duplicate sv add fails with repo/path/scriptable choices.",
+        "Same repo duplicate source paths are distinguishable."
+      ],
+      "checks": [
+        "Run duplicate add tests",
+        "Run CLI add contract tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T02:36:59Z",
+      "updated_at": "2026-05-16T02:46:16Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T02:46:16Z"
+    },
+    {
+      "id": "T034",
+      "priority": 340,
+      "phase": "commands",
+      "title": "Implement add-all and list picker command changes",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T033"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/selector.py",
+        "tests/"
+      ],
+      "objective": "Finish sv add --all, sv add --all --repo, and sv add -l behavior while removing special sv add all behavior.",
+      "steps": [
+        "Treat sv add all as a normal skill name instead of the all alias.",
+        "Support sv add --all and sv add --all --repo <repo-id> with duplicate handling.",
+        "Make sv add -l use multi-select and resolve selected duplicate skill names before copying."
+      ],
+      "acceptance": [
+        "sv add all looks for a skill literally named all.",
+        "sv add --all --repo installs all valid skills from one source.",
+        "Selected duplicates are resolved before any local files are changed."
+      ],
+      "checks": [
+        "Run add-all tests",
+        "Run add -l tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T02:46:16Z",
+      "updated_at": "2026-05-16T02:56:35Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T02:56:35Z"
+    },
+    {
+      "id": "T035",
+      "priority": 350,
+      "phase": "commands",
+      "title": "Implement vault replacement prompts and --replace",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T034"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/project.py",
+        "tests/"
+      ],
+      "objective": "Handle existing target paths safely in skill-vault mode.",
+      "steps": [
+        "When a vault skill target already exists, prompt for replacement in TTY mode.",
+        "Require --replace for non-TTY replacement.",
+        "Warn when local edits are detected before replacement."
+      ],
+      "acceptance": [
+        "TTY vault add prompts before replacing an existing skill.",
+        "Non-TTY vault add refuses replacement unless --replace is provided.",
+        "Local edit warnings are shown before destructive replacement."
+      ],
+      "checks": [
+        "Run vault replacement tests",
+        "Run add tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T02:56:36Z",
+      "updated_at": "2026-05-16T03:08:15Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T03:08:15Z"
+    },
+    {
+      "id": "T036",
+      "priority": 360,
+      "phase": "commands",
+      "title": "Implement managed removal flows",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T035"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/project.py",
+        "src/sv/selector.py",
+        "tests/"
+      ],
+      "objective": "Add interactive and bulk removal behavior that never removes unmanaged skills accidentally.",
+      "steps": [
+        "Implement sv remove -l multi-select with Skill, target path, and source/orphan status rows plus confirmation.",
+        "Implement sv remove --all to remove only manifest-managed skills, with TTY confirmation and non-TTY --yes requirement.",
+        "Implement sv repo remove -l multi-select repo removal with confirmation."
+      ],
+      "acceptance": [
+        "Bulk remove ignores manual/unmanaged skill folders.",
+        "Non-TTY sv remove --all requires --yes.",
+        "Repo removal picker confirms before changing config."
+      ],
+      "checks": [
+        "Run remove contract tests",
+        "Run repo command tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T03:08:15Z",
+      "updated_at": "2026-05-16T03:24:59Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T03:24:59Z"
+    },
+    {
+      "id": "T037",
+      "priority": 370,
+      "phase": "tty-ux",
+      "title": "Choose and encapsulate the TTY UI approach",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T036"
+      ],
+      "files_hint": [
+        "src/sv/selector.py",
+        "src/sv/table.py",
+        "pyproject.toml",
+        "tests/"
+      ],
+      "objective": "Make a deliberate terminal UI dependency decision and isolate UI code behind testable primitives.",
+      "steps": [
+        "Compare current stdlib selector/table code against lightweight dependency options in the context of cross-platform UX, tiny install, and fast delivery.",
+        "Prefer no new runtime dependency unless tests show current approach cannot meet the first target.",
+        "Encapsulate the chosen approach so command handlers remain simple and non-TTY output stays separate."
+      ],
+      "acceptance": [
+        "The chosen UI approach is reflected in code structure and tests.",
+        "No broad dependency is added without a clear reason.",
+        "Non-TTY behavior remains independent of TTY rendering."
+      ],
+      "checks": [
+        "Run selector/table tests",
+        "Run CLI non-TTY tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T03:24:59Z",
+      "updated_at": "2026-05-16T03:32:35Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T03:32:35Z"
+    },
+    {
+      "id": "T038",
+      "priority": 380,
+      "phase": "tty-ux",
+      "title": "Build reusable interactive table and picker primitives",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T037"
+      ],
+      "files_hint": [
+        "src/sv/selector.py",
+        "src/sv/table.py",
+        "tests/test_selector.py",
+        "tests/test_table.py"
+      ],
+      "objective": "Support the common TTY list/search/repo/add/remove UX with aligned columns, filtering, details, and checkbox selection.",
+      "steps": [
+        "Add read-only table navigation with headers, highlighted current row, one-line truncation, range/count footer, and q cancel/back.",
+        "Add checkbox multi-select picker without numeric row prefixes.",
+        "Add slash filtering and Enter details hooks where appropriate."
+      ],
+      "acceptance": [
+        "Pickers use checkboxes and no numeric prefixes.",
+        "Read-only tables use a highlighted current row and footer help.",
+        "Slash filtering works in tested selector/table states."
+      ],
+      "checks": [
+        "Run selector tests",
+        "Run table tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T03:32:35Z",
+      "updated_at": "2026-05-16T03:46:32Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T03:46:32Z"
+    },
+    {
+      "id": "T039",
+      "priority": 390,
+      "phase": "tty-ux",
+      "title": "Wire interactive list/search/repo browsing views",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T038"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "src/sv/selector.py",
+        "tests/"
+      ],
+      "objective": "Use the reusable TTY primitives for sv list, sv search, sv repo list, and sv repo -l.",
+      "steps": [
+        "Make TTY sv list show Skill, Source, Description rows with details on Enter.",
+        "Make TTY sv search show an interactive filtered table with details on Enter.",
+        "Make TTY sv repo list and sv repo -l open a repo browser where Enter shows repo skills and supports install one/all/filter/back."
+      ],
+      "acceptance": [
+        "TTY list/search/repo list are interactive by default.",
+        "Non-TTY list/search/repo list keep plain/scriptable output.",
+        "Repo skill view can install one skill or all skills from that repo."
+      ],
+      "checks": [
+        "Run TTY selector integration tests",
+        "Run non-TTY CLI tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T03:46:32Z",
+      "updated_at": "2026-05-16T04:06:38Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T04:06:38Z"
+    },
+    {
+      "id": "T040",
+      "priority": 400,
+      "phase": "commands",
+      "title": "Add sv repo -l alias and svx console script",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T039"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "pyproject.toml",
+        "tests/test_cli_help.py",
+        "tests/test_cli_source_commands.py"
+      ],
+      "objective": "Add command aliases requested by the PLAN without adding unsupported aliases.",
+      "steps": [
+        "Make sv repo -l an exact alias for sv repo list.",
+        "Add svx <repo> console script equivalent to sv repo add <repo>.",
+        "Do not add sv add repo <repo> as an alias."
+      ],
+      "acceptance": [
+        "sv repo -l behaves like sv repo list in TTY and non-TTY contexts.",
+        "svx owner/repo calls the repo-add flow and returns matching output/errors.",
+        "CLI help and package metadata include the new script."
+      ],
+      "checks": [
+        "Run CLI source command tests",
+        "Run help/package smoke tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T04:06:38Z",
+      "updated_at": "2026-05-16T04:11:28Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T04:11:28Z"
+    },
+    {
+      "id": "T041",
+      "priority": 410,
+      "phase": "quality",
+      "title": "Add Epic 1 end-to-end acceptance coverage",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T040"
+      ],
+      "files_hint": [
+        "tests/",
+        "src/sv/"
+      ],
+      "objective": "Cover the complete first implementation target with realistic end-to-end and contract tests.",
+      "steps": [
+        "Add E2E tests for indexed sources, generic fallback, explicit skills paths, materialization, manifests, vault mode, update/sync/orphan/status, and command changes.",
+        "Use fake backends or local fixtures to avoid network dependence.",
+        "Keep security tests for path traversal, symlinks, and control characters green."
+      ],
+      "acceptance": [
+        "Acceptance criteria from PLAN.md Epic 1 are represented in tests where feasible.",
+        "Tests do not require external network access.",
+        "Coverage remains aligned with the existing project threshold."
+      ],
+      "checks": [
+        "Run full test suite if feasible",
+        "Run focused E2E/security suites"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T04:11:28Z",
+      "updated_at": "2026-05-16T04:27:24Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T04:27:24Z"
+    },
+    {
+      "id": "T042",
+      "priority": 420,
+      "phase": "quality",
+      "title": "Polish CLI help and user-facing error contracts",
+      "status": "done",
+      "passes": true,
+      "depends_on": [
+        "T041"
+      ],
+      "files_hint": [
+        "src/sv/cli.py",
+        "tests/test_cli_help.py",
+        "tests/test_cli_error_contracts.py",
+        "README.md"
+      ],
+      "objective": "Ensure implemented Epic 1 commands are discoverable and produce actionable output without broad Epic 4 docs work.",
+      "steps": [
+        "Update CLI help text for sv init, sv index, sv search, sv status, sv add --all --repo, sv remove --all, sv repo -l, sv repo remove -l, and svx where applicable.",
+        "Tighten user-facing errors for auth/rate-limit fallback, missing Git, duplicate choices, unsupported schemas, and non-TTY confirmation requirements.",
+        "Only touch README if current command examples become wrong; avoid Epic 4 quick-start expansion."
+      ],
+      "acceptance": [
+        "CLI help lists implemented commands and important flags accurately.",
+        "Error messages are actionable and safe from control-character injection.",
+        "No deferred Epic 3/4 scope is accidentally implemented."
+      ],
+      "checks": [
+        "Run CLI help tests",
+        "Run CLI error contract tests",
+        "Run security control-character tests"
+      ],
+      "attempts": 1,
+      "started_at": "2026-05-16T07:40:37Z",
+      "updated_at": "2026-05-16T07:52:35Z",
+      "last_exit_code": 0,
+      "completed_at": "2026-05-16T07:52:35Z"
+    }
+  ],
+  "deferred_out_of_scope": [
+    {
+      "epic": "Epic 2",
+      "reason": "Agent adapter research and cross-agent support are explicitly out of the first implementation target.",
+      "items": [
+        "Research Pi/Claude/Codex/Gemini/Copilot/Cursor/opencode/cline/devin/jules/amp project skill isolation",
+        "Implement --agent target selection",
+        "Implement multi-agent sv run semantics"
+      ]
+    },
+    {
+      "epic": "Epic 3",
+      "reason": "Quality hardening is a later roadmap epic, except where tests are necessary for Epic 1 changes.",
+      "items": [
+        "Lower Python floor to 3.11+",
+        "Official Windows/macOS/Linux support",
+        "Ruff adoption and stricter linting",
+        "Cross-platform CI expansion"
+      ]
+    },
+    {
+      "epic": "Epic 4",
+      "reason": "Installer, release, docs, governance, and branch protection are explicitly outside the first implementation target.",
+      "items": [
+        "PyPI/GitHub release",
+        "curl/PowerShell installers",
+        "sv doctor",
+        "branch rename/protection",
+        "Makefile",
+        "API docs",
+        "governance files",
+        "README quick start expansion"
+      ]
+    }
+  ]
+}

@@ -23,6 +23,7 @@ Changelog = "https://github.com/HamdiMaz/sv/blob/master/CHANGELOG.md"
 
 [project.scripts]
 sv = "sv.cli:main"
+svx = "sv.cli:svx_main"
 
 [dependency-groups]
 dev = [

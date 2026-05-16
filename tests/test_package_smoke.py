@@ -12,12 +12,13 @@ def test_importing_package_exposes_version():
     assert callable(sv.cli.main)
 
 
-def test_console_entry_point_is_sv_cli_main():
+def test_console_entry_points_include_sv_and_svx():
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     pyproject_data = tomllib.loads(pyproject.read_text())
 
     scripts = pyproject_data["project"]["scripts"]
     assert scripts["sv"] == "sv.cli:main"
+    assert scripts["svx"] == "sv.cli:svx_main"
 
 
 def test_declared_package_version_is_public_version():

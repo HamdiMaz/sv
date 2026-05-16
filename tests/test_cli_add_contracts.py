@@ -1,10 +1,11 @@
 from pathlib import Path
-import subprocess
 
 import pytest
 
 from sv.cli import build_parser, handle
 from sv.config import SvPaths, load_config
+from sv.hashing import sha256_skill_directory
+from sv.manifest import load_manifest
 from sv.source import default_runner
 from tests.helpers import (
     assert_no_raw_control_characters,
@@ -40,6 +41,31 @@ def _assert_existing_skill_unchanged(
 
 def _forbid_git_calls(args, cwd=None):
     raise AssertionError(f"unexpected git call: {args}")
+
+
+@pytest.mark.integration
+def test_add_from_git_subdirectory_targets_repo_root(tmp_path, run_sv):
+    source = make_source_repo(tmp_path, "source-a")
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    subdir = project / "nested" / "work"
+    subdir.mkdir(parents=True)
+    run_git(["init"], project)
+    configure_source(source, project, home)
+    repo_id = load_config(SvPaths.from_home(home)).repos[0].id
+
+    result = run_sv(
+        ["add", f"{repo_id}:alpha"],
+        cwd=subdir,
+        home=home,
+        git_runner=default_runner,
+    )
+
+    assert result.exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "SKILL.md").exists()
+    assert not (subdir / ".pi").exists()
+    manifest = load_manifest(project / ".pi" / "skills")
+    assert list(manifest) == ["alpha"]
 
 
 def test_add_missing_skill_fails_without_git_or_project_skill_dir(tmp_path, run_sv):
@@ -210,6 +236,51 @@ def test_add_existing_skill_from_different_recorded_origin_prompts_remove(
 
 
 @pytest.mark.integration
+def test_add_existing_skill_from_different_path_same_repo_prompts_remove(
+    tmp_path, run_sv
+):
+    source = make_source_repo(tmp_path, "source-a")
+    team_alpha = source / "team" / "skills" / "alpha"
+    team_alpha.mkdir(parents=True)
+    (team_alpha / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Team alpha.\n---\n\n# alpha\n"
+    )
+    (team_alpha / "notes.md").write_text("alpha from team\n")
+    run_git(["add", "team/skills/alpha"], source)
+    run_git(["commit", "-m", "add team alpha"], source)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    repo_id = load_config(SvPaths.from_home(home)).repos[0].id
+
+    first = run_sv(
+        ["add", f"{repo_id}:alpha"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+    assert first.exit_code == 0
+
+    target = project / ".pi" / "skills" / "alpha"
+    original = (target / "notes.md").read_text()
+
+    second = run_sv(
+        ["add", f"{repo_id}:team/skills/alpha"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+
+    _assert_existing_skill_unchanged(second, project, "alpha", original)
+    assert (
+        f"Pi skill 'alpha' already exists at {target} (currently from {repo_id}; "
+        f"requested {repo_id}:team/skills/alpha). Run 'sv remove alpha' first "
+        "if you want to switch sources."
+    ) in second.stdout
+
+
+@pytest.mark.integration
 def test_add_existing_skill_without_recorded_origin_asks_to_replace(tmp_path, run_sv):
     source = make_source_repo(tmp_path, "source-a")
     home = tmp_path / "home"
@@ -237,9 +308,79 @@ def test_add_existing_skill_without_recorded_origin_asks_to_replace(tmp_path, ru
     ) in result.stdout
 
 
-@pytest.mark.parametrize("add_args", [["add", "all"], ["add", "--all"]])
 @pytest.mark.integration
-def test_add_all_adds_every_source_skill(tmp_path: Path, capsys, add_args):
+def test_add_writes_canonical_project_manifest_without_legacy_manifest(
+    tmp_path: Path, capsys
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    paths = SvPaths.from_home(home)
+    repo_id = load_config(paths).repos[0].id
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "alpha"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    project_skills = project / ".pi" / "skills"
+    installed = project_skills / "alpha"
+    assert (installed / "notes.md").read_text() == "alpha v1\n"
+    assert not (paths.source_repo_for(repo_id) / "skills" / "alpha" / "notes.md").exists()
+    assert not (paths.source_repo_for(repo_id) / "skills" / "beta" / "notes.md").exists()
+    assert (project / ".sv" / "manifest.toml").is_file()
+    assert not (project_skills / ".sv-manifest.toml").exists()
+    manifest = load_manifest(project_skills)
+    assert sorted(manifest) == ["alpha"]
+    assert manifest["alpha"].repo_id == repo_id
+    assert manifest["alpha"].target_path == ".pi/skills/alpha"
+    assert manifest["alpha"].source_content_hash == sha256_skill_directory(installed)
+    assert manifest["alpha"].installed_content_hash == sha256_skill_directory(installed)
+    assert manifest["alpha"].local_content_hash == sha256_skill_directory(installed)
+
+
+@pytest.mark.integration
+def test_add_validates_indexed_materialized_skill_before_mutating_project(
+    tmp_path: Path, capsys
+):
+    source = make_source_repo(tmp_path)
+    skill_file = source / "skills" / "alpha" / "SKILL.md"
+    skill_file.write_text("---\nname: not-alpha\ndescription: Wrong.\n---\n")
+    (source / ".sv").mkdir()
+    (source / ".sv" / "index.toml").write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "\n"
+        "[[skills]]\n"
+        'name = "alpha"\n'
+        'description = "Indexed alpha."\n'
+        'source_path = "skills/alpha"\n'
+        'content_hash = "sha256:index"\n'
+        'skill_file_hash = "sha256:index-skill"\n'
+    )
+    run_git(["add", ".sv/index.toml", "skills/alpha/SKILL.md"], source)
+    run_git(["commit", "-m", "add invalid indexed alpha"], source)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "alpha"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "does not match folder" in captured.err
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / ".alpha.sv-add-tmp").exists()
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+@pytest.mark.integration
+def test_add_all_adds_every_source_skill(tmp_path: Path, capsys):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -247,7 +388,7 @@ def test_add_all_adds_every_source_skill(tmp_path: Path, capsys, add_args):
     configure_source(source, project, home)
     capsys.readouterr()
 
-    exit_code = handle(parse(add_args), cwd=project, home=home)
+    exit_code = handle(parse(["add", "--all"]), cwd=project, home=home)
 
     assert exit_code == 0
     output = capsys.readouterr().out
@@ -257,6 +398,118 @@ def test_add_all_adds_every_source_skill(tmp_path: Path, capsys, add_args):
         project / ".pi" / "skills" / "alpha" / "notes.md"
     ).read_text() == "alpha v1\n"
     assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
+
+
+@pytest.mark.integration
+def test_add_all_treats_all_as_a_literal_skill_name(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    write_source_skill(source, "all", "Literal all skill.", "literal all\n")
+    run_git(["add", "skills/all"], source)
+    run_git(["commit", "-m", "add literal all skill"], source)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "all"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Added Pi skill 'all'" in output
+    assert (project / ".pi" / "skills" / "all" / "notes.md").read_text() == "literal all\n"
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / "beta").exists()
+
+
+@pytest.mark.integration
+def test_add_all_missing_literal_all_reports_error_without_copying(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "all"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    assert "Skill 'all' was not found" in capsys.readouterr().err
+    assert not (project / ".pi").exists()
+
+
+@pytest.mark.integration
+def test_add_all_repo_installs_every_skill_from_requested_source(tmp_path: Path, capsys):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    write_source_skill(source_b, "beta", "Beta from B.", "beta from b\n")
+    run_git(["add", "skills/alpha", "skills/beta"], source_b)
+    run_git(["commit", "-m", "update b skills"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    repo_id_b = load_config(SvPaths.from_home(home)).repos[1].id
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "--all", "--repo", repo_id_b]), cwd=project, home=home)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Added Pi skill 'alpha'" in output
+    assert "Added Pi skill 'beta'" in output
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha from b\n"
+    assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta from b\n"
+
+
+@pytest.mark.integration
+def test_add_all_repo_reports_duplicate_skills_in_requested_source_before_copying(
+    tmp_path: Path, capsys
+):
+    source = make_source_repo(tmp_path, "source-a")
+    team_alpha = source / "team" / "skills" / "alpha"
+    team_alpha.mkdir(parents=True)
+    (team_alpha / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Team alpha.\n---\n\n# alpha\n"
+    )
+    (team_alpha / "notes.md").write_text("alpha from team\n")
+    run_git(["add", "team/skills/alpha"], source)
+    run_git(["commit", "-m", "add team alpha"], source)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    repo_id = load_config(SvPaths.from_home(home)).repos[0].id
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "--all", "--repo", repo_id]), cwd=project, home=home)
+
+    assert exit_code == 1
+    assert not (project / ".pi").exists()
+    error = capsys.readouterr().err
+    assert "Duplicate source skill 'alpha'" in error
+    assert f"{repo_id}:alpha" in error
+    assert f"{repo_id}:team/skills/alpha" in error
+
+
+@pytest.mark.integration
+def test_add_all_repo_unknown_source_fails_without_copying(tmp_path: Path, capsys):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    capsys.readouterr()
+
+    exit_code = handle(parse(["add", "--all", "--repo", "missing/repo"]), cwd=project, home=home)
+
+    assert exit_code == 1
+    assert "Repo 'missing/repo' was not found" in capsys.readouterr().err
+    assert not (project / ".pi").exists()
 
 
 @pytest.mark.integration
@@ -349,32 +602,29 @@ def test_add_interactive_uses_cached_source_without_pull(tmp_path: Path, capsys)
 
     def git_runner(args, cwd=None):
         git_calls.append((list(args), cwd))
-        if args == ["git", "--version"]:
-            return subprocess.CompletedProcess(
-                args=args, returncode=0, stdout="git version 2.0\n"
-            )
-        if args == ["git", "remote", "get-url", "origin"]:
-            return subprocess.CompletedProcess(
-                args=args, returncode=0, stdout=f"{source}\n"
-            )
-        raise AssertionError(f"unexpected git call: {args}")
+        if args[:2] in (["git", "fetch"], ["git", "pull"]):
+            raise AssertionError(f"unexpected source refresh: {args}")
+        return default_runner(args, cwd)
+
+    selected = []
+
+    def select_first(skills, **kwargs):
+        selected.append(skills[0].name)
+        return [skills[0]]
 
     exit_code = handle(
         parse(["add", "-l"]),
         cwd=project,
         home=home,
         git_runner=git_runner,
-        skill_selector=lambda skills, **kwargs: [skills[0]],
+        skill_selector=select_first,
     )
 
     assert exit_code == 0
-    assert [call[0] for call in git_calls] == [
-        ["git", "--version"],
-        ["git", "remote", "get-url", "origin"],
-    ]
+    assert not any(call[0][:2] in (["git", "fetch"], ["git", "pull"]) for call in git_calls)
     assert (
-        project / ".pi" / "skills" / "alpha" / "notes.md"
-    ).read_text() == "alpha v1\n"
+        project / ".pi" / "skills" / selected[0] / "notes.md"
+    ).read_text() == f"{selected[0]} v1\n"
 
 
 @pytest.mark.integration
@@ -544,7 +794,62 @@ def test_add_duplicate_skill_choice_table_does_not_repeat_skill_name(
 
 
 @pytest.mark.integration
-def test_add_interactive_rejects_selected_duplicate_skill_names_without_copying(
+def test_add_interactive_resolves_selected_duplicate_skill_names_before_copying(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "skills/alpha"], source_b)
+    run_git(["commit", "-m", "update alpha in b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    repo_ids = [repo.id for repo in load_config(SvPaths.from_home(home)).repos]
+    repo_id_a, repo_id_b = repo_ids
+    capsys.readouterr()
+    chooser_calls = []
+
+    def select_beta_and_both_alpha(skills, **kwargs):
+        selected = []
+        beta_selected = False
+        for skill in skills:
+            if skill.name == "alpha":
+                selected.append(skill)
+            elif skill.name == "beta" and not beta_selected:
+                selected.append(skill)
+                beta_selected = True
+        return selected
+
+    def choose_b_alpha(matches):
+        chooser_calls.append([(match.name, match.repo_id) for match in matches])
+        assert not (project / ".pi").exists()
+        return next(match for match in matches if match.repo_id == repo_id_b)
+
+    exit_code = handle(
+        parse(["add", "-l"]),
+        cwd=project,
+        home=home,
+        skill_selector=select_beta_and_both_alpha,
+        skill_chooser=choose_b_alpha,
+    )
+
+    assert exit_code == 0
+    assert chooser_calls == [[("alpha", repo_id_a), ("alpha", repo_id_b)]]
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha from b\n"
+    assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
+    output = capsys.readouterr().out
+    assert "Multiple selected sources provide 'alpha'" in output
+    assert "Added Pi skill 'alpha'" in output
+    assert "Added Pi skill 'beta'" in output
+
+
+@pytest.mark.integration
+def test_add_interactive_duplicate_resolution_cancel_does_not_copy_any_selection(
     tmp_path: Path, capsys
 ):
     source_a = make_source_repo(tmp_path, "source-a")
@@ -559,21 +864,33 @@ def test_add_interactive_rejects_selected_duplicate_skill_names_without_copying(
     configure_source(source_b, project, home)
     capsys.readouterr()
 
-    def select_both_alpha(skills, **kwargs):
-        return [skill for skill in skills if skill.name == "alpha"]
+    def select_beta_and_both_alpha(skills, **kwargs):
+        selected = []
+        beta_selected = False
+        for skill in skills:
+            if skill.name == "alpha":
+                selected.append(skill)
+            elif skill.name == "beta" and not beta_selected:
+                selected.append(skill)
+                beta_selected = True
+        return selected
+
+    def cancel_duplicate_choice(matches):
+        assert [match.name for match in matches] == ["alpha", "alpha"]
+        assert not (project / ".pi").exists()
+        return None
 
     exit_code = handle(
         parse(["add", "-l"]),
         cwd=project,
         home=home,
-        skill_selector=select_both_alpha,
+        skill_selector=select_beta_and_both_alpha,
+        skill_chooser=cancel_duplicate_choice,
     )
 
-    assert exit_code == 1
-    assert not (project / ".pi" / "skills" / "alpha").exists()
-    error = capsys.readouterr().err
-    assert "Select only one source for duplicate skill 'alpha'" in error
-    assert "repo:skill" in error
+    assert exit_code == 0
+    assert not (project / ".pi").exists()
+    assert "No skill selected for duplicate 'alpha'." in capsys.readouterr().out
 
 
 @pytest.mark.integration
@@ -600,6 +917,52 @@ def test_add_all_reports_duplicate_source_skills_without_copying(
     error = capsys.readouterr().err
     assert "Duplicate source skill 'alpha'" in error
     assert "Use qualified skill references" in error
+
+
+@pytest.mark.integration
+def test_add_all_resolves_duplicate_source_skills_before_copying(
+    tmp_path: Path, capsys
+):
+    source_a = make_source_repo(tmp_path, "source-a")
+    source_b = make_source_repo(tmp_path, "source-b")
+    run_git(["rm", "-r", "skills/beta"], source_b)
+    write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
+    run_git(["add", "-A"], source_b)
+    run_git(["commit", "-m", "keep only alpha from b"], source_b)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source_a, project, home)
+    configure_source(source_b, project, home)
+    repo_ids = [repo.id for repo in load_config(SvPaths.from_home(home)).repos]
+    repo_id_a, repo_id_b = repo_ids
+    capsys.readouterr()
+    chooser_calls = []
+
+    def choose_b_alpha(matches):
+        chooser_calls.append([(match.name, match.repo_id) for match in matches])
+        assert not (project / ".pi").exists()
+        return next(match for match in matches if match.repo_id == repo_id_b)
+
+    exit_code = handle(
+        parse(["add", "--all"]),
+        cwd=project,
+        home=home,
+        skill_chooser=choose_b_alpha,
+    )
+
+    assert exit_code == 0
+    assert chooser_calls == [[("alpha", repo_id_a), ("alpha", repo_id_b)]]
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha from b\n"
+    assert (
+        project / ".pi" / "skills" / "beta" / "notes.md"
+    ).read_text() == "beta v1\n"
+    output = capsys.readouterr().out
+    assert "Multiple selected sources provide 'alpha'" in output
+    assert "Added Pi skill 'alpha'" in output
+    assert "Added Pi skill 'beta'" in output
 
 
 @pytest.mark.integration
