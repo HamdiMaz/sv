@@ -170,7 +170,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | `sv search` | Implemented | Non-TTY ranked output exists; TTY browser path exists. |
 | First-run config behavior | Fixed (FIXED) | Missing or schema-only config non-TTY errors; TTY prompt is pluggable; explicit `repos = []` remains an intentional empty-source config. |
 | Update vs sync semantics | Fixed (FIXED) | Hash/orphan logic exists, and the trusted-source/index-hash skip model is documented for `sv update` and `sv sync`. |
-| Orphan tracking | Implemented in reviewed paths | Needs root/cwd fix to be reliable. |
+| Orphan tracking | Fixed (FIXED) | Root/cwd targeting is fixed, and update-from-subdirectory regression coverage verifies orphan state is written to the root manifest and clears when the source reappears. |
 | `sv status` | Fixed (FIXED) | Project/vault/global handlers exist; global source state now reports the recorded backend/index hash and legacy missing backend values as `unknown` without crashing. |
 | Duplicate `sv add <skill>` resolution | Implemented (FIXED) | Non-TTY choices exist; TTY duplicate source selection uses the checkbox picker and source-choice tables no longer support numeric row prefixes. |
 | `sv add -l` picker | Fixed (FIXED) | Uses checkbox selector with structured Skill/Source/Description columns and aligned headers/rows instead of an unaligned single-column label list. |

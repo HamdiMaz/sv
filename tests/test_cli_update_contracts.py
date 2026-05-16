@@ -250,6 +250,52 @@ def test_update_marks_missing_source_orphan_and_reattaches_when_it_reappears(
     assert manifest_entry.update_available is False
 
 
+def test_update_from_git_subdirectory_marks_root_manifest_orphan_and_reattaches(
+    tmp_path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    nested = project / "nested" / "work"
+    nested.mkdir(parents=True)
+    run_git(["init"], project)
+    configure_source(source, project, home)
+
+    add_result = run_sv(
+        ["add", "alpha"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+    assert add_result.exit_code == 0
+
+    run_git(["rm", "-r", "skills/alpha"], source)
+    run_git(["commit", "-m", "remove alpha"], source)
+
+    orphan_result = run_sv(["update"], cwd=nested, home=home, git_runner=default_runner)
+
+    assert orphan_result.exit_code == 0
+    assert "orphan state recorded" in orphan_result.stdout
+    assert load_manifest(project / ".pi" / "skills")["alpha"].orphan is True
+    assert not (nested / ".pi").exists()
+    assert not (nested / ".sv").exists()
+
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "restore alpha"], source)
+
+    reattach_result = run_sv(
+        ["update"], cwd=nested, home=home, git_runner=default_runner
+    )
+
+    assert reattach_result.exit_code == 0
+    assert "Updated Pi skill 'alpha'." in reattach_result.stdout
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert load_manifest(project / ".pi" / "skills")["alpha"].orphan is False
+    assert not (nested / ".pi").exists()
+    assert not (nested / ".sv").exists()
+
+
 def test_update_aborts_on_partial_source_refresh_failure_without_marking_orphan(
     tmp_path, run_sv
 ):
