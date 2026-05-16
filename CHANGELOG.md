@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed TTY skill browsing details to omit copy-paste-oriented `Add as` references while keeping focused source/path metadata.
 - Fixed source metadata and index reads to enforce byte limits across Git and GitHub backends, bound `gh api` output capture, and reject oversized index entry sets and fields before parsing can exhaust resources.
 - Fixed `sv index --include` to reject symlinked include paths before scanning so index generation cannot read outside the repository through symlinked roots.
 - Fixed local Git source handling to avoid hidden full local clones when Git ignores lightweight filter/depth options.

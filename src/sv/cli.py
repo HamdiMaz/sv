@@ -1966,7 +1966,6 @@ def _print_source_skill_detail(entry: SourceSkill) -> None:
     print(f"Source: {_escape_control_characters(entry.repo_id)}")
     print(f"Path: {_escape_control_characters(entry.source_relative_path)}")
     print(f"Description: {_escape_control_characters(entry.description)}")
-    print(f"Add as: {_escape_control_characters(_source_skill_reference(entry))}")
 
 
 def _browse_tty_table(headers: Sequence[str], rows: Sequence[Sequence[str]], **kwargs):

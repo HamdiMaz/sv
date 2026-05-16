@@ -56,6 +56,7 @@ def test_tty_list_browses_source_skills_with_details_by_default(
     assert "Skill: alpha" in result.stdout
     assert "Source: " in result.stdout
     assert "Description: Alpha skill." in result.stdout
+    assert "Add as:" not in result.stdout
 
 
 @pytest.mark.integration

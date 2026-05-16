@@ -844,7 +844,9 @@ def test_cli_print_helpers_and_interactive_source_rows(tmp_path: Path, capsys):
     assert cli_module._entry_for_interactive_row(["missing"], rows, entries) is None
 
     cli_module._print_source_skill_detail(second)
-    assert "Add as: A:other/alpha" in capsys.readouterr().out
+    detail_output = capsys.readouterr().out
+    assert "Path: other/alpha" in detail_output
+    assert "Add as:" not in detail_output
 
     assert cli_module._handle_search("zzz", [first]) == 0
     assert "No matching skills" in capsys.readouterr().out

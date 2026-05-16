@@ -166,7 +166,7 @@ Impact: `sv status` cannot report “No sv-managed Pi skills found in this proje
 
 Suggested fix: load local manifest/managed entries first. If there are no managed local skills, report that without refreshing sources. Refresh only when update/orphan state needs source comparison.
 
-### Low: TTY browse details still include copy-paste-oriented `Add as`
+### Low: TTY browse details still include copy-paste-oriented `Add as` (FIXED)
 
 Evidence:
 
@@ -193,7 +193,7 @@ Impact: minor UX mismatch. Non-TTY duplicate sections should keep exact scriptab
 5. Reject symlinked `sv index` include roots before scanning/reading. (FIXED)
 6. Update README and docs for first-run config, `sv add --all`, `sv update` vs `sv sync`, and missing Epic 1 commands/flags. (FIXED)
 7. Make `sv status` avoid remote refresh when no managed local entries exist. (FIXED)
-8. Optionally remove `Add as` from TTY browse details or explicitly document that deviation.
+8. Remove `Add as` from TTY browse details while preserving exact references in non-TTY duplicate output. (FIXED)
 
 ## Suggested post-fix verification
 
