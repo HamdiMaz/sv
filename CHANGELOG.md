@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Marked the bounded generic discovery PLAN alignment review item fixed after verifying default and configured discovery roots are covered.
 - Marked the update-vs-sync PLAN alignment review item fixed after verifying the trusted-source/index-hash skip model is documented for both commands.
 - Fixed source path-aware indexed catalogs to reject `.sv/index.toml` entries whose skill name does not match the `source_path` folder, and marked the PLAN alignment review item fixed.
 - Marked the vault mode targeting PLAN alignment review item fixed after verifying vault add/remove/update/sync target root skills and nested context coverage exists.
