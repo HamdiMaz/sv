@@ -18,6 +18,7 @@ from urllib.parse import quote, urlsplit
 
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
+from sv.materialization import validate_materialization_source_tree
 from sv.terminal import escape_terminal_controls
 
 Runner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]]
@@ -361,6 +362,11 @@ class GitHubGhApiBackend:
                     operation,
                     f"{item_path} has unsupported GitHub content type {item_type}",
                 )
+            else:
+                raise SourceBackendError(
+                    operation,
+                    f"{item_path} has unsupported GitHub content type {item_type or 'unknown'}",
+                )
 
     def _read_file(
         self, path: str, *, operation: str, max_decoded_bytes: int | None = None
@@ -587,9 +593,7 @@ class GitLocalSourceBackend:
             )
         if destination.is_symlink():
             raise SvError(f"Materialization destination must not be a symlink: {destination}.")
-        for path in source.rglob("*"):
-            if path.is_symlink():
-                raise SvError(f"Source skills path must not contain symlinks: {path}.")
+        validate_materialization_source_tree(source)
         if destination.exists():
             if destination.is_dir():
                 shutil.rmtree(destination)

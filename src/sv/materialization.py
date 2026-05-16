@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 import shutil
 
 from sv.errors import SvError
+
+_MAX_MATERIALIZATION_FILES = 1000
+_MAX_MATERIALIZATION_BYTES = 10 * 1024 * 1024
+_MAX_MATERIALIZATION_DEPTH = 25
+
+
+@dataclass
+class _MaterializationStats:
+    files: int = 0
+    bytes: int = 0
 
 
 def copy_skill_folder_to_temp(
@@ -17,7 +28,7 @@ def copy_skill_folder_to_temp(
     """
     remove_materialization_path(temp_target, ignore_errors=True)
     try:
-        _reject_symlinked_materialization_source(source)
+        validate_materialization_source_tree(source)
         shutil.copytree(source, temp_target)
     except OSError as exc:
         remove_materialization_path(temp_target, ignore_errors=True)
@@ -119,17 +130,44 @@ def replace_with_materialized_skill_folder(
         raise SvError(f"{error_message}: {exc}") from exc
 
 
-def _reject_symlinked_materialization_source(source: Path) -> None:
+def validate_materialization_source_tree(source: Path) -> None:
     if source.is_symlink():
-        raise SvError(f"Source materialization path contains a symlink at {source}.")
+        raise SvError(
+            f"Source materialization path must not contain symlinks; contains a symlink at {source}."
+        )
+    if not source.is_dir():
+        raise SvError(f"Source materialization path is not a directory: {source}.")
+
+    stats = _MaterializationStats()
     try:
         for path in source.rglob("*"):
             if path.is_symlink():
                 raise SvError(
-                    f"Source materialization path contains a symlink at {path}."
+                    f"Source materialization path must not contain symlinks; contains a symlink at {path}."
                 )
+            _record_materialization_entry(source, path, stats)
     except OSError as exc:
         raise SvError(f"Failed to inspect source materialization path {source}: {exc}") from exc
+
+
+def _record_materialization_entry(
+    source: Path, path: Path, stats: _MaterializationStats
+) -> None:
+    depth = len(path.relative_to(source).parts)
+    if depth > _MAX_MATERIALIZATION_DEPTH:
+        raise SvError(f"Source materialization path exceeds depth limit: {source}.")
+
+    if path.is_dir():
+        return
+    if not path.is_file():
+        raise SvError(f"Source materialization path contains unsupported path {path}.")
+    if stats.files >= _MAX_MATERIALIZATION_FILES:
+        raise SvError(f"Source materialization path exceeds file limit: {source}.")
+
+    stats.bytes += path.stat().st_size
+    if stats.bytes > _MAX_MATERIALIZATION_BYTES:
+        raise SvError(f"Source materialization path exceeds byte limit: {source}.")
+    stats.files += 1
 
 
 def restore_materialization_backup(target: Path, backup_target: Path) -> None:

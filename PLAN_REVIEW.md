@@ -153,7 +153,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | PLAN area | Status | Notes |
 | --- | --- | --- |
 | Versioned TOML helpers | Fixed (FIXED) | Future schema errors exist; new versioned config, canonical project manifest, and global manifest files now reject missing `schema_version`, while legacy single-repo config and legacy Pi manifests remain readable for migration. |
-| Safe hashing/materialization | Mostly implemented | Symlink checks and atomic helpers are present. Security hardening still recommended for quotas/timeouts. |
+| Safe hashing/materialization | Fixed (FIXED) | Symlink checks, atomic helpers, Git/GitHub subprocess timeouts, GitHub API materialization quotas, and local materialization file-count/byte/depth quotas are now present with regression coverage. |
 | Source path-aware catalog | Mostly implemented | Same-name/source-path models exist. |
 | Canonical project manifest | Fixed (FIXED) | New `.sv/manifest.toml` support exists, and project add/remove/sync/update operations now target the detected repository root consistently with status. |
 | Legacy Pi manifest migration | Implemented in code paths reviewed | Needs final verification after root/cwd fix. |

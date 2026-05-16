@@ -5,6 +5,7 @@ import pytest
 
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
+from sv import materialization as materialization_module
 import sv.source as source_module
 from sv.source import (
     GitBloblessSparseBackend,
@@ -525,6 +526,26 @@ def test_github_api_helpers_limit_listing_size_item_size_and_response_body(
     assert source_module._read_limited_response_body(SmallBody()) == b"ok"
 
 
+def test_github_gh_api_backend_rejects_unknown_materialization_content_type(
+    tmp_path: Path,
+):
+    runner = FakeRunner(
+        [
+            completed(
+                ["gh", "api"],
+                stdout=(
+                    '[{"name":"generated","path":"skills/alpha/generated",'
+                    '"type":"workflow_run"}]'
+                ),
+            ),
+        ]
+    )
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
+
+    with pytest.raises(SourceBackendError, match="unsupported GitHub content type"):
+        backend.materialize_folder("skills/alpha", tmp_path / "materialized")
+
+
 def test_github_gh_api_backend_rejects_out_of_folder_materialization_paths_before_reading(
     tmp_path: Path,
 ):
@@ -922,6 +943,60 @@ def test_git_local_backend_rejects_symlinked_materialization_ancestor(
 
     with pytest.raises(SvError, match="Source skills path must not be a symlink"):
         backend.materialize_folder("linked/skills/alpha", tmp_path / "materialized")
+
+
+def test_git_local_backend_rejects_materialization_over_file_limit_before_copying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    source = repo_path / "skills" / "alpha"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("remote\n")
+    destination = tmp_path / "materialized"
+    backend = GitLocalSourceBackend(repo_path)
+
+    monkeypatch.setattr(materialization_module, "_MAX_MATERIALIZATION_FILES", 0)
+
+    with pytest.raises(SvError, match="file limit"):
+        backend.materialize_folder("skills/alpha", destination)
+
+    assert not destination.exists()
+
+
+def test_git_local_backend_rejects_oversized_materialization_before_copying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    source = repo_path / "skills" / "alpha"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("large\n")
+    destination = tmp_path / "materialized"
+    backend = GitLocalSourceBackend(repo_path)
+
+    monkeypatch.setattr(materialization_module, "_MAX_MATERIALIZATION_BYTES", 4)
+
+    with pytest.raises(SvError, match="byte limit"):
+        backend.materialize_folder("skills/alpha", destination)
+
+    assert not destination.exists()
+
+
+def test_git_local_backend_rejects_too_deep_materialization_before_copying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    nested = repo_path / "skills" / "alpha" / "docs" / "deep"
+    nested.mkdir(parents=True)
+    (nested / "usage.md").write_text("remote\n")
+    destination = tmp_path / "materialized"
+    backend = GitLocalSourceBackend(repo_path)
+
+    monkeypatch.setattr(materialization_module, "_MAX_MATERIALIZATION_DEPTH", 1)
+
+    with pytest.raises(SvError, match="depth limit"):
+        backend.materialize_folder("skills/alpha", destination)
+
+    assert not destination.exists()
 
 
 def test_git_local_backend_rejects_symlinked_index_ancestor(tmp_path: Path):

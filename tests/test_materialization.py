@@ -4,6 +4,7 @@ import shutil
 import pytest
 
 from sv.errors import SvError
+from sv import materialization as materialization_module
 from sv.materialization import (
     copy_skill_folder_to_temp,
     install_materialized_skill_folder,
@@ -52,6 +53,65 @@ def test_copy_skill_folder_to_temp_rejects_symlink_in_source_tree(tmp_path: Path
         )
 
     assert not target.exists()
+
+
+def test_copy_skill_folder_to_temp_rejects_source_trees_over_file_limit(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "source" / "alpha"
+    temp_target = tmp_path / "project" / ".alpha.sv-tmp"
+    _write_skill(source, "remote\n")
+
+    monkeypatch.setattr(materialization_module, "_MAX_MATERIALIZATION_FILES", 0)
+
+    with pytest.raises(SvError, match="file limit"):
+        copy_skill_folder_to_temp(
+            source,
+            temp_target,
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    assert not temp_target.exists()
+
+
+def test_copy_skill_folder_to_temp_rejects_source_trees_over_byte_limit(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "source" / "alpha"
+    temp_target = tmp_path / "project" / ".alpha.sv-tmp"
+    _write_skill(source, "remote\n")
+
+    monkeypatch.setattr(materialization_module, "_MAX_MATERIALIZATION_BYTES", 4)
+
+    with pytest.raises(SvError, match="byte limit"):
+        copy_skill_folder_to_temp(
+            source,
+            temp_target,
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    assert not temp_target.exists()
+
+
+def test_copy_skill_folder_to_temp_rejects_source_trees_over_depth_limit(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "source" / "alpha"
+    nested = source / "docs" / "deep"
+    nested.mkdir(parents=True)
+    (nested / "usage.md").write_text("remote\n")
+    temp_target = tmp_path / "project" / ".alpha.sv-tmp"
+
+    monkeypatch.setattr(materialization_module, "_MAX_MATERIALIZATION_DEPTH", 1)
+
+    with pytest.raises(SvError, match="depth limit"):
+        copy_skill_folder_to_temp(
+            source,
+            temp_target,
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    assert not temp_target.exists()
 
 
 def test_copy_skill_folder_to_temp_cleans_partial_copy_and_preserves_target(
