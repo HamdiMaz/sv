@@ -168,7 +168,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Bounded generic discovery | Mostly implemented | Default roots and configured roots exist. |
 | Materialize selected folders only | Fixed (FIXED) | GitHub API materialization now streams selected-folder files into an operation temporary directory with file-count, depth, entry, and total-byte limits; local materialization is also quota guarded. |
 | `sv search` | Implemented | Non-TTY ranked output exists; TTY browser path exists. |
-| First-run config behavior | Mostly implemented | Missing config non-TTY errors; TTY prompt is pluggable. |
+| First-run config behavior | Fixed (FIXED) | Missing or schema-only config non-TTY errors; TTY prompt is pluggable; explicit `repos = []` remains an intentional empty-source config. |
 | Update vs sync semantics | Mostly implemented | Hash/orphan logic exists. There is a trust risk when skipping solely on remote index hash. |
 | Orphan tracking | Implemented in reviewed paths | Needs root/cwd fix to be reliable. |
 | `sv status` | Fixed (FIXED) | Project/vault/global handlers exist; global source state now reports the recorded backend/index hash and legacy missing backend values as `unknown` without crashing. |

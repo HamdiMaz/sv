@@ -82,6 +82,7 @@ from sv.source import (
 )
 from sv.table import browse_table
 from sv.terminal import escape_terminal_controls
+from sv.tomlutil import load_toml_document
 from sv.ui import (
     CellWidths,
     format_plain_table as format_table,
@@ -641,11 +642,24 @@ def _should_record_global_source_state(cwd: Path, home: Path) -> bool:
 
 
 def _load_config_for_source_command(paths: SvPaths) -> SvConfig:
-    if paths.config_file.exists():
-        return load_config(paths)
+    if not paths.config_file.exists():
+        return _load_or_prompt_for_initial_sources(paths)
+
+    config = load_config(paths)
+    if config.repos or _config_explicitly_disables_sources(paths):
+        return config
+    return _load_or_prompt_for_initial_sources(paths)
+
+
+def _load_or_prompt_for_initial_sources(paths: SvPaths) -> SvConfig:
     if _can_prompt_for_initial_sources():
         return _prompt_for_initial_sources(paths)
     raise SvError(_missing_source_config_guidance())
+
+
+def _config_explicitly_disables_sources(paths: SvPaths) -> bool:
+    data = load_toml_document(paths.config_file, "sv config")
+    return "repos" in data
 
 
 def _can_prompt_for_initial_sources() -> bool:
@@ -1542,12 +1556,7 @@ def _handle_repo(
         return 0
 
     if args.repo_command == "list" or repo_list_alias:
-        if not paths.config_file.exists():
-            if not _can_prompt_for_initial_sources():
-                raise SvError(_missing_source_config_guidance())
-            config = _prompt_for_initial_sources(paths)
-        else:
-            config = load_config(paths)
+        config = _load_config_for_source_command(paths)
         if not config.repos:
             _print_no_source_repos_configured()
             return 0
