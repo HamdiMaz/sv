@@ -3174,7 +3174,11 @@ def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:
         return None
 
     while True:
-        selected = select_skills(matches, item_label=_source_skill_label)
+        selected = select_skills(
+            matches,
+            item_label=_source_skill_picker_labeler(matches),
+            header_label=_source_skill_picker_header_label(matches),
+        )
         if not selected:
             return None
         if len(selected) == 1:

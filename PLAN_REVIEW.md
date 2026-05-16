@@ -177,7 +177,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | `sv add --all --repo` | Partially implemented | Repo filter exists; duplicate TTY resolution missing. |
 | Managed removal flows | Mostly implemented | Root/cwd issue affects normal project removal from subdirs. |
 | `sv repo -l` and `svx` | Implemented | Scripts/help metadata added. |
-| TTY list/search/repo browser | Partial | Read-only table exists. Multi-select picker and duplicate chooser do not fully meet the PLAN UX. |
+| TTY list/search/repo browser | Implemented (FIXED) | Read-only table browser exists, the multi-select picker uses aligned Skill/Source/Description rows, and duplicate source choosing now uses the same aligned picker UX. |
 
 ## Security and robustness notes
 

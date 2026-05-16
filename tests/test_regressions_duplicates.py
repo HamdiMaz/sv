@@ -218,7 +218,7 @@ def test_add_same_repo_duplicates_tty_cancel_suggests_path_qualified_reference(
     monkeypatch.setattr(
         cli_module,
         "select_skills",
-        lambda matches, *, item_label: [],
+        lambda matches, **kwargs: [],
     )
 
     exit_code = handle(
@@ -262,7 +262,7 @@ def test_add_same_repo_duplicates_in_tty_shows_paths_and_accepts_checkbox_select
     monkeypatch.setattr(
         cli_module,
         "select_skills",
-        lambda matches, *, item_label: [matches[1]],
+        lambda matches, **kwargs: [matches[1]],
     )
 
     exit_code = handle(

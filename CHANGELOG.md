@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed TTY duplicate source selection to use the aligned Skill/Source/Description picker layout.
 - Fixed versioned TOML loading so new config, canonical project manifest, and global manifest files reject missing `schema_version` values while preserving legacy migration reads.
 - Added regression coverage for the `sv add -l` picker to keep its checkbox rows aligned as Skill/Source/Description columns.
 - Marked the global source manifest PLAN alignment item fixed after verifying refresh state records backend and index-hash metadata.

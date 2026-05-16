@@ -1,8 +1,11 @@
+from io import StringIO
 from pathlib import Path
+import sys
 
 import pytest
 
-from sv.cli import build_parser, handle
+from sv.catalog import SourceSkill
+from sv.cli import _choose_skill, build_parser, handle
 from sv.config import SvPaths, load_config
 from sv.hashing import sha256_skill_directory
 from sv.manifest import load_manifest
@@ -41,6 +44,54 @@ def _assert_existing_skill_unchanged(
 
 def _forbid_git_calls(args, cwd=None):
     raise AssertionError(f"unexpected git call: {args}")
+
+
+class _TtyStream(StringIO):
+    def isatty(self):
+        return True
+
+
+def _source_skill(tmp_path: Path, name: str, repo_id: str, description: str) -> SourceSkill:
+    repo_path = tmp_path / repo_id.replace("/", "-")
+    source_path = repo_path / "skills" / name
+    return SourceSkill(
+        name=name,
+        description=description,
+        repo_id=repo_id,
+        repo_url=f"https://example.com/{repo_id}.git",
+        repo_path=repo_path,
+        source_path=source_path,
+    )
+
+
+def test_duplicate_source_chooser_uses_aligned_source_table(monkeypatch, tmp_path):
+    matches = [
+        _source_skill(tmp_path, "alpha", "Org/Short", "First alpha."),
+        _source_skill(tmp_path, "alpha", "LongerOrg/Skills", "Second alpha."),
+    ]
+    selector_calls = []
+
+    def fake_select_skills(skills, **kwargs):
+        selector_calls.append((skills, kwargs))
+        return [skills[1]]
+
+    monkeypatch.setattr(sys, "stdin", _TtyStream())
+    monkeypatch.setattr(sys, "stdout", _TtyStream())
+    monkeypatch.setattr("sv.cli.select_skills", fake_select_skills)
+
+    selected = _choose_skill(matches)
+
+    assert selected == matches[1]
+    assert selector_calls[0][0] == matches
+    kwargs = selector_calls[0][1]
+    header_label = kwargs["header_label"]
+    item_label = kwargs["item_label"]
+    first_label = item_label(matches[0])
+    second_label = item_label(matches[1])
+    assert header_label.startswith("Skill")
+    assert header_label.index("Source") == first_label.index(matches[0].repo_id)
+    assert header_label.index("Description") == first_label.index(matches[0].description)
+    assert first_label.index(matches[0].description) == second_label.index(matches[1].description)
 
 
 @pytest.mark.integration

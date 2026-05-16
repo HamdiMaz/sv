@@ -1418,7 +1418,7 @@ def test_choose_skill_reprompts_until_single_checkbox_selection(
     monkeypatch.setattr(
         cli_module,
         "select_skills",
-        lambda matches, *, item_label: next(selections),
+        lambda matches, **kwargs: next(selections),
     )
 
     assert cli_module._choose_skill([skill]) == skill
@@ -1431,7 +1431,7 @@ def test_choose_skill_accepts_empty_checkbox_selection(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(
         cli_module,
         "select_skills",
-        lambda matches, *, item_label: [],
+        lambda matches, **kwargs: [],
     )
 
     assert cli_module._choose_skill([_source_skill(tmp_path, "source")]) is None
