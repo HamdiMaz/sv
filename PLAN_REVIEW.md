@@ -157,7 +157,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Source path-aware catalog | Mostly implemented | Same-name/source-path models exist. |
 | Canonical project manifest | Mostly implemented | New `.sv/manifest.toml` support exists. Root/cwd inconsistency is a major bug. |
 | Legacy Pi manifest migration | Implemented in code paths reviewed | Needs final verification after root/cwd fix. |
-| Global source manifest | Partial | State exists, but backend is hard-coded as `git` and `index_hash` is not populated on success. See `src/sv/cli.py:968`, `src/sv/cli.py:994`, `src/sv/cli.py:1001`. |
+| Global source manifest | Fixed (FIXED) | Refresh state records the successful lightweight backend and remote index hash, with legacy missing backend values rendered as `unknown` in status output. |
 | Explicit `--skills-path` | Implemented | Config validation rejects unsafe paths. |
 | `.sv/index.toml` parser/writer | Implemented | Duplicate names with paths are supported. |
 | `sv index` scanner | Partial | Recursive scanner exists, but `PLAN.md` requires include/exclude path flags and config equivalents; parser exposes no flags (`src/sv/cli.py:147-153`, `src/sv/index.py:161`). |
