@@ -4,13 +4,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tomllib
 from typing import Any, Literal, cast
 
 from sv.catalog import normalize_source_relative_path
 from sv.errors import SvError
 from sv.hashing import sha256_file, sha256_skill_directory
+from sv.project import normalize_skill_name
 from sv.skills import InvalidSkillError, parse_skill_file
 from sv.terminal import escape_terminal_controls
 from sv.tomlutil import (
@@ -480,9 +481,14 @@ def _parse_skill_entries(raw_skills: Any, path: Path) -> tuple[IndexSkillEntry, 
             raise SvError(
                 f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'source_path' is invalid: {exc}"
             ) from exc
+        name = _expect_skill_string(skill_item.get("name"), "name", index, path)
+        normalized_name = _normalize_index_skill_name(name, index, path)
+        _validate_source_path_matches_name(
+            normalized_source_path, normalized_name, index, path
+        )
         entries.append(
             IndexSkillEntry(
-                name=_expect_skill_string(skill_item.get("name"), "name", index, path),
+                name=normalized_name,
                 description=_expect_skill_string(
                     skill_item.get("description"), "description", index, path
                 ),
@@ -534,15 +540,17 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
         _validate_skill_string(entry.content_hash, "content_hash", index, path)
         _validate_skill_string(entry.skill_file_hash, "skill_file_hash", index, path)
         _validate_skill_string(entry.source_path, "source_path", index, path)
+        normalized_name = _normalize_index_skill_name(entry.name, index, path)
         try:
             source_path = normalize_source_relative_path(entry.source_path)
         except SvError as exc:
             raise SvError(
                 f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'source_path' is invalid: {exc}"
             ) from exc
+        _validate_source_path_matches_name(source_path, normalized_name, index, path)
         entries.append(
             IndexSkillEntry(
-                name=entry.name,
+                name=normalized_name,
                 description=entry.description,
                 source_path=source_path,
                 content_hash=entry.content_hash,
@@ -550,6 +558,26 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
             )
         )
     return entries
+
+
+def _normalize_index_skill_name(name: str, index: int, path: Path) -> str:
+    try:
+        return normalize_skill_name(name)
+    except SvError as exc:
+        raise SvError(
+            f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'name' is invalid: {exc}"
+        ) from exc
+
+
+def _validate_source_path_matches_name(
+    source_path: str, skill_name: str, index: int, path: Path
+) -> None:
+    if PurePosixPath(source_path).name == skill_name:
+        return
+    raise SvError(
+        f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} source_path "
+        f"'{source_path}' does not match skill name '{skill_name}'."
+    )
 
 
 def _expect_kind(value: Any, path: Path) -> IndexKind:

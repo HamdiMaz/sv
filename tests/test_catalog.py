@@ -190,6 +190,36 @@ def test_build_source_catalog_from_backend_uses_index_without_reading_skill_file
     assert result.failures == ()
 
 
+def test_build_source_catalog_from_backend_rejects_index_name_source_path_mismatch(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    backend = IndexedBackend(
+        """
+        schema_version = 1
+        kind = "skill-vault"
+        generated_by = "sv"
+        generated_at = "2026-05-15T00:00:00Z"
+
+        [[skills]]
+        name = "alpha"
+        description = "Alpha from index."
+        source_path = "skills/beta"
+        content_hash = "sha256:alpha"
+        skill_file_hash = "sha256:alpha-skill"
+        """
+    )
+
+    result = build_source_catalog_from_backends([repo], paths, {repo.id: (backend,)})
+
+    assert result.entries == ()
+    assert len(result.failures) == 1
+    assert "source_path 'skills/beta' does not match skill name 'alpha'" in result.failure_report()
+    assert backend.read_file_calls == []
+    assert backend.list_candidate_calls == 0
+
+
 def test_build_source_catalog_from_backend_reports_future_index_schema(
     tmp_path: Path,
 ):

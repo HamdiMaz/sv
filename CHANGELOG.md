@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed source path-aware indexed catalogs to reject `.sv/index.toml` entries whose skill name does not match the `source_path` folder, and marked the PLAN alignment review item fixed.
 - Marked the vault mode targeting PLAN alignment review item fixed after verifying vault add/remove/update/sync target root skills and nested context coverage exists.
 - Fixed first-run source config handling so schema-only configs are treated as missing source configuration while explicit `repos = []` still disables sources, and marked the PLAN alignment review item fixed.
 - Fixed `sv repo add --skills-path` for already-configured repos to merge new bounded discovery roots, and marked the explicit `--skills-path` PLAN alignment review item fixed.

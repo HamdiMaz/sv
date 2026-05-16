@@ -267,6 +267,54 @@ def test_load_index_rejects_unsafe_source_path(tmp_path: Path):
         load_index(path)
 
 
+def test_load_index_rejects_name_source_path_mismatch(tmp_path: Path):
+    path = tmp_path / ".sv" / "index.toml"
+    path.parent.mkdir()
+    path.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "\n"
+        "[[skills]]\n"
+        'name = "alpha"\n'
+        'description = "Alpha."\n'
+        'source_path = "skills/beta"\n'
+        'content_hash = "sha256:content"\n'
+        'skill_file_hash = "sha256:skill-file"\n'
+    )
+
+    with pytest.raises(
+        SvError,
+        match="source_path 'skills/beta' does not match skill name 'alpha'",
+    ):
+        load_index(path)
+
+
+def test_save_index_rejects_name_source_path_mismatch(tmp_path: Path):
+    path = tmp_path / ".sv" / "index.toml"
+    document = IndexDocument(
+        kind="skill-vault",
+        generated_by="sv",
+        generated_at="2026-05-15T00:00:00Z",
+        skills=(
+            IndexSkillEntry(
+                name="alpha",
+                description="Alpha.",
+                source_path="skills/beta",
+                content_hash="sha256:content",
+                skill_file_hash="sha256:skill-file",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        SvError,
+        match="source_path 'skills/beta' does not match skill name 'alpha'",
+    ):
+        save_index(path, document)
+
+
 def test_save_index_writes_deterministic_toml_and_round_trips(tmp_path: Path):
     path = tmp_path / ".sv" / "index.toml"
     document = IndexDocument(
