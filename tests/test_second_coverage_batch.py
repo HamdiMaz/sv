@@ -702,7 +702,12 @@ def test_source_git_local_backend_read_list_and_materialize_edges(tmp_path: Path
     repo = tmp_path / "repo"
     (repo / "skills" / "alpha").mkdir(parents=True)
     (repo / "skills" / "alpha" / "SKILL.md").write_text("alpha\n")
+    (repo / "skills" / ".hidden").mkdir()
+    (repo / "skills" / ".hidden" / "SKILL.md").write_text("hidden\n")
+    (repo / "skills" / "not-a-directory").write_text("skip\n")
     backend = GitLocalSourceBackend(repo)
+
+    assert backend.list_candidate_skill_files() == ["skills/alpha/SKILL.md"]
 
     with pytest.raises(SourceBackendError, match="could not be read"):
         backend.read_file("skills/missing/SKILL.md")
@@ -722,6 +727,18 @@ def test_source_git_local_backend_read_list_and_materialize_edges(tmp_path: Path
 
     with pytest.raises(SourceBackendError, match="does not contain files"):
         backend.materialize_folder("skills/missing", tmp_path / "missing")
+
+    existing_file = tmp_path / "existing-file"
+    existing_file.write_text("old\n")
+    backend.materialize_folder("skills/alpha", existing_file)
+    assert (existing_file / "SKILL.md").read_text() == "alpha\n"
+
+    existing_dir = tmp_path / "existing-dir"
+    existing_dir.mkdir()
+    (existing_dir / "old.txt").write_text("old\n")
+    backend.materialize_folder("skills/alpha", existing_dir)
+    assert (existing_dir / "SKILL.md").read_text() == "alpha\n"
+    assert not (existing_dir / "old.txt").exists()
 
     destination = tmp_path / "dest-link"
     outside = tmp_path / "outside"
@@ -746,7 +763,7 @@ def test_source_git_sparse_local_metadata_and_cleanup_error_branches(tmp_path: P
     (repo / "team" / "skills").rmdir()
     (repo / "team").rmdir()
     (repo / "custom").mkdir()
-    assert backend._local_metadata_checkout_available(("bad:name", "custom"))
+    assert backend._local_metadata_checkout_available(("bad:name", "missing", "custom"))
 
     original_iterdir = Path.iterdir
 

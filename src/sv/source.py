@@ -658,7 +658,13 @@ class GitSparseSourceBackend:
     def read_file(self, path: str) -> bytes:
         operation = "reading remote file"
         normalized_path = _normalize_backend_relative_path(path)
-        self._prepare_checkout([_sparse_file_pattern(normalized_path)], operation)
+        self._prepare_checkout(
+            [
+                *_metadata_sparse_patterns(self._configured_skills_paths),
+                _sparse_file_pattern(normalized_path),
+            ],
+            operation,
+        )
         return GitLocalSourceBackend(self.repo_path).read_file(normalized_path)
 
     def read_index(self) -> bytes | None:

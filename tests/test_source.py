@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -1206,6 +1207,72 @@ def test_git_treeless_partial_backend_fetches_metadata_and_selected_folder_witho
         ]
     ]
     assert ["git", "clone", "--", "https://example.com/skills.git", str(repo_path)] not in clone_calls
+
+
+def test_git_treeless_partial_backend_keeps_generic_metadata_cache_after_skill_reads(
+    tmp_path: Path,
+):
+    repo_path = tmp_path / "repo"
+    source_files = {
+        "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha.\n---\n",
+        "skills/beta/SKILL.md": "---\nname: beta\ndescription: Beta.\n---\n",
+    }
+
+    def restore_sparse_patterns(patterns: set[str]) -> None:
+        repo_path.mkdir(parents=True, exist_ok=True)
+        for child in repo_path.iterdir():
+            if child.name == ".git":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        for relative_path, content in source_files.items():
+            file_pattern = f"/{relative_path}"
+            if file_pattern not in patterns and "/skills/*/SKILL.md" not in patterns:
+                continue
+            target = repo_path / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+
+    def runner(args, cwd=None):
+        command = list(args)
+        if command == ["git", "--version"]:
+            return completed(command, stdout="git version 2.0\n")
+        if command[:2] == ["git", "clone"]:
+            (repo_path / ".git").mkdir(parents=True, exist_ok=True)
+            return completed(command)
+        if command == ["git", "remote", "get-url", "origin"]:
+            return completed(command, stdout="https://example.com/skills.git\n")
+        if command[:4] == ["git", "sparse-checkout", "set", "--no-cone"]:
+            restore_sparse_patterns(set(command[4:]))
+            return completed(command)
+        return completed(command)
+
+    refreshed_backend = GitTreelessPartialBackend(
+        "https://example.com/skills.git", repo_path, runner=runner, update=True
+    )
+
+    assert refreshed_backend.read_index() is None
+    assert refreshed_backend.list_candidate_skill_files() == [
+        "skills/alpha/SKILL.md",
+        "skills/beta/SKILL.md",
+    ]
+    assert refreshed_backend.read_file("skills/alpha/SKILL.md") == source_files[
+        "skills/alpha/SKILL.md"
+    ].encode()
+    assert refreshed_backend.read_file("skills/beta/SKILL.md") == source_files[
+        "skills/beta/SKILL.md"
+    ].encode()
+
+    cached_backend = GitTreelessPartialBackend(
+        "https://example.com/skills.git", repo_path, runner=runner, update=False
+    )
+
+    assert cached_backend.list_candidate_skill_files() == [
+        "skills/alpha/SKILL.md",
+        "skills/beta/SKILL.md",
+    ]
 
 
 def test_source_backend_failure_formats_actionable_message():

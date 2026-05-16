@@ -10,7 +10,7 @@ The main verification gates now pass and the original `PLAN_REVIEW.md` blockers 
 
 However, I would **not call the Epic 1 implementation fully complete yet**. I found remaining functional, security/robustness, and documentation gaps that are not caught by the current test suite. The most important are:
 
-1. Git sparse fallback metadata cache can be narrowed to only the last discovered skill, making later `sv add -l` / cached catalog reads incomplete.
+1. Git sparse fallback metadata cache can be narrowed to only the last discovered skill, making later `sv add -l` / cached catalog reads incomplete. (FIXED)
 2. Local path Git sources can silently ignore `--filter`/`--depth`, violating the plan's “never silently full-clone” rule.
 3. Unknown/unsafe Git URL schemes such as `git://` and `ext::` are accepted and passed to Git. (FIXED)
 4. README and command docs still describe removed or changed behavior (`sv add all`, default `HamdiMaz/Skills`, and destructive `sv update`). (FIXED)
@@ -44,7 +44,7 @@ The previously reported blockers are broadly addressed in current code:
 
 ## Findings
 
-### High: Git sparse fallback can leave cached metadata incomplete
+### High: Git sparse fallback can leave cached metadata incomplete (FIXED)
 
 Evidence:
 
@@ -186,7 +186,7 @@ Impact: minor UX mismatch. Non-TTY duplicate sections should keep exact scriptab
 
 ## Recommended fix list before declaring Epic 1 complete
 
-1. Fix sparse Git metadata cache narrowing and add regression coverage.
+1. Fix sparse Git metadata cache narrowing and add regression coverage. (FIXED)
 2. Enforce a strict repo URL/protocol allowlist and set defensive Git protocol environment. (FIXED)
 3. Handle local path sources without silently ignoring lightweight clone requirements.
 4. Add metadata/index size and entry limits for all backends, including `gh` and Git local cache reads.
