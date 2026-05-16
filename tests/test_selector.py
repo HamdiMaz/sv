@@ -351,6 +351,39 @@ def test_select_skills_selects_items_in_list_order(monkeypatch):
     assert "\x1b[?25h" in rendered
 
 
+def test_select_skills_renders_structured_columns_with_aligned_header(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter"])
+    items = [
+        {"skill": "a", "source": "Org/A", "description": "Alpha."},
+        {"skill": "longer", "source": "Org/Longer", "description": "Longer."},
+    ]
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
+
+    select_skills(
+        items,
+        stdin=TtyStream(),
+        stdout=output,
+        item_columns=lambda item: [
+            item["skill"],
+            item["source"],
+            item["description"],
+        ],
+        header_columns=["Skill", "Source", "Description"],
+    )
+
+    lines = [visible_text(line) for line in output.getvalue().splitlines()]
+    assert "    Skill   Source      Description" in lines
+    assert "[ ] a       Org/A       Alpha." in lines
+    assert "[ ] longer  Org/Longer  Longer." in lines
+
+
 def test_select_skills_returns_empty_when_cancelled(monkeypatch):
     output = TtyStream()
     key_inputs = iter(["down", "down", "quit"])

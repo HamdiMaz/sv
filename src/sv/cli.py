@@ -2014,10 +2014,13 @@ def _handle_add_interactive(
         print("No valid skills found in configured source repos.")
         return 0
 
-    selected_skills = skill_selector(
+    selected_skills = _call_selector(
+        skill_selector,
         catalog,
         item_label=_source_skill_picker_labeler(catalog),
         header_label=_source_skill_picker_header_label(catalog),
+        item_columns=_source_skill_picker_columns,
+        header_columns=["Skill", "Source", "Description"],
     )
     if not selected_skills:
         print("No skills selected.")
@@ -3091,6 +3094,14 @@ def _source_skill_label(entry: SourceSkill) -> str:
     return entry.display_label
 
 
+def _source_skill_picker_columns(entry: SourceSkill) -> list[str]:
+    return [
+        _escape_control_characters(entry.name),
+        _source_skill_picker_source_label(entry),
+        _escape_control_characters(entry.description),
+    ]
+
+
 def _source_skill_picker_labeler(
     catalog: Sequence[SourceSkill],
 ) -> Callable[[SourceSkill], str]:
@@ -3178,6 +3189,8 @@ def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:
             matches,
             item_label=_source_skill_picker_labeler(matches),
             header_label=_source_skill_picker_header_label(matches),
+            item_columns=_source_skill_picker_columns,
+            header_columns=["Skill", "Source", "Description"],
         )
         if not selected:
             return None

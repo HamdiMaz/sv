@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed the interactive `sv add -l` picker to pass structured Skill/Source/Description columns into the checkbox selector while preserving simple selector compatibility.
 - Marked the `sv status` PLAN alignment review item fixed after confirming project, vault, and global status handlers now cover backend/index reporting and legacy missing-backend states.
 - Added subdirectory regression coverage for project remove, sync, and update targeting the detected repository root.
 - Marked canonical project manifest PLAN alignment fixed after verifying subdirectory project operations target the detected repository root.

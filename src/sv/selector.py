@@ -152,6 +152,8 @@ def select_skills(
     item_label: Callable[[T], str] = str,
     header_label: str | None = None,
     filter_text: Callable[[T], str] | None = None,
+    item_columns: Callable[[T], Sequence[str]] | None = None,
+    header_columns: Sequence[str] | None = None,
 ) -> list[T]:
     """Prompt for skills with arrow-key navigation and spacebar selection."""
     input_stream = sys.stdin if stdin is None else stdin
@@ -171,10 +173,18 @@ def select_skills(
             "Interactive skill selection requires a Unix-like terminal."
         ) from exc
 
+    column_labeler = _column_labeler(skills, item_columns, header_columns)
+    effective_item_label = item_label if column_labeler is None else column_labeler
+    effective_header_label = (
+        header_label
+        if column_labeler is None or header_columns is None
+        else column_labeler.header_label()
+    )
+    effective_filter_text = effective_item_label if filter_text is None else filter_text
     state = SelectionState(
         skills,
         viewport_size=viewport_size,
-        filter_text=item_label if filter_text is None else filter_text,
+        filter_text=effective_filter_text,
     )
     try:
         fd = input_stream.fileno()
@@ -196,8 +206,8 @@ def select_skills(
         rendered_lines = _render(
             state,
             output_stream,
-            item_label=item_label,
-            header_label=header_label,
+            item_label=effective_item_label,
+            header_label=effective_header_label,
         )
 
         while True:
@@ -222,8 +232,8 @@ def select_skills(
                     output_stream,
                     previous_line_count=rendered_lines,
                     highlight_cursor=False,
-                    item_label=item_label,
-                    header_label=header_label,
+                    item_label=effective_item_label,
+                    header_label=effective_header_label,
                 )
                 return state.selected_items()
             elif key in {"escape", "quit", "eof"}:
@@ -232,8 +242,8 @@ def select_skills(
                     output_stream,
                     previous_line_count=rendered_lines,
                     highlight_cursor=False,
-                    item_label=item_label,
-                    header_label=header_label,
+                    item_label=effective_item_label,
+                    header_label=effective_header_label,
                 )
                 return []
             else:
@@ -243,8 +253,8 @@ def select_skills(
                 state,
                 output_stream,
                 previous_line_count=rendered_lines,
-                item_label=item_label,
-                header_label=header_label,
+                item_label=effective_item_label,
+                header_label=effective_header_label,
             )
     finally:
         restore_error: BaseException | None = None
@@ -259,6 +269,58 @@ def select_skills(
             raise SvError(
                 "Interactive skill selection could not restore terminal settings."
             ) from restore_error
+
+
+@dataclass(frozen=True)
+class _ColumnLabeler(Generic[T]):
+    item_columns: Callable[[T], Sequence[str]]
+    widths: tuple[int, ...]
+    header_columns: tuple[str, ...] | None = None
+
+    def __call__(self, item: T) -> str:
+        return self._format_row(self.item_columns(item))
+
+    def header_label(self) -> str:
+        if self.header_columns is None:
+            return ""
+        return self._format_row(self.header_columns)
+
+    def _format_row(self, columns: Sequence[str]) -> str:
+        sanitized = [_sanitize_label(str(value)) for value in columns]
+        padded = [
+            value if index == len(sanitized) - 1 else _fit_column(value, self.widths[index])
+            for index, value in enumerate(sanitized[: len(self.widths)])
+        ]
+        if len(sanitized) > len(self.widths):
+            padded.extend(sanitized[len(self.widths) :])
+        return "  ".join(padded)
+
+
+def _column_labeler(
+    items: Sequence[T],
+    item_columns: Callable[[T], Sequence[str]] | None,
+    header_columns: Sequence[str] | None,
+) -> _ColumnLabeler[T] | None:
+    if item_columns is None:
+        return None
+
+    rows = [tuple(_sanitize_label(str(value)) for value in item_columns(item)) for item in items]
+    headers = None if header_columns is None else tuple(str(value) for value in header_columns)
+    column_count = max(
+        [len(row) for row in rows] + ([len(headers)] if headers is not None else [0]),
+        default=0,
+    )
+    widths = []
+    for index in range(column_count):
+        values = [row[index] for row in rows if index < len(row)]
+        if headers is not None and index < len(headers):
+            values.append(_sanitize_label(headers[index]))
+        widths.append(max((_display_width(value) for value in values), default=0))
+    return _ColumnLabeler(item_columns, tuple(widths), headers)
+
+
+def _fit_column(value: str, width: int) -> str:
+    return value + " " * max(width - _display_width(value), 0)
 
 
 def _render(
