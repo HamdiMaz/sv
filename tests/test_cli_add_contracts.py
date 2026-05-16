@@ -592,6 +592,69 @@ def test_add_all_repo_reports_duplicate_skills_in_requested_source_before_copyin
 
 
 @pytest.mark.integration
+def test_add_all_repo_resolves_duplicate_skills_in_requested_source_before_copying(
+    tmp_path: Path, capsys, monkeypatch
+):
+    source = make_source_repo(tmp_path, "source-a")
+    team_alpha = source / "team" / "skills" / "alpha"
+    team_alpha.mkdir(parents=True)
+    (team_alpha / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Team alpha.\n---\n\n# alpha\n"
+    )
+    (team_alpha / "notes.md").write_text("alpha from team\n")
+    run_git(["add", "team/skills/alpha"], source)
+    run_git(["commit", "-m", "add team alpha"], source)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    repo_id = load_config(SvPaths.from_home(home)).repos[0].id
+    selector_calls = []
+    capsys.readouterr()
+
+    def select_team_alpha(matches, **kwargs):
+        selector_calls.append((matches, kwargs))
+        assert not (project / ".pi").exists()
+        return [
+            next(
+                match
+                for match in matches
+                if match.source_relative_path == "team/skills/alpha"
+            )
+        ]
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(cli_module, "select_skills", select_team_alpha)
+
+    exit_code = handle(
+        parse(["add", "--all", "--repo", repo_id]),
+        cwd=project,
+        home=home,
+    )
+
+    assert exit_code == 0
+    selected_matches, selector_kwargs = selector_calls[0]
+    assert [(match.repo_id, match.source_relative_path) for match in selected_matches] == [
+        (repo_id, "skills/alpha"),
+        (repo_id, "team/skills/alpha"),
+    ]
+    assert selector_kwargs["header_columns"] == ["Skill", "Source", "Description"]
+    assert selector_kwargs["item_columns"](selected_matches[1]) == [
+        "alpha",
+        f"{repo_id}:team/skills/alpha",
+        "Team alpha.",
+    ]
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha from team\n"
+    output = capsys.readouterr().out
+    assert "Multiple selected sources provide 'alpha'" in output
+    assert f"{repo_id}:team/skills/alpha" in output
+    assert "Added Pi skill 'alpha'" in output
+
+
+@pytest.mark.integration
 def test_add_all_repo_unknown_source_fails_without_copying(tmp_path: Path, capsys):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Marked the `sv add --all --repo` PLAN alignment review item fixed after adding regression coverage for TTY duplicate resolution within a filtered source repo.
 - Fixed GitHub API materialization to fail closed on unsupported content item types instead of silently omitting them.
 - Added local skill materialization file-count, byte, and depth limits before copying source trees, and marked the safe hashing/materialization PLAN alignment item fixed.
 - Fixed the interactive `sv remove -l` picker to pass structured Skill/Target/Source-Status columns into the checkbox selector for managed-removal rows.
