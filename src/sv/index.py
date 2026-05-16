@@ -252,6 +252,7 @@ def _iter_candidate_skill_files(
         path = root if not relative_root else root / relative_root
         if _is_excluded(relative_root, exclude_paths):
             continue
+        _reject_unsafe_include_path(path, root)
         if not path.exists():
             continue
         if path.is_file():
@@ -300,6 +301,37 @@ def _collect_candidate_skill_files(
                     _collect_candidate_skill_files(child, root, candidates, exclude_paths, seen)
     except OSError as exc:
         raise SvError(f"Failed to scan directory {path}: {exc}") from exc
+
+
+def _reject_unsafe_include_path(path: Path, root: Path) -> None:
+    _reject_symlinked_scan_path(path, root)
+    try:
+        resolved = path.resolve()
+    except OSError as exc:
+        raise SvError(f"Failed to inspect include path {path}: {exc}") from exc
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise SvError(
+            f"Refusing to scan include path outside repository root: {path}."
+        ) from exc
+
+
+def _reject_symlinked_scan_path(path: Path, root: Path) -> None:
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise SvError(
+            f"Refusing to scan include path outside repository root: {path}."
+        ) from exc
+    current = root
+    for part in relative.parts:
+        current = current / part
+        try:
+            if current.is_symlink():
+                raise SvError(f"Refusing to scan symlinked include path at {current}.")
+        except OSError as exc:
+            raise SvError(f"Failed to inspect include path {current}: {exc}") from exc
 
 
 def _normalize_scan_paths(paths: Sequence[str], *, field: str) -> tuple[str, ...]:

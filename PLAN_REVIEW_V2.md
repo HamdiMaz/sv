@@ -136,7 +136,7 @@ Impact: a malicious or accidental huge `.sv/index.toml` / `SKILL.md` can cause m
 
 Suggested fix: impose max byte limits for index files and candidate `SKILL.md` files across all backends. For `gh`, use a bounded runner/output strategy or reject output over a configured cap before parsing. Add index entry count / field length limits.
 
-### Medium: `sv index --include` can scan through symlinked roots before rejecting
+### Medium: `sv index --include` can scan through symlinked roots before rejecting (FIXED)
 
 Evidence:
 
@@ -190,7 +190,7 @@ Impact: minor UX mismatch. Non-TTY duplicate sections should keep exact scriptab
 2. Enforce a strict repo URL/protocol allowlist and set defensive Git protocol environment. (FIXED)
 3. Handle local path sources without silently ignoring lightweight clone requirements. (FIXED)
 4. Add metadata/index size and entry limits for all backends, including `gh` and Git local cache reads.
-5. Reject symlinked `sv index` include roots before scanning/reading.
+5. Reject symlinked `sv index` include roots before scanning/reading. (FIXED)
 6. Update README and docs for first-run config, `sv add --all`, `sv update` vs `sv sync`, and missing Epic 1 commands/flags. (FIXED)
 7. Make `sv status` avoid remote refresh when no managed local entries exist. (FIXED)
 8. Optionally remove `Add as` from TTY browse details or explicitly document that deviation.

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed `sv index --include` to reject symlinked include paths before scanning so index generation cannot read outside the repository through symlinked roots.
 - Fixed local Git source handling to avoid hidden full local clones when Git ignores lightweight filter/depth options.
 - Fixed sparse Git source reads to preserve metadata checkout patterns so cached generic catalogs keep every discovered skill.
 - Fixed repo URL handling to reject unsupported Git URL schemes such as `git://`, `ext::`, and other remote-helper forms while constraining Git subprocess protocols to `file`, `https`, and `ssh`.

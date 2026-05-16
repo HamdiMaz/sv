@@ -111,6 +111,28 @@ def test_scan_repo_for_index_does_not_follow_symlinked_directories(tmp_path: Pat
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+@pytest.mark.parametrize("include_path", ["linked-skills", "linked-skills/external"])
+def test_scan_repo_for_index_rejects_symlinked_include_paths_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, include_path: str
+):
+    outside = tmp_path.with_name(f"{tmp_path.name}-outside")
+    _write_skill(outside / "skills" / "external", "external", "External skill.")
+    (tmp_path / "linked-skills").symlink_to(outside / "skills", target_is_directory=True)
+
+    def fail_parse(*_args: Any, **_kwargs: Any):
+        raise AssertionError("scan should reject the include path before parsing")
+
+    monkeypatch.setattr("sv.index.parse_skill_file", fail_parse)
+
+    with pytest.raises(SvError, match="symlinked include path"):
+        scan_repo_for_index(
+            tmp_path,
+            include_paths=(include_path,),
+            generated_at="2026-05-15T00:00:00Z",
+        )
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
 def test_scan_repo_for_index_warns_and_skips_skill_trees_containing_symlinks(
     tmp_path: Path,
 ):
