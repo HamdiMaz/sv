@@ -88,7 +88,7 @@ def test_security_paths_reject_invalid_skill_inputs_without_filesystem_mutation(
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
     config_before = paths.config_file.read_text()
 
     def failing_git_runner(args, cwd=None):
@@ -126,7 +126,7 @@ def test_repo_add_rejects_invalid_repo_inputs_without_filesystem_mutation(
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
     config_before = paths.config_file.read_text()
     project_skills = project / ".pi" / "skills"
     project_skills.mkdir(parents=True)

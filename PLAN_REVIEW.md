@@ -152,7 +152,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 
 | PLAN area | Status | Notes |
 | --- | --- | --- |
-| Versioned TOML helpers | Mostly implemented | Future schema errors exist; missing schema is treated as current, which may be too permissive for new files. |
+| Versioned TOML helpers | Fixed (FIXED) | Future schema errors exist; new versioned config, canonical project manifest, and global manifest files now reject missing `schema_version`, while legacy single-repo config and legacy Pi manifests remain readable for migration. |
 | Safe hashing/materialization | Mostly implemented | Symlink checks and atomic helpers are present. Security hardening still recommended for quotas/timeouts. |
 | Source path-aware catalog | Mostly implemented | Same-name/source-path models exist. |
 | Canonical project manifest | Mostly implemented | New `.sv/manifest.toml` support exists. Root/cwd inconsistency is a major bug. |

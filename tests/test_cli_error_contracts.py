@@ -91,7 +91,7 @@ def test_auth_rate_limit_failures_explain_api_and_git_fallbacks(
     project.mkdir()
     _write_config(
         home,
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n',
     )
@@ -165,7 +165,7 @@ def _missing_skill(tmp_path: Path) -> CliErrorScenario:
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    _write_config(home, "repos = []\n")
+    _write_config(home, "schema_version = 1\nrepos = []\n")
     return CliErrorScenario(
         args=["add", "missing"],
         home=home,
@@ -193,7 +193,7 @@ def _git_failure(tmp_path: Path) -> CliErrorScenario:
     project.mkdir()
     _write_config(
         home,
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "HamdiMaz/Skills"\n'
         'url = "https://github.com/HamdiMaz/Skills.git"\n',
     )

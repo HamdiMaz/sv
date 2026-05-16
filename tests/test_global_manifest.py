@@ -103,6 +103,17 @@ def test_global_manifest_does_not_read_project_managed_skill_state(tmp_path: Pat
     assert not paths.global_manifest_file.exists()
 
 
+def test_load_global_manifest_rejects_missing_schema_version(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    paths.global_manifest_file.parent.mkdir(parents=True)
+    paths.global_manifest_file.write_text("sources = []\n")
+
+    with pytest.raises(SvError, match="missing 'schema_version'"):
+        load_global_manifest(paths)
+
+
 def test_load_global_manifest_rejects_future_schema_with_update_message(
     tmp_path: Path,
 ) -> None:

@@ -142,11 +142,13 @@ def load_config(paths: SvPaths) -> SvConfig:
     if not paths.config_file.exists():
         return SvConfig()
 
+    raw_data = load_toml_document(paths.config_file, "sv config")
     data = require_schema_version(
-        load_toml_document(paths.config_file, "sv config"),
+        raw_data,
         path=paths.config_file,
         document_name="sv config",
         current_version=1,
+        require_present="schema_version" not in raw_data and "repos" in raw_data,
     )
 
     try:
@@ -376,12 +378,12 @@ def _save_config(paths: SvPaths, config: SvConfig) -> None:
         if not config.repos:
             atomic_write_text(
                 paths.config_file,
-                "repos = []\n",
+                "schema_version = 1\nrepos = []\n",
                 document_name="sv config",
             )
             return
 
-        lines: list[str] = []
+        lines: list[str] = ["schema_version = 1"]
         for index, repo in enumerate(config.repos):
             if index:
                 lines.append("")

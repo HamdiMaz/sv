@@ -253,9 +253,34 @@ def test_load_config_reads_old_single_repo_config(tmp_path: Path):
 def test_load_config_reports_malformed_toml_as_sv_error(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = [\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = [\n")
 
     with pytest.raises(SvError, match="Failed to read sv config"):
+        load_config(paths)
+
+
+def test_load_config_rejects_missing_schema_version(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text('[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n')
+
+    with pytest.raises(SvError, match="missing 'schema_version'"):
+        load_config(paths)
+
+
+def test_load_config_rejects_missing_schema_version_for_hybrid_repo_config(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        'repo = "Legacy/Skills"\n'
+        '[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+    )
+
+    with pytest.raises(SvError, match="missing 'schema_version'"):
         load_config(paths)
 
 
@@ -275,7 +300,7 @@ def test_load_config_rejects_future_schema_with_update_message(tmp_path: Path):
 def test_load_config_reports_invalid_repo_entries_as_sv_error(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text('[[repos]]\nid = "Org/Skills"\n')
+    paths.config_file.write_text('schema_version = 1\n[[repos]]\nid = "Org/Skills"\n')
 
     with pytest.raises(SvError, match="Invalid sv config"):
         load_config(paths)
@@ -284,7 +309,7 @@ def test_load_config_reports_invalid_repo_entries_as_sv_error(tmp_path: Path):
 def test_load_config_rejects_repos_not_a_list(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text('repos = "not-a-list"\n')
+    paths.config_file.write_text('schema_version = 1\nrepos = "not-a-list"\n')
 
     with pytest.raises(SvError, match="Invalid sv config"):
         load_config(paths)
@@ -293,7 +318,7 @@ def test_load_config_rejects_repos_not_a_list(tmp_path: Path):
 def test_load_config_rejects_repo_entries_that_are_not_tables(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text('repos = [1]\n')
+    paths.config_file.write_text('schema_version = 1\nrepos = [1]\n')
 
     with pytest.raises(SvError, match="Invalid sv config"):
         load_config(paths)
@@ -303,7 +328,7 @@ def test_load_config_rejects_aliases_not_a_list(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://example.com/skills.git"\n'
         'aliases = "Mirror/Skills"\n'
@@ -317,7 +342,7 @@ def test_load_config_rejects_non_string_aliases(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         'aliases = [123]\n'
@@ -331,7 +356,7 @@ def test_load_config_deduplicates_duplicate_aliases(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         'aliases = ["Mirror/Skills", "Mirror/Skills", "Mirror/Second"]\n'
@@ -352,7 +377,7 @@ def test_load_config_reads_repo_skills_paths(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         'skills_paths = ["packages/agents/pi/skills", "tools/skills"]\n'
@@ -385,7 +410,7 @@ def test_load_config_rejects_unsafe_repo_skills_paths(
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         f'skills_paths = ["{skills_path}"]\n'
@@ -401,7 +426,7 @@ def test_load_config_rejects_skills_paths_not_a_list(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         'skills_paths = "skills"\n'
@@ -418,7 +443,7 @@ def test_load_config_rejects_non_string_skills_paths(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         'skills_paths = [123]\n'
@@ -432,7 +457,7 @@ def test_load_config_rejects_unsafe_aliases(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         'aliases = ["../../outside", "Org/Skills"]\n'
@@ -455,7 +480,7 @@ def test_load_config_rejects_non_string_repo_entry_fields(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = []\nurl = "https://example.com/skills.git"\n'
+        'schema_version = 1\n[[repos]]\nid = []\nurl = "https://example.com/skills.git"\n'
     )
 
     with pytest.raises(SvError, match="repo entry 1 field 'id' must be a string"):
@@ -466,7 +491,7 @@ def test_load_config_rejects_unsafe_repo_id(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "../../outside"\nurl = "https://example.com/skills.git"\n'
+        'schema_version = 1\n[[repos]]\nid = "../../outside"\nurl = "https://example.com/skills.git"\n'
     )
 
     with pytest.raises(
@@ -517,7 +542,7 @@ def test_load_config_rejects_control_characters_in_repo_id(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/\\u001bSkills"\nurl = "https://example.com/skills.git"\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/\\u001bSkills"\nurl = "https://example.com/skills.git"\n'
     )
 
     with pytest.raises(
@@ -530,7 +555,7 @@ def test_load_config_rejects_option_like_repo_entry_url(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "--upload-pack=/tmp/fake"\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "--upload-pack=/tmp/fake"\n'
     )
 
     with pytest.raises(SvError, match="repo cannot start with '-'"):
@@ -551,7 +576,7 @@ def test_load_config_rejects_cleartext_and_credentialed_repo_urls(
 ):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text(f'[[repos]]\nid = "Org/Skills"\nurl = "{repo_url}"\n')
+    paths.config_file.write_text(f'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "{repo_url}"\n')
 
     with pytest.raises(SvError, match=match):
         load_config(paths)
@@ -637,7 +662,7 @@ def test_load_config_coalesces_identical_duplicate_repo_entries(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n'
     )
 
@@ -650,7 +675,7 @@ def test_load_config_coalesces_duplicate_repo_id_with_equivalent_url(tmp_path: P
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
         '[[repos]]\nid = "Org/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
     )
 
@@ -663,7 +688,7 @@ def test_load_config_rejects_duplicate_repo_id_with_different_urls(tmp_path: Pat
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Other/Skills.git"\n'
     )
 
@@ -675,7 +700,7 @@ def test_load_config_coalesces_duplicate_repo_urls_with_different_ids(tmp_path: 
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\nid = "Mirror/Skills"\nurl = "https://github.com/Org/Skills.git"\n'
     )
 
@@ -694,12 +719,12 @@ def test_load_config_merges_duplicate_repo_url_skills_paths(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
         'skills_paths = ["packages/agents/pi/skills", "tools/skills"]\n'
         '\n'
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Mirror/Skills"\n'
         'url = "git@github.com:Org/Skills.git"\n'
         'skills_paths = ["tools/skills", "nested/skills"]\n'
@@ -725,7 +750,7 @@ def test_load_config_coalesces_equivalent_github_repo_urls(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
         '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
     )
 
@@ -746,7 +771,7 @@ def test_add_repo_preserves_duplicate_source_aliases_when_rewriting_config(
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
     )
 
@@ -771,7 +796,7 @@ def test_remove_repo_does_not_remove_canonical_repo_by_alias(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
     )
 
@@ -805,6 +830,7 @@ def test_add_repo_writes_multi_repo_config_without_duplicates(tmp_path: Path):
         ),
     )
     assert paths.config_file.read_text() == (
+        "schema_version = 1\n"
         "[[repos]]\n"
         'id = "HamdiMaz/Skills"\n'
         'url = "https://github.com/HamdiMaz/Skills.git"\n'
@@ -839,7 +865,7 @@ def test_remove_last_repo_preserves_empty_repo_config(tmp_path: Path):
 
     assert removed.id == "HamdiMaz/Skills"
     assert load_config(paths).repos == ()
-    assert paths.config_file.read_text() == "repos = []\n"
+    assert paths.config_file.read_text() == "schema_version = 1\nrepos = []\n"
 
 
 def test_remove_repo_reports_missing_repo(tmp_path: Path):

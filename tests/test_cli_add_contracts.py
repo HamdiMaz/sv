@@ -74,7 +74,7 @@ def test_add_missing_skill_fails_without_git_or_project_skill_dir(tmp_path, run_
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
 
     result = run_sv(
         ["add", "missing"],

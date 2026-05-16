@@ -79,6 +79,7 @@ def load_global_manifest(paths: SvPaths) -> dict[str, GlobalSourceState]:
         path=path,
         document_name=GLOBAL_MANIFEST_DOCUMENT,
         current_version=MANIFEST_SCHEMA_VERSION,
+        require_present=True,
     )
     if "skills" in data:
         raise SvError(
@@ -266,6 +267,7 @@ def load_manifest(project_skills_dir: Path) -> dict[str, ManifestEntry]:
         path=path,
         document_name=document_name,
         current_version=MANIFEST_SCHEMA_VERSION,
+        require_present=document_name == CANONICAL_MANIFEST_DOCUMENT,
     )
 
     return _parse_manifest_entries(data.get("skills", []), path, document_name)

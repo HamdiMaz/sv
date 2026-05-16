@@ -32,6 +32,19 @@ def test_load_toml_document_reports_parse_errors_with_file_context(tmp_path: Pat
     assert str(path) in message
 
 
+def test_require_schema_version_rejects_missing_required_schema_version(tmp_path: Path):
+    path = tmp_path / "manifest.toml"
+
+    with pytest.raises(SvError, match="missing 'schema_version'"):
+        require_schema_version(
+            {},
+            path=path,
+            document_name="sv manifest",
+            current_version=1,
+            require_present=True,
+        )
+
+
 def test_require_schema_version_rejects_future_versions_actionably(tmp_path: Path):
     path = tmp_path / "manifest.toml"
     data = {"schema_version": 99}

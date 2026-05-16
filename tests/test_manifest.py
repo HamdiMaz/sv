@@ -169,6 +169,15 @@ def test_load_manifest_reports_malformed_toml_as_sv_error(tmp_path: Path):
         load_manifest(project_skills)
 
 
+def test_load_manifest_rejects_missing_schema_version_in_canonical_manifest(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    manifest_module.manifest_path(project_skills).parent.mkdir(parents=True)
+    manifest_module.manifest_path(project_skills).write_text("skills = []\n")
+
+    with pytest.raises(SvError, match="missing 'schema_version'"):
+        load_manifest(project_skills)
+
+
 def test_load_manifest_rejects_future_schema_with_update_message(tmp_path: Path):
     project_skills = tmp_path / ".pi" / "skills"
     manifest_module.manifest_path(project_skills).parent.mkdir(parents=True)
@@ -254,7 +263,7 @@ def test_load_manifest_reads_legacy_manifest_from_project_root_argument(
 def test_load_manifest_rejects_canonical_invalid_entries_as_sv_error(tmp_path: Path):
     project_skills = tmp_path / ".pi" / "skills"
     manifest_module.manifest_path(project_skills).parent.mkdir(parents=True)
-    manifest_module.manifest_path(project_skills).write_text('skills = ["alpha"]\n')
+    manifest_module.manifest_path(project_skills).write_text('schema_version = 1\nskills = ["alpha"]\n')
 
     with pytest.raises(
         SvError, match=r"sv project manifest.*skills\[1\] must be a table"

@@ -191,7 +191,7 @@ def test_repo_list_escapes_control_characters_in_repo_url(
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
 
     monkeypatch.setattr(
         "sv.cli.load_config",
@@ -340,7 +340,7 @@ def test_source_git_errors_escape_stderr_control_characters(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "HamdiMaz/Skills"\n'
         'url = "https://github.com/HamdiMaz/Skills.git"\n'
     )
@@ -385,7 +385,7 @@ def test_source_git_errors_escape_stdout_control_characters(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "HamdiMaz/Skills"\n'
         'url = "https://github.com/HamdiMaz/Skills.git"\n'
     )
@@ -430,7 +430,7 @@ def test_source_git_errors_escape_os_error_control_characters(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "HamdiMaz/Skills"\n'
         'url = "https://github.com/HamdiMaz/Skills.git"\n'
     )

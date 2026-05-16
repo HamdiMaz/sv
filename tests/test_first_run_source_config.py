@@ -48,7 +48,7 @@ def test_explicit_empty_repos_is_not_first_run_missing_config(
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
 
     def git_runner(git_args, cwd=None):
         raise AssertionError(f"unexpected git call: {git_args}")

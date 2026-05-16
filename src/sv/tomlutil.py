@@ -30,14 +30,22 @@ def require_schema_version(
     document_name: str,
     current_version: int,
     migrations: Mapping[int, SchemaMigration] | None = None,
+    require_present: bool = False,
 ) -> dict[str, Any]:
     """Validate or safely migrate a simple schema_version field.
 
-    Missing schema_version is treated as the current version so existing legacy
-    documents can opt in to this helper without a file-format rewrite.
+    By default, missing schema_version is treated as the current version so
+    existing legacy documents can opt in to this helper without a file-format
+    rewrite. Set require_present for new versioned document formats that should
+    reject unversioned files instead of silently accepting them.
     """
     migrated: dict[str, Any] = dict(data)
     migrations = {} if migrations is None else migrations
+
+    if require_present and "schema_version" not in migrated:
+        raise SvError(
+            f"Invalid {document_name} at {path}: missing 'schema_version'."
+        )
 
     while True:
         raw_version = migrated.get("schema_version", current_version)

@@ -32,7 +32,7 @@ def test_list_uses_github_index_without_cloning_or_downloading_skill_folders(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
     )
@@ -99,7 +99,7 @@ def test_list_reports_future_index_schema_even_when_another_repo_has_entries(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\n'
@@ -172,7 +172,7 @@ def test_list_with_explicit_empty_repos_prints_next_step_and_skips_git(
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
 
     def git_runner(args, cwd=None):
         raise AssertionError(f"unexpected git call: {args}")
@@ -290,7 +290,7 @@ def test_list_and_add_coalesce_equivalent_repo_aliases(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
+        'schema_version = 1\n[[repos]]\nid = "Org/Skills"\nurl = "https://github.com/Org/Skills"\n\n'
         '[[repos]]\nid = "Mirror/Skills"\nurl = "git@github.com:Org/Skills.git"\n'
     )
     repo_path = paths.source_repo_for("Org/Skills")
@@ -349,7 +349,7 @@ def test_list_coalesces_repeated_repo_config_entries(tmp_path: Path, capsys):
     repo_id = derive_repo_id(str(source))
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        "[[repos]]\n"
+        "schema_version = 1\n[[repos]]\n"
         f'id = "{repo_id}"\n'
         f'url = "{source}"\n'
         "\n"

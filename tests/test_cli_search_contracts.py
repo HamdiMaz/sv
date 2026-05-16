@@ -14,7 +14,7 @@ def test_search_with_no_configured_repos_prints_next_step_and_skips_git(
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
 
     def git_runner(args, cwd=None):
         raise AssertionError(f"unexpected git call: {args}")
@@ -39,7 +39,7 @@ def test_search_uses_github_index_without_cloning_or_downloading_skill_folders(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
     )
@@ -110,7 +110,7 @@ def test_search_with_no_matches_prints_empty_message(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n'
     )
@@ -164,7 +164,7 @@ def test_search_matches_description_repo_id_and_source_path_with_ranked_output(
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Primary"\n'
         'url = "https://github.com/Org/Primary.git"\n\n'
         '[[repos]]\n'

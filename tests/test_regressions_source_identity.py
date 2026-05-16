@@ -76,7 +76,7 @@ def test_add_repo_rewrite_preserves_duplicate_source_aliases(tmp_path: Path) -> 
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\n'
@@ -104,7 +104,7 @@ def test_remove_repo_keeps_duplicate_aliases_for_remaining_sources(tmp_path: Pat
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills.git"\n\n'
         '[[repos]]\n'
@@ -132,7 +132,7 @@ def test_qualified_catalog_lookup_uses_aliases_from_rewrite(tmp_path: Path) -> N
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
-        '[[repos]]\n'
+        'schema_version = 1\n[[repos]]\n'
         'id = "Org/Skills"\n'
         'url = "https://github.com/Org/Skills"\n\n'
         '[[repos]]\n'

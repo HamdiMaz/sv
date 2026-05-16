@@ -243,7 +243,7 @@ def test_repo_list_with_no_configured_repos_explains_how_to_add_one(
     project.mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
-    paths.config_file.write_text("repos = []\n")
+    paths.config_file.write_text("schema_version = 1\nrepos = []\n")
 
     exit_code = handle(parse(["repo", "list"]), cwd=project, home=home)
 
