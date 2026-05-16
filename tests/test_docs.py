@@ -255,6 +255,16 @@ def test_command_reference_documents_search():
     assert "descriptions match by text substring" in command_reference
 
 
+def test_command_reference_documents_repo_aliases_and_svx():
+    command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")
+
+    assert "`sv repo -l`" in command_reference
+    assert "exact alias for `sv repo list`" in command_reference
+    assert "`svx <repo>`" in command_reference
+    assert "console script alias for `sv repo add <repo>`" in command_reference
+    assert "passes through repeatable `--skills-path` values" in command_reference
+
+
 def test_no_documented_removed_command_parses(capsys):
     with pytest.raises(SystemExit):
         parse_sv(["config", "show"])

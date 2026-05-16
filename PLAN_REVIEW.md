@@ -176,7 +176,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | `sv add -l` picker | Fixed (FIXED) | Uses checkbox selector with structured Skill/Source/Description columns and aligned headers/rows instead of an unaligned single-column label list. |
 | `sv add --all --repo` | Fixed (FIXED) | Repo filtering and TTY duplicate resolution are covered, including same-repo duplicate source paths. |
 | Managed removal flows | Fixed (FIXED) | Root/cwd targeting is covered, and `sv remove -l` now uses structured Skill/Target/Source-Status picker columns for the managed-removal TTY flow. |
-| `sv repo -l` and `svx` | Implemented | Scripts/help metadata added. |
+| `sv repo -l` and `svx` | Implemented (FIXED) | Scripts/help metadata added, and the command reference now documents both aliases. |
 | Repo-aware `sv run` | Fixed (FIXED) | Running `sv run` from a Git subdirectory now validates the detected repository root's `.pi/skills` directory and passes that absolute skills path to Pi, with regression coverage. |
 | TTY list/search/repo browser | Implemented (FIXED) | Read-only table browser exists, the multi-select picker uses aligned Skill/Source/Description rows, and duplicate source choosing now uses the same aligned picker UX. |
 

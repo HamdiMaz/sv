@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Documented the `sv repo -l` and `svx <repo>` aliases in the command reference and marked the PLAN alignment review item fixed.
 - Marked the `.sv/index.toml` parser/writer PLAN alignment review item fixed after verifying parser, deterministic writer, duplicate-name, and future-schema coverage.
 - Documented `sv search` ranked/fuzzy behavior in the command reference and marked the PLAN alignment review item fixed.
 - Marked the README generated table PLAN alignment review item fixed after verifying marker-only README regeneration coverage.
