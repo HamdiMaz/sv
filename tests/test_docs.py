@@ -22,6 +22,7 @@ EXPECTED_DOC_LINKS = {
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 README_PATH = _PROJECT_ROOT / "README.md"
+CHANGELOG_PATH = _PROJECT_ROOT / "CHANGELOG.md"
 DOCS_DIR = _PROJECT_ROOT / "docs"
 WORKFLOW_PATH = _PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
 
@@ -263,6 +264,104 @@ def test_command_reference_documents_repo_aliases_and_svx():
     assert "`svx <repo>`" in command_reference
     assert "console script alias for `sv repo add <repo>`" in command_reference
     assert "passes through repeatable `--skills-path` values" in command_reference
+
+
+def test_command_reference_documents_epic1_commands_and_flags():
+    command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")
+
+    expected_snippets = [
+        "`sv init [folder]`",
+        "`sv status`",
+        "`sv add --all --repo <repo>`",
+        "`sv remove --all`",
+        "`sv remove --all --yes`",
+        "`sv repo add <repo> --skills-path <path>`",
+        "`sv repo remove -l`",
+    ]
+
+    missing_snippets = [
+        snippet for snippet in expected_snippets if snippet not in command_reference
+    ]
+    assert not missing_snippets, (
+        "docs/commands.md is missing Epic 1 command or flag documentation: "
+        f"{', '.join(missing_snippets)}"
+    )
+
+
+def test_docs_describe_explicit_first_run_source_configuration():
+    stale_default_source_phrases = [
+        "Default skill source when no repo config exists",
+        "uses the default `HamdiMaz/Skills` repo",
+        "default repo is used again",
+        "restoring the default repo",
+    ]
+    stale_locations: list[str] = []
+    for path in [*_documented_paths(), CHANGELOG_PATH]:
+        text = path.read_text(encoding="utf-8")
+        for phrase in stale_default_source_phrases:
+            if phrase in text:
+                stale_locations.append(f"{path.relative_to(_PROJECT_ROOT)}: {phrase}")
+
+    assert not stale_locations, (
+        "Docs should describe explicit first-run source configuration instead of "
+        f"implicit defaults: {'; '.join(stale_locations)}"
+    )
+
+    readme = README_PATH.read_text(encoding="utf-8")
+    assert "No skill source repos configured." in readme
+    assert "sv repo add HamdiMaz/Skills" in readme
+
+
+def test_docs_do_not_describe_removed_add_all_positional_alias():
+    stale_locations = [
+        str(path.relative_to(_PROJECT_ROOT))
+        for path in [*_documented_paths(), CHANGELOG_PATH]
+        if "sv add all" in path.read_text(encoding="utf-8")
+    ]
+
+    assert not stale_locations, (
+        "Docs should describe `sv add --all`, not the removed positional "
+        f"`sv add all` behavior. Stale mentions in: {', '.join(stale_locations)}"
+    )
+
+
+def test_docs_distinguish_update_from_force_sync():
+    stale_phrases = [
+        "`sv update` does the same work",
+        "Equivalent to refresh sources plus `sv sync`",
+        "`sv sync` and `sv update` both refresh configured source repos before syncing project skills",
+        "Both commands refresh configured source repos before syncing managed project skills",
+        "sync/update overwrite semantics",
+        "`sv update` to refresh configured source repo caches and sync project skills in one command",
+    ]
+    stale_locations: list[str] = []
+    for path in [*_documented_paths(), CHANGELOG_PATH]:
+        text = path.read_text(encoding="utf-8")
+        for phrase in stale_phrases:
+            if phrase in text:
+                stale_locations.append(f"{path.relative_to(_PROJECT_ROOT)}: {phrase}")
+
+    assert not stale_locations, (
+        "Docs should not describe `sv update` as destructive force-sync: "
+        f"{'; '.join(stale_locations)}"
+    )
+
+    docs_requiring_safe_update_language = [
+        README_PATH,
+        DOCS_DIR / "commands.md",
+        DOCS_DIR / "usage.md",
+        DOCS_DIR / "examples.md",
+        DOCS_DIR / "getting-started.md",
+    ]
+    missing_safe_language = [
+        str(path.relative_to(_PROJECT_ROOT))
+        for path in docs_requiring_safe_update_language
+        if "preserves local edits" not in path.read_text(encoding="utf-8")
+    ]
+    assert not missing_safe_language, (
+        "Docs that mention `sv update` should say it preserves local edits. "
+        f"Missing in: {', '.join(missing_safe_language)}"
+    )
 
 
 def test_no_documented_removed_command_parses(capsys):

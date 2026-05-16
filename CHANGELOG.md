@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed stale README and command docs for explicit first-run source configuration, `sv add --all`, safe `sv update`, and missing Epic 1 commands/flags.
 - Fixed `sv status` to avoid refreshing unreachable configured sources when the current project or skill-vault has no managed skills.
 - Fixed source refresh commands run from `$HOME` to update the global source-state manifest when it is not occupied by a home-project manifest.
 - Fixed `sv status` from nested non-Git projects with only a canonical `.sv/manifest.toml` to report project skill state instead of global source status, and updated manifest documentation to reference `.sv/manifest.toml`.
@@ -103,19 +104,19 @@
 - Fixed ambiguous non-interactive `sv add <skill>` to fail with qualified `repo:skill` guidance instead of silently doing nothing.
 - Fixed malformed `~/.sv/config.toml` and `.pi/skills/.sv-manifest.toml` files to report user-facing errors instead of tracebacks.
 - Fixed unsafe repo IDs in config and `sv repo add` input to be rejected before they can escape the `~/.sv/sources` cache directory.
-- Fixed `sv add all` to stop before copying when multiple source repos provide the same skill folder name.
+- Fixed `sv add --all` to stop before copying when multiple source repos provide the same skill folder name.
 - Fixed `sv add` to report non-directory target paths, manifest failures, and copy failures as user-facing errors without leaving untracked or partial skill directories.
 - Fixed `sv sync` to restore the previous local skill if a late filesystem or manifest update failure occurs during replacement.
 - Fixed `sv remove` to validate the manifest before deleting a skill directory.
 - Fixed unreadable `SKILL.md` files to report user-facing errors instead of raw tracebacks.
 - Tightened config and manifest validation to reject non-string fields, escape control characters when writing TOML, write manifests atomically, and wrap read/write filesystem failures.
 - Tightened skill name validation to reject leading-dot folder names and colons that cannot be synced or referenced consistently.
-- Documented source repo configuration, cache refresh behavior, and sync/update overwrite semantics.
+- Documented source repo configuration, cache refresh behavior, safe `sv update` behavior, and force-sync overwrite semantics.
 - Fixed `sv remove` to delete the removed skill's `.sv-manifest.toml` entry while preserving other recorded origins.
-- Fixed `sv repo remove` so removing the last configured repo leaves an explicit empty repo list instead of restoring the default repo.
+- Fixed `sv repo remove` so removing the last configured repo leaves an explicit empty repo list instead of re-enabling any implicit source.
 - Fixed `sv add -l` to open faster by using cached source repos without pulling when the cache already exists.
 - Expanded the README with installation, quick-start, storage layout, cache-refresh, and troubleshooting guidance.
-- Added `sv update` to refresh configured source repo caches and sync project skills in one command.
+- Added `sv update` to refresh configured source repo caches and safely update unchanged project skills while preserving local edits.
 - Added `sv repo add`, `sv repo remove`, and `sv repo list` for multiple source repositories.
 - Changed `sv list` and `sv add -l` to show repo-aware skill metadata from parsed `SKILL.md` files.
 - Added project skill origin tracking in `.pi/skills/.sv-manifest.toml` for reliable multi-repo sync.
@@ -123,7 +124,7 @@
 - Added `sv remove -l` / `sv remove --list` to remove project skills from an interactive list.
 - Added `sv add -l` / `sv add --list` to choose multiple skills from an interactive scrolling list.
 - Added ←/→ pagination in the `sv add -l` picker.
-- Added `sv add all` and `sv add --all` to install every non-conflicting skill from configured source repos.
+- Added `sv add --all` to install every non-conflicting skill from configured source repos.
 
 ## v0.1.0
 

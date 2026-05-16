@@ -6,16 +6,21 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 
 | Command | Use when | Notes |
 | --- | --- | --- |
+| `sv init [folder]` | You want to create a skill-vault repository scaffold. | Initializes the current directory or the optional target folder and makes nested vaults detectable as Git repos. |
+| `sv status` | You want local managed-skill state. | Reports modified, update-available, orphan, index, and README status for projects, skill-vaults, or global source context. |
 | `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values, showing each duplicate skill name once per group. |
 | `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser so Enter can show details. |
 | `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
 | `sv add <repo>:<skill>` | Multiple repos provide the same skill name. | Copy the exact value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Use Space to select and Enter to confirm. |
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |
+| `sv add --all --repo <repo>` | You want every non-conflicting skill from one source. | Restricts bulk add to the configured repo ID, useful when other repos contain duplicate skill names. |
 | `sv remove <skill>` | You want to remove one project skill. | Updates the canonical `.sv/manifest.toml` project manifest. |
 | `sv remove -l` | You want to remove several project skills interactively. | Lists installed project skills, not source skills. |
-| `sv sync` | You want installed skills refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |
-| `sv update` | You want explicit refresh-and-sync output. | Equivalent to refresh sources plus `sv sync`, with progress messages and the same trusted-index behavior; a stale or malicious index can hide source changes until regenerated or re-added. |
+| `sv remove --all` | You want to remove every sv-managed local skill. | Removes managed skills only; manual/unmanaged skill folders are kept. |
+| `sv remove --all --yes` | You want non-interactive bulk removal. | Confirms bulk removal without prompting, which is required for non-TTY `--all` use. |
+| `sv update` | You want a safe refresh of sources and unchanged local skills. | Refreshes configured sources, updates only managed skill folders without local modifications, and preserves local edits by marking modified skills with update-available state. Uses the same trusted-index optimization as sync. |
+| `sv sync` | You want installed skills force-refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |
 | `sv run -- <pi args>` | You want Pi to use only project-local skills. | Runs `pi --no-skills --skill .pi/skills ...`. |
 
 ## Source repo commands
@@ -24,9 +29,11 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | --- | --- |
 | `sv repo add <owner/repo>` | Add a GitHub source repo. |
 | `sv repo add <path-or-url>` | Add a local or Git URL source repo. |
+| `sv repo add <repo> --skills-path <path>` | Add a source repo with one bounded discovery root. Repeat `--skills-path` to scan multiple repo-relative skill roots. |
 | `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. |
 | `sv repo -l` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
+| `sv repo remove -l` | Choose one or more source repos to remove from an interactive list. Use `--yes` to skip the confirmation prompt. |
 | `svx <repo>` | console script alias for `sv repo add <repo>`; passes through repeatable `--skills-path` values. |
 
 `sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful.

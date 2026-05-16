@@ -13,7 +13,7 @@ However, I would **not call the Epic 1 implementation fully complete yet**. I fo
 1. Git sparse fallback metadata cache can be narrowed to only the last discovered skill, making later `sv add -l` / cached catalog reads incomplete.
 2. Local path Git sources can silently ignore `--filter`/`--depth`, violating the plan's “never silently full-clone” rule.
 3. Unknown/unsafe Git URL schemes such as `git://` and `ext::` are accepted and passed to Git.
-4. README and command docs still describe removed or changed behavior (`sv add all`, default `HamdiMaz/Skills`, and destructive `sv update`).
+4. README and command docs still describe removed or changed behavior (`sv add all`, default `HamdiMaz/Skills`, and destructive `sv update`). (FIXED)
 5. Remote metadata/index reads still lack size/entry limits for some backends.
 
 ## Verification run
@@ -110,7 +110,7 @@ Impact: `git://` is unauthenticated/cleartext-ish from a trust perspective, and 
 
 Suggested fix: use a strict source URL allowlist: GitHub shorthand, GitHub HTTPS, vetted SSH forms, and explicit local paths if intended. Reject unknown schemes. Consider setting `GIT_ALLOW_PROTOCOL` for subprocesses.
 
-### High: README/docs are materially stale against Epic 1 behavior
+### High: README/docs are materially stale against Epic 1 behavior (FIXED)
 
 Evidence:
 
@@ -191,7 +191,7 @@ Impact: minor UX mismatch. Non-TTY duplicate sections should keep exact scriptab
 3. Handle local path sources without silently ignoring lightweight clone requirements.
 4. Add metadata/index size and entry limits for all backends, including `gh` and Git local cache reads.
 5. Reject symlinked `sv index` include roots before scanning/reading.
-6. Update README and docs for first-run config, `sv add --all`, `sv update` vs `sv sync`, and missing Epic 1 commands/flags.
+6. Update README and docs for first-run config, `sv add --all`, `sv update` vs `sv sync`, and missing Epic 1 commands/flags. (FIXED)
 7. Make `sv status` avoid remote refresh when no managed local entries exist. (FIXED)
 8. Optionally remove `Add as` from TTY browse details or explicitly document that deviation.
 

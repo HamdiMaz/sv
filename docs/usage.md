@@ -17,7 +17,10 @@ sv add find-docs
 # Add a specific source when multiple repos provide the same skill name
 sv add HamdiMaz/Skills:find-docs
 
-# Update installed project skills from their recorded sources
+# Safely update unchanged project skills from their recorded sources
+sv update
+
+# Force-sync installed project skills from their recorded sources
 sv sync
 
 # Run Pi with only this project's skills
@@ -59,10 +62,10 @@ Duplicate skill names are allowed in source repos, but a Pi project can only hav
 
 ## Updating project skills
 
-- `sv sync` pulls configured source repos and refreshes installed project skills from their recorded origins.
-- `sv update` does the same work but prints explicit progress messages before pulling and syncing.
+- `sv update` pulls configured source repos and refreshes only managed project skills whose local folders still match their recorded baseline. It preserves local edits by skipping modified skills and marking them as modified with an update available.
+- `sv sync` force-syncs managed project skills from their recorded origins.
 
-Synced skill folders are replaced with the source version. Local edits inside managed skill folders are overwritten. Local-only or ambiguous legacy skills are skipped with a clear message.
+Force-synced skill folders are replaced with the source version, so local edits inside managed skill folders are overwritten by `sv sync`. Local-only or ambiguous legacy skills are skipped with a clear message.
 
 ## Output and table behavior
 

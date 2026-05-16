@@ -23,11 +23,7 @@ uv tool install .
 
 ## Where sv stores files
 
-Default skill source when no repo config exists:
-
-```text
-https://github.com/HamdiMaz/Skills.git
-```
+Source repos are configured explicitly. If no source config exists yet, interactive commands can offer recommended sources; non-interactive commands fail with a helpful `sv repo add <repo>` next step instead of assuming a default repo.
 
 Global sv files live under:
 
@@ -49,16 +45,16 @@ Project Pi skills live under:
 
 ## Source repo configuration
 
-`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, `sv` uses the default `HamdiMaz/Skills` repo. After you run `sv repo add`, only repos recorded in the config are used. `sv repo add` accepts GitHub shorthand such as `owner/repo`, GitHub HTTPS/SSH URLs, and local Git repository paths. Existing bare relative paths, and paths starting with `./`, `../`, `/`, or `~`, are resolved to absolute paths before they are saved, so global configuration keeps working no matter which project directory you run `sv` from later. If a local path looks like GitHub shorthand, use an explicit path prefix such as `./owner/repo` or `../repo`. Use `sv repo list` to see the derived repo ID used by qualified skill references and `sv repo remove`.
+`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, or if it only contains `schema_version`, `sv` does not assume any source repo. In an interactive TTY it can prompt you to add a recommended source; in non-interactive use it reports `No skill source repos are configured` and tells you to run `sv repo add <repo>`. After you run `sv repo add`, only repos recorded in the config are used. `sv repo add` accepts GitHub shorthand such as `owner/repo`, GitHub HTTPS/SSH URLs, and local Git repository paths. Existing bare relative paths, and paths starting with `./`, `../`, `/`, or `~`, are resolved to absolute paths before they are saved, so global configuration keeps working no matter which project directory you run `sv` from later. If a local path looks like GitHub shorthand, use an explicit path prefix such as `./owner/repo` or `../repo`. Use `sv repo list` to see the derived repo ID used by qualified skill references and `sv repo remove`.
 
-To use the default repo plus a team repo, add both explicitly:
+To use the public HamdiMaz skills repo plus a team repo, add both explicitly:
 
 ```bash
 sv repo add HamdiMaz/Skills
 sv repo add SomeOrg/TeamSkills
 ```
 
-Removing the last repo writes `repos = []`. The default repo is used again only if `~/.sv/config.toml` is removed or if you add `HamdiMaz/Skills` explicitly.
+Removing the last repo writes `repos = []`, which intentionally disables all sources until you add another repo. Removing `~/.sv/config.toml` returns to first-run behavior, not to an implicit default source.
 
 ## Quick start
 
@@ -115,16 +111,16 @@ and `q` to cancel. The picker renders inline, shows 5 skills at a time, displays
 scrolls as you move. Each picker row includes the source repo ID so duplicate skill names are easy to distinguish without repeating the skill name twice. Long picker labels and the help line are truncated to the terminal width, and control characters from source metadata are escaped before display so the inline UI stays stable. If you select two sources for the same skill name, `sv` stops before copying anything and asks you to choose only one source. When a source repo is already cached, `sv add -l` reads the
 cache without pulling first so the picker opens quickly. Run `sv list` when you
 want to refresh source caches without changing project skills; use `sv update`
-only when you also want to sync installed project skills.
+when you also want to safely update unchanged installed project skills.
 
 Add every valid, non-conflicting skill from configured source repos:
 
 ```bash
-sv add all
 sv add --all
+sv add --all --repo HamdiMaz/Skills
 ```
 
-If multiple repos provide the same skill folder name, `sv add all` stops before copying anything and asks you to choose sources explicitly with `repo_id:skill` references. If a skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged.
+Use `--repo` to bulk-add only from one configured source. If multiple repos provide the same skill folder name, `sv add --all` stops before copying anything and asks you to choose sources explicitly with `repo_id:skill` references. If a skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged.
 
 Remove a skill from the current project:
 
@@ -138,21 +134,21 @@ Choose one or more project skills from an interactive list and remove them:
 sv remove -l
 ```
 
-Update project skills from their recorded source repos:
-
-```bash
-sv sync
-```
-
-`sv sync` refreshes configured sources, then replaces matching project skill folders with the source copy. Local edits inside synced skill folders are overwritten. Legacy skills without manifest entries are adopted and overwritten only when exactly one configured repo provides that skill name; ambiguous or local-only skills are skipped with a clear message.
-
-Update source repo caches and then sync project skills with explicit progress messages:
+Safely update source metadata and unchanged project skills from their recorded source repos:
 
 ```bash
 sv update
 ```
 
-`sv sync` and `sv update` both refresh configured source repos before syncing project skills. Use `sv update` when you want the refresh-and-sync operation to be explicit in command output. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
+`sv update` refreshes configured sources, then updates managed project skills only when the local folder still matches its recorded baseline. It preserves local edits by skipping modified skills and marking them as modified with an update available in the project manifest/status output.
+
+Force-sync project skills from their recorded source repos:
+
+```bash
+sv sync
+```
+
+`sv sync` refreshes configured sources, then replaces matching project skill folders with the source copy. Local edits inside synced skill folders are overwritten. Legacy skills without manifest entries are adopted and overwritten only when exactly one configured repo provides that skill name; ambiguous or local-only skills are skipped with a clear message. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
 
 Treat configured source repositories and their generated `.sv/index.toml` files as trusted inputs. When a refreshed source index reports the same content hash already recorded in the project manifest, `sv sync`/`sv update` can skip re-materializing that skill as an optimization; a stale or malicious index can therefore hide source changes until the index is regenerated or the source is removed and re-added.
 
@@ -186,7 +182,7 @@ description: Use when creating or publishing GitHub releases.
 ---
 ```
 
-The frontmatter `name` must match the folder name, and `description` must be non-empty. Skill folders with missing or malformed metadata are skipped by `sv list`, `sv add`, `sv add all`, `sv sync`, and `sv update`. Unreadable or non-UTF-8 `SKILL.md` files stop the command with a clear error so source repository problems are not missed.
+The frontmatter `name` must match the folder name, and `description` must be non-empty. Skill folders with missing or malformed metadata are skipped by `sv list`, `sv add`, `sv add --all`, `sv sync`, and `sv update`. Unreadable or non-UTF-8 `SKILL.md` files stop the command with a clear error so source repository problems are not missed.
 
 ## Project manifest
 

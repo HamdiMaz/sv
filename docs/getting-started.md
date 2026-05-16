@@ -49,10 +49,10 @@ The picker shows the visible range and controls at the bottom. Use ↑/↓ to mo
 ## 4. Keep skills updated
 
 ```bash
-sv sync
+sv update
 ```
 
-`sv sync` refreshes configured source repos and updates installed skills from their recorded sources. Managed skill folders are replaced with the source copy, so do not keep local edits inside synced skill folders.
+`sv update` refreshes configured source repos and updates installed skills from their recorded sources when the local folders are unchanged. It preserves local edits by skipping modified managed skills and marking them as having an update available. Use `sv sync` only when you intentionally want to force managed skill folders back to the source copy and overwrite local edits.
 
 ## 5. Run Pi with project skills only
 
@@ -75,6 +75,7 @@ pi --no-skills --skill .pi/skills <pi args>
 | Remove a source from config | `sv repo remove <repo-id>` |
 | Remove a project skill | `sv remove find-docs` |
 | Select project skills to remove | `sv remove -l` |
-| Refresh and sync with progress messages | `sv update` |
+| Safely refresh unchanged managed skills | `sv update` |
+| Force-sync and overwrite managed skills | `sv sync` |
 
 For more detail, read the [examples](examples.md), [usage guide](usage.md), [command reference](commands.md), and [output guide](output.md).

@@ -40,12 +40,12 @@ Use ↑/↓ to move, Space to select, Enter to add, and `q` to cancel. The picke
 ## Update installed skills
 
 ```bash
-sv sync
-# or, when you want explicit progress messages:
 sv update
+# or, when you intentionally want to overwrite local edits:
+sv sync
 ```
 
-Both commands refresh configured source repos before syncing managed project skills from their recorded origins.
+`sv update` refreshes configured source repos and updates only unchanged managed skills from their recorded origins. It preserves local edits by skipping modified skills and marking them as having an update available. Use `sv sync` when you intentionally want to force local managed skills back to the source copy.
 
 ## Run Pi with only project skills
 
