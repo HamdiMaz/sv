@@ -166,7 +166,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Vault mode targeting | Partially implemented | Root-vault add/remove exists. Nested init/context bug can make vault mode invisible. |
 | Lightweight backend order | Fixed (FIXED) | `source_backends_for_repo()` now keeps GitHub API backends first even when the local cache path already exists, so later refreshes still try `gh api -> HTTPS -> Git`. |
 | Bounded generic discovery | Mostly implemented | Default roots and configured roots exist. |
-| Materialize selected folders only | Mostly implemented | API materialization recursively loads all files into memory; see hardening below. |
+| Materialize selected folders only | Fixed (FIXED) | GitHub API materialization now streams selected-folder files into an operation temporary directory with file-count, depth, entry, and total-byte limits; local materialization is also quota guarded. |
 | `sv search` | Implemented | Non-TTY ranked output exists; TTY browser path exists. |
 | First-run config behavior | Mostly implemented | Missing config non-TTY errors; TTY prompt is pluggable. |
 | Update vs sync semantics | Mostly implemented | Hash/orphan logic exists. There is a trust risk when skipping solely on remote index hash. |
