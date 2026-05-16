@@ -159,7 +159,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Legacy Pi manifest migration | Fixed (FIXED) | Added subdirectory sync regression coverage proving legacy `.pi/skills/.sv-manifest.toml` origins are read from the detected repo root and migrated into the canonical `.sv/manifest.toml`. |
 | Global source manifest | Fixed (FIXED) | Refresh state records the successful lightweight backend and remote index hash, with legacy missing backend values rendered as `unknown` in status output. |
 | Explicit `--skills-path` | Fixed (FIXED) | Config validation rejects unsafe paths, and adding `--skills-path` to an already configured repo now merges the new bounded discovery roots instead of ignoring them. |
-| `.sv/index.toml` parser/writer | Implemented | Duplicate names with paths are supported. |
+| `.sv/index.toml` parser/writer | Implemented (FIXED) | Duplicate names with paths are supported. |
 | `sv index` scanner | Fixed (FIXED) | Recursive scanner supports repeatable `--include`/`--exclude` path flags plus `.sv/index-config.toml` defaults, with tests covering CLI/config integration and scan filtering. |
 | README generated table | Fixed (FIXED) | Marker-only updates are present and covered, preserving user README content outside sv markers while regenerating only the skill table. |
 | `sv init` | Implemented (FIXED) | Nested folder initialization inside an existing worktree now creates a real, detectable skill-vault Git repository; regression tests cover both init and status detection. |

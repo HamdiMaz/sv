@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Marked the `.sv/index.toml` parser/writer PLAN alignment review item fixed after verifying parser, deterministic writer, duplicate-name, and future-schema coverage.
 - Documented `sv search` ranked/fuzzy behavior in the command reference and marked the PLAN alignment review item fixed.
 - Marked the README generated table PLAN alignment review item fixed after verifying marker-only README regeneration coverage.
 - Marked the orphan tracking PLAN alignment review item fixed after adding update-from-subdirectory regression coverage for root manifest orphaning and reattachment.
