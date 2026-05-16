@@ -198,6 +198,36 @@ def test_status_in_skill_vault_reports_stale_index_and_readme(
     assert "stale" in result.stdout
 
 
+def test_status_in_empty_skill_vault_does_not_refresh_unreachable_sources(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    init_result = run_sv(
+        ["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner
+    )
+    assert init_result.exit_code == 0
+    missing_source = tmp_path / "missing-source"
+    add_result = run_sv(
+        ["repo", "add", str(missing_source)],
+        cwd=vault,
+        home=home,
+        git_runner=default_runner,
+    )
+    assert add_result.exit_code == 0
+
+    result = run_sv(["status"], cwd=vault, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "Skill-vault status" in result.stdout
+    assert "No sv-managed vault skills found in this skill-vault." in result.stdout
+    assert "repository" not in result.stderr
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
 def test_status_in_nested_non_git_project_with_empty_manifest_context_is_not_global(
     tmp_path: Path, run_sv
 ):
@@ -530,6 +560,34 @@ def test_status_in_normal_project_does_not_present_unmanaged_manual_skills_as_ma
     assert result.exit_code == 0
     assert "No sv-managed Pi skills found in this project." in result.stdout
     assert "manual" not in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_in_empty_project_does_not_refresh_unreachable_sources(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    run_git(["init"], project)
+    missing_source = tmp_path / "missing-source"
+    add_result = run_sv(
+        ["repo", "add", str(missing_source)],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+    assert add_result.exit_code == 0
+
+    result = run_sv(["status"], cwd=project, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "No sv-managed Pi skills found in this project." in result.stdout
+    assert "Global skill source status" not in result.stdout
+    assert "repository" not in result.stderr
     assert_no_traceback(result.stdout)
     assert_no_traceback(result.stderr)
     assert_no_raw_control_characters(result.stdout)

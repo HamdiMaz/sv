@@ -2541,6 +2541,11 @@ def _handle_status(
 
     project_skills_dir = adapter.project_skill_dir(context.repo_root)
     _reject_symlinked_status_project_skills_path(project_skills_dir)
+    entries = _project_status_entries(project_skills_dir)
+    if not entries:
+        print("No sv-managed Pi skills found in this project.")
+        return 0
+
     catalog = _status_catalog_if_configured(
         paths,
         git_runner,
@@ -2550,11 +2555,7 @@ def _handle_status(
         refresh_project_skill_local_states(project_skills_dir)
     else:
         refresh_project_skill_states(catalog, project_skills_dir)
-
     entries = _project_status_entries(project_skills_dir)
-    if not entries:
-        print("No sv-managed Pi skills found in this project.")
-        return 0
 
     print("Project sv-managed Pi skills")
     print(
@@ -2590,22 +2591,24 @@ def _handle_vault_status(
 ) -> int:
     vault_skills_dir = context.vault_skills_dir
     _reject_symlinked_status_vault_skills_path(vault_skills_dir)
-    catalog = _status_catalog_if_configured(
-        paths,
-        git_runner,
-        record_global_source_state=record_global_source_state,
-    )
-    if catalog is None:
-        refresh_vault_skill_local_states(vault_skills_dir)
-    else:
-        refresh_vault_skill_states(catalog, vault_skills_dir)
+    entries = _vault_status_entries(vault_skills_dir)
+    if entries:
+        catalog = _status_catalog_if_configured(
+            paths,
+            git_runner,
+            record_global_source_state=record_global_source_state,
+        )
+        if catalog is None:
+            refresh_vault_skill_local_states(vault_skills_dir)
+        else:
+            refresh_vault_skill_states(catalog, vault_skills_dir)
+        entries = _vault_status_entries(vault_skills_dir)
 
     freshness = _vault_freshness_status(context.repo_root)
     print("Skill-vault status")
     print(f"Index: {freshness.index_status}")
     print(f"README: {freshness.readme_status}")
 
-    entries = _vault_status_entries(vault_skills_dir)
     if not entries:
         print("No sv-managed vault skills found in this skill-vault.")
         return 0
