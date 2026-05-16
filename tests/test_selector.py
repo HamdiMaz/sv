@@ -201,6 +201,23 @@ def test_render_uses_custom_item_labels():
     assert "alpha  Org/A" in stdout.getvalue()
 
 
+def test_render_can_show_a_header_aligned_after_checkbox_prefix():
+    state = SelectionState(["alpha  RepoA  First skill"])
+    stdout = StringIO()
+
+    line_count = _render(
+        state,
+        stdout,
+        header_label="Skill  Source  Description",
+        highlight_cursor=False,
+    )
+
+    lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert line_count == 3
+    assert lines[0] == "    Skill  Source  Description"
+    assert lines[1] == "[ ] alpha  RepoA  First skill"
+
+
 def test_render_escapes_control_characters_in_item_labels():
     state = SelectionState(["alpha\x1b[2J"])
     stdout = StringIO()

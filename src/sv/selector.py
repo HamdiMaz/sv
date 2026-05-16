@@ -150,6 +150,7 @@ def select_skills(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     item_label: Callable[[T], str] = str,
+    header_label: str | None = None,
     filter_text: Callable[[T], str] | None = None,
 ) -> list[T]:
     """Prompt for skills with arrow-key navigation and spacebar selection."""
@@ -192,7 +193,12 @@ def select_skills(
             ) from exc
         output_stream.write(_HIDE_CURSOR)
         output_stream.flush()
-        rendered_lines = _render(state, output_stream, item_label=item_label)
+        rendered_lines = _render(
+            state,
+            output_stream,
+            item_label=item_label,
+            header_label=header_label,
+        )
 
         while True:
             key = _read_key(fd)
@@ -217,6 +223,7 @@ def select_skills(
                     previous_line_count=rendered_lines,
                     highlight_cursor=False,
                     item_label=item_label,
+                    header_label=header_label,
                 )
                 return state.selected_items()
             elif key in {"escape", "quit", "eof"}:
@@ -226,6 +233,7 @@ def select_skills(
                     previous_line_count=rendered_lines,
                     highlight_cursor=False,
                     item_label=item_label,
+                    header_label=header_label,
                 )
                 return []
             else:
@@ -236,6 +244,7 @@ def select_skills(
                 output_stream,
                 previous_line_count=rendered_lines,
                 item_label=item_label,
+                header_label=header_label,
             )
     finally:
         restore_error: BaseException | None = None
@@ -259,22 +268,34 @@ def _render(
     previous_line_count: int = 0,
     highlight_cursor: bool = True,
     item_label: Callable[[T], str] = str,
+    header_label: str | None = None,
 ) -> int:
     if previous_line_count:
         stdout.write(f"\x1b[{previous_line_count}F")
         stdout.write("\x1b[J")
 
-    lines = [
+    lines: list[str] = []
+    if header_label is not None:
+        lines.append(_format_header_line(header_label))
+    lines.extend(
         _format_skill_line(
             state, index, item_label(skill), highlight_cursor=highlight_cursor
         )
         for index, skill in state.visible_items()
-    ]
+    )
     lines.append(_format_help_line(state))
     stdout.write("\n".join(lines))
     stdout.write("\n")
     stdout.flush()
     return len(lines)
+
+
+def _format_header_line(header_label: str) -> str:
+    prefix_width = _display_width("[ ] ")
+    terminal_width = _terminal_width()
+    label = _fit_label(header_label, max(terminal_width - prefix_width, 0))
+    line = _fit_text(f"{' ' * prefix_width}{label}", terminal_width)
+    return f"{_FG_MUTED}{_BOLD}{line}{_RESET}"
 
 
 def _format_help_line(state: SelectionState[T]) -> str:

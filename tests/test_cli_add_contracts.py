@@ -536,10 +536,16 @@ def test_add_interactive_adds_selected_skills(tmp_path: Path, capsys):
     assert exit_code == 0
     assert selector_calls[0][0][0].name == "alpha"
     assert "item_label" in selector_calls[0][1]
+    assert "header_label" in selector_calls[0][1]
     item_label = selector_calls[0][1]["item_label"]
+    header_label = selector_calls[0][1]["header_label"]
     first_skill = selector_calls[0][0][0]
     label = item_label(first_skill)
+    assert header_label.startswith("Skill  Source")
+    assert header_label.endswith("Description")
     assert first_skill.repo_id in label
+    assert label.index(first_skill.repo_id) == header_label.index("Source")
+    assert label.index(first_skill.description) == header_label.index("Description")
     assert f"{first_skill.repo_id}:alpha" not in label
     assert not (project / ".pi" / "skills" / "alpha").exists()
     assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"

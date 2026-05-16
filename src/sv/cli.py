@@ -2015,7 +2015,9 @@ def _handle_add_interactive(
         return 0
 
     selected_skills = skill_selector(
-        catalog, item_label=_source_skill_picker_labeler(catalog)
+        catalog,
+        item_label=_source_skill_picker_labeler(catalog),
+        header_label=_source_skill_picker_header_label(catalog),
     )
     if not selected_skills:
         print("No skills selected.")
@@ -3092,29 +3094,67 @@ def _source_skill_label(entry: SourceSkill) -> str:
 def _source_skill_picker_labeler(
     catalog: Sequence[SourceSkill],
 ) -> Callable[[SourceSkill], str]:
+    skill_width, source_width = _source_skill_picker_column_widths(catalog)
+
+    def label(entry: SourceSkill) -> str:
+        skill = _escape_control_characters(entry.name)
+        source = _source_skill_picker_source_label(entry)
+        description = _escape_control_characters(entry.description)
+        return _source_skill_picker_row_label(
+            skill,
+            source,
+            description,
+            skill_width=skill_width,
+            source_width=source_width,
+        )
+
+    return label
+
+
+def _source_skill_picker_header_label(catalog: Sequence[SourceSkill]) -> str:
+    skill_width, source_width = _source_skill_picker_column_widths(catalog)
+    return _source_skill_picker_row_label(
+        "Skill",
+        "Source",
+        "Description",
+        skill_width=skill_width,
+        source_width=source_width,
+    )
+
+
+def _source_skill_picker_column_widths(
+    catalog: Sequence[SourceSkill],
+) -> tuple[int, int]:
     skill_width = max(
         [_display_width(_escape_control_characters(entry.name)) for entry in catalog],
-        default=_display_width("Skill"),
+        default=0,
     )
     source_width = max(
         [
             _display_width(_source_skill_picker_source_label(entry))
             for entry in catalog
         ],
-        default=_display_width("Source"),
+        default=0,
+    )
+    return (
+        max(skill_width, _display_width("Skill")),
+        max(source_width, _display_width("Source")),
     )
 
-    def label(entry: SourceSkill) -> str:
-        skill = _escape_control_characters(entry.name)
-        source = _source_skill_picker_source_label(entry)
-        description = _escape_control_characters(entry.description)
-        return (
-            f"{_pad_display_width(skill, skill_width)}  "
-            f"{_pad_display_width(source, source_width)}  "
-            f"{description}"
-        )
 
-    return label
+def _source_skill_picker_row_label(
+    skill: str,
+    source: str,
+    description: str,
+    *,
+    skill_width: int,
+    source_width: int,
+) -> str:
+    return (
+        f"{_pad_display_width(skill, skill_width)}  "
+        f"{_pad_display_width(source, source_width)}  "
+        f"{description}"
+    )
 
 
 def _source_skill_picker_source_label(entry: SourceSkill) -> str:

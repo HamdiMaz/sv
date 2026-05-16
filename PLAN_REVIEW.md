@@ -173,7 +173,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Orphan tracking | Implemented in reviewed paths | Needs root/cwd fix to be reliable. |
 | `sv status` | Partial | Project/vault/global handlers exist; global crash and state accuracy issues remain. |
 | Duplicate `sv add <skill>` resolution | Implemented (FIXED) | Non-TTY choices exist; TTY duplicate source selection uses the checkbox picker and source-choice tables no longer support numeric row prefixes. |
-| `sv add -l` picker | Partial (FIXED) | Uses checkbox selector with aligned Skill/Source/Description labels instead of an unaligned single-column label list. |
+| `sv add -l` picker | Fixed (FIXED) | Uses checkbox selector with an aligned Skill/Source/Description header and rows instead of an unaligned single-column label list. |
 | `sv add --all --repo` | Partially implemented | Repo filter exists; duplicate TTY resolution missing. |
 | Managed removal flows | Mostly implemented | Root/cwd issue affects normal project removal from subdirs. |
 | `sv repo -l` and `svx` | Implemented | Scripts/help metadata added. |

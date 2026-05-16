@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fixed `sv add -l` picker labels to align Skill, Source, and Description columns in the checkbox selector.
+- Fixed `sv add -l` picker labels to include an aligned Skill, Source, and Description header and rows in the checkbox selector.
 - Fixed duplicate `sv add <skill>` source-choice formatting to remove the legacy numbered-row option and keep TTY resolution checkbox-only.
 - Fixed GitHub source refresh backend ordering to keep API backends ahead of Git fallback even when a local source cache already exists.
 - Documented the trusted-source model behind `sv sync`/`sv update` remote index-hash shortcuts so users know when full materialization is skipped.
