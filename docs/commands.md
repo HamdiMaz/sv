@@ -12,7 +12,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv add <repo>:<skill>` | Multiple repos provide the same skill name. | Copy the exact value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Use Space to select and Enter to confirm. |
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |
-| `sv remove <skill>` | You want to remove one project skill. | Updates `.pi/skills/.sv-manifest.toml`. |
+| `sv remove <skill>` | You want to remove one project skill. | Updates the canonical `.sv/manifest.toml` project manifest. |
 | `sv remove -l` | You want to remove several project skills interactively. | Lists installed project skills, not source skills. |
 | `sv sync` | You want installed skills refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |
 | `sv update` | You want explicit refresh-and-sync output. | Equivalent to refresh sources plus `sv sync`, with progress messages and the same trusted-index behavior; a stale or malicious index can hide source changes until regenerated or re-added. |

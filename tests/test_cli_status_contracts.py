@@ -198,6 +198,46 @@ def test_status_in_skill_vault_reports_stale_index_and_readme(
     assert "stale" in result.stdout
 
 
+def test_status_in_nested_non_git_project_with_empty_manifest_context_is_not_global(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "empty-manifest-project"
+    project.mkdir()
+    metadata = project / ".sv"
+    metadata.mkdir()
+    (metadata / "manifest.toml").write_text("schema_version = 1\n", encoding="utf-8")
+    nested = project / "src" / "package"
+    nested.mkdir(parents=True)
+
+    result = run_sv(["status"], cwd=nested, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "No sv-managed Pi skills found in this project" in result.stdout
+    assert "Global skill source status" not in result.stdout
+    assert "No global skill sources configured" not in result.stdout
+
+
+def test_status_in_nested_non_git_project_with_manifest_context_is_not_global(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "manifest-project"
+    project.mkdir()
+    entry = _source_skill(tmp_path / "source", "alpha")
+    project_skills = project / ".pi" / "skills"
+    add_project_skill(entry, project_skills)
+    nested = project / "src" / "package"
+    nested.mkdir(parents=True)
+
+    result = run_sv(["status"], cwd=nested, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "Project sv-managed Pi skills" in result.stdout
+    assert "alpha" in result.stdout
+    assert "Global skill source status" not in result.stdout
+
+
 def test_status_in_nested_non_git_project_index_context_is_not_global(
     tmp_path: Path, run_sv
 ):
@@ -225,6 +265,115 @@ def test_status_in_nested_non_git_project_index_context_is_not_global(
     assert "Project sv-managed Pi skills" in result.stdout
     assert "alpha" in result.stdout
     assert "Global skill source status" not in result.stdout
+
+
+def test_status_at_home_with_global_manifest_shows_global_source_health(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    paths = SvPaths.from_home(home)
+    add_result = run_sv(["repo", "add", "Org/Skills"], cwd=home, home=home)
+    assert add_result.exit_code == 0
+    save_global_manifest(
+        paths,
+        {
+            "Org/Skills": GlobalSourceState(
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                backend="github-api",
+                last_refresh_status="ok",
+                index_hash="sha256:index",
+                catalog_skill_count=3,
+            )
+        },
+    )
+
+    result = run_sv(["status"], cwd=home, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "Global skill source status" in result.stdout
+    assert "Org/Skills" in result.stdout
+    assert "github-api" in result.stdout
+    assert "No sv-managed Pi skills found in this project" not in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_at_home_with_schema_only_global_manifest_and_pi_skills_is_global(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".pi" / "skills").mkdir(parents=True)
+    save_global_manifest(SvPaths.from_home(home), {})
+
+    result = run_sv(["status"], cwd=home, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "No global skill sources configured" in result.stdout
+    assert "No sv-managed Pi skills found in this project" not in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+
+
+def test_status_under_home_with_global_manifest_shows_global_source_health(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    outside = home / "work" / "scratch"
+    outside.mkdir(parents=True)
+    paths = SvPaths.from_home(home)
+    add_result = run_sv(["repo", "add", "Org/Skills"], cwd=outside, home=home)
+    assert add_result.exit_code == 0
+    save_global_manifest(
+        paths,
+        {
+            "Org/Skills": GlobalSourceState(
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                backend="github-api",
+                last_refresh_status="ok",
+                index_hash="sha256:index",
+                catalog_skill_count=3,
+            )
+        },
+    )
+
+    result = run_sv(["status"], cwd=outside, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "Global skill source status" in result.stdout
+    assert "Org/Skills" in result.stdout
+    assert "github-api" in result.stdout
+    assert "No sv-managed Pi skills found in this project" not in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_global_context_ignores_project_state_in_global_manifest_path(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    entry = _source_skill(tmp_path / "source", "alpha")
+    add_project_skill(entry, home / ".pi" / "skills")
+    add_result = run_sv(["repo", "add", "Org/Skills"], cwd=outside, home=home)
+    assert add_result.exit_code == 0
+
+    result = run_sv(["status"], cwd=outside, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "Global skill source status" in result.stdout
+    assert "Org/Skills" in result.stdout
+    assert "unknown" in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
 
 
 def test_status_outside_git_project_shows_global_source_health(

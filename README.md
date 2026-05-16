@@ -190,7 +190,7 @@ The frontmatter `name` must match the folder name, and `description` must be non
 
 ## Project manifest
 
-When `sv` installs or syncs a skill, it records the source repo in `.pi/skills/.sv-manifest.toml`. This lets `sv sync` and `sv update` refresh skills from the repo they came from, even when multiple repos contain the same skill name.
+When `sv` installs or syncs a skill, it records the source repo in the canonical project manifest at `.sv/manifest.toml`. Legacy `.pi/skills/.sv-manifest.toml` files remain readable for migration. This lets `sv sync` and `sv update` refresh skills from the repo they came from, even when multiple repos contain the same skill name.
 
 Existing project skills without manifest entries are backfilled during sync when exactly one configured repo provides a valid skill with that name. Ambiguous or local-only skills are skipped with a clear message.
 

@@ -50,6 +50,7 @@ from sv.manifest import (
     ManifestEntry,
     load_global_manifest,
     load_manifest,
+    project_manifest_path,
     save_global_manifest,
     save_manifest,
 )
@@ -584,13 +585,17 @@ def _build_svx_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _detect_local_context(cwd: Path) -> LocalContext:
+def _detect_local_context(
+    cwd: Path, *, global_manifest_file: Path | None = None
+) -> LocalContext:
     repo_root = _find_nearest_git_root(cwd)
     if repo_root is None:
         cwd_root = cwd.resolve()
-        non_git_project_root = _find_nearest_non_git_project_index_root(cwd_root)
-        if non_git_project_root is not None:
-            return LocalContext(repo_root=non_git_project_root, index_kind="project-index")
+        non_git_context = _find_nearest_non_git_project_context(
+            cwd_root, global_manifest_file=global_manifest_file
+        )
+        if non_git_context is not None:
+            return non_git_context
         return LocalContext(repo_root=cwd_root)
     _reject_symlinked_sv_metadata_dir(repo_root)
     path = index_path(repo_root)
@@ -601,7 +606,9 @@ def _detect_local_context(cwd: Path) -> LocalContext:
     return LocalContext(repo_root=repo_root, index_kind=load_index(path).kind)
 
 
-def _find_nearest_non_git_project_index_root(cwd_root: Path) -> Path | None:
+def _find_nearest_non_git_project_context(
+    cwd_root: Path, *, global_manifest_file: Path | None = None
+) -> LocalContext | None:
     for candidate in (cwd_root, *cwd_root.parents):
         metadata_dir = candidate / ".sv"
         if metadata_dir.is_symlink():
@@ -612,12 +619,31 @@ def _find_nearest_non_git_project_index_root(cwd_root: Path) -> Path | None:
         path = index_path(candidate)
         if path.is_symlink():
             raise SvError(f"Refusing to use symlinked sv index at {_escape_output_path(path)}.")
-        if not path.is_file():
-            continue
-        index = load_index(path)
-        if index.kind == "project-index":
-            return candidate
+        if path.is_file():
+            index = load_index(path)
+            if index.kind == "project-index":
+                return LocalContext(repo_root=candidate, index_kind="project-index")
+        manifest = project_manifest_path(candidate)
+        if manifest.is_symlink():
+            raise SvError(
+                f"Refusing to use symlinked sv project manifest at {_escape_output_path(manifest)}."
+            )
+        if manifest.is_file() and _is_non_git_project_manifest(
+            manifest, global_manifest_file=global_manifest_file
+        ):
+            return LocalContext(repo_root=candidate)
     return None
+
+
+def _is_non_git_project_manifest(
+    manifest: Path, *, global_manifest_file: Path | None = None
+) -> bool:
+    data = load_toml_document(manifest, "sv manifest")
+    if "skills" in data:
+        return True
+    if global_manifest_file is not None and manifest == global_manifest_file:
+        return False
+    return "sources" not in data
 
 
 def _reject_symlinked_sv_metadata_dir(repo_root: Path) -> None:
@@ -2480,7 +2506,11 @@ def _handle_status(
     record_global_source_state: bool,
     context: LocalContext | None = None,
 ) -> int:
-    context = _detect_local_context(cwd) if context is None else context
+    context = (
+        _detect_local_context(cwd, global_manifest_file=paths.global_manifest_file)
+        if context is None
+        else context
+    )
     if context.is_skill_vault:
         return _handle_vault_status(
             context,
@@ -2488,7 +2518,15 @@ def _handle_status(
             git_runner=git_runner,
             record_global_source_state=record_global_source_state,
         )
-    if not (context.repo_root / ".git").exists() and context.index_kind is None:
+    manifest = project_manifest_path(context.repo_root)
+    has_project_manifest = manifest.is_file() and _is_non_git_project_manifest(
+        manifest, global_manifest_file=paths.global_manifest_file
+    )
+    if (
+        not (context.repo_root / ".git").exists()
+        and context.index_kind is None
+        and not has_project_manifest
+    ):
         return _handle_global_status(paths)
 
     project_skills_dir = adapter.project_skill_dir(context.repo_root)
@@ -2619,7 +2657,7 @@ def _index_skills_are_fresh(existing: IndexDocument, current: IndexDocument) -> 
 
 def _handle_global_status(paths: SvPaths) -> int:
     config = load_config(paths) if paths.config_file.exists() else SvConfig()
-    states = load_global_manifest(paths)
+    states = _load_global_manifest_for_source_state(paths) or {}
     repo_ids = sorted({repo.id for repo in config.repos} | set(states))
     if not repo_ids:
         print("No global skill sources configured.")
