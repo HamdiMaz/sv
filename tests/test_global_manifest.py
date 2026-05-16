@@ -1,6 +1,6 @@
 from pathlib import Path
 import hashlib
-import subprocess
+import shutil
 
 import pytest
 
@@ -146,7 +146,7 @@ def test_list_refresh_records_global_source_state(
     state = states[repo_id]
     assert state.repo_id == repo_id
     assert state.repo_url == str(source)
-    assert state.backend == "git-treeless-partial"
+    assert state.backend == "git-local-source"
     assert state.last_refresh_started_at is not None
     assert state.last_refresh_status == "ok"
     assert state.last_refresh_finished_at is not None
@@ -282,14 +282,9 @@ def test_failed_refresh_records_global_source_health(
     first_result = run_sv(["list"], cwd=project, home=home, git_runner=default_runner)
     assert first_result.exit_code == 0
 
-    def fail_fetch(command, cwd=None):
-        if command[:2] == ["git", "fetch"]:
-            return subprocess.CompletedProcess(
-                command, 1, stdout="", stderr="network unavailable"
-            )
-        return default_runner(command, cwd)
+    shutil.rmtree(source / ".git")
 
-    result = run_sv(["list"], cwd=project, home=home, git_runner=fail_fetch)
+    result = run_sv(["list"], cwd=project, home=home, git_runner=default_runner)
 
     assert result.exit_code == 1
     state = next(iter(load_global_manifest(SvPaths.from_home(home)).values()))
@@ -297,10 +292,10 @@ def test_failed_refresh_records_global_source_health(
     assert state.last_refresh_finished_at is not None
     assert state.last_refresh_status == "error"
     assert state.last_refresh_error is not None
-    assert "network unavailable" in state.last_refresh_error
+    assert "not a Git working tree" in state.last_refresh_error
     assert state.health_status == "error"
     assert state.health_details is not None
-    assert "network unavailable" in state.health_details
+    assert "not a Git working tree" in state.health_details
 
 
 def test_repo_remove_prunes_global_source_state(tmp_path: Path, run_sv) -> None:

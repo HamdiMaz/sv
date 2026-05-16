@@ -11,6 +11,7 @@ from sv.project import normalize_skill_name
 from sv.terminal import escape_terminal_controls
 from sv.skills import InvalidSkillError, parse_skill_file, parse_skill_text
 from sv.source import (
+    LocalGitSourceBackend,
     SourceBackend,
     SourceBackendError,
     SourceBackendFailure,
@@ -424,9 +425,11 @@ def _catalog_entries_from_backend(
         except InvalidSkillError as exc:
             _warn_invalid_skill(warn, PurePosixPath(source_relative_path), exc)
             continue
-        source_path = repo_path / Path(*PurePosixPath(source_relative_path).parts)
+        source_path, source_root = _source_path_for_backend(
+            backend, repo_path, source_relative_path
+        )
         _reject_symlinked_source_path_or_ancestors(
-            source_path, repo_path, "Source skills path"
+            source_path, source_root, "Source skills path"
         )
         entries.append(
             SourceSkill(
@@ -455,9 +458,11 @@ def _catalog_entries_from_index(
     entries: list[SourceSkill] = []
     for index_entry in index.skills:
         source_relative_path = normalize_source_relative_path(index_entry.source_path)
-        source_path = repo_path / Path(*PurePosixPath(source_relative_path).parts)
+        source_path, source_root = _source_path_for_backend(
+            backend, repo_path, source_relative_path
+        )
         _reject_symlinked_source_path_or_ancestors(
-            source_path, repo_path, "Source skills path"
+            source_path, source_root, "Source skills path"
         )
         entries.append(
             SourceSkill(
@@ -476,6 +481,14 @@ def _catalog_entries_from_index(
             )
         )
     return entries
+
+
+def _source_path_for_backend(
+    backend: SourceBackend, repo_path: Path, source_relative_path: str
+) -> tuple[Path, Path]:
+    if isinstance(backend, LocalGitSourceBackend):
+        return backend.local_path_for(source_relative_path), backend.repo_path
+    return repo_path / Path(*PurePosixPath(source_relative_path).parts), repo_path
 
 
 def _backend_materializer(

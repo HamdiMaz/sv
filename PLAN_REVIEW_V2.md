@@ -11,7 +11,7 @@ The main verification gates now pass and the original `PLAN_REVIEW.md` blockers 
 However, I would **not call the Epic 1 implementation fully complete yet**. I found remaining functional, security/robustness, and documentation gaps that are not caught by the current test suite. The most important are:
 
 1. Git sparse fallback metadata cache can be narrowed to only the last discovered skill, making later `sv add -l` / cached catalog reads incomplete. (FIXED)
-2. Local path Git sources can silently ignore `--filter`/`--depth`, violating the plan's “never silently full-clone” rule.
+2. Local path Git sources can silently ignore `--filter`/`--depth`, violating the plan's “never silently full-clone” rule. (FIXED)
 3. Unknown/unsafe Git URL schemes such as `git://` and `ext::` are accepted and passed to Git. (FIXED)
 4. README and command docs still describe removed or changed behavior (`sv add all`, default `HamdiMaz/Skills`, and destructive `sv update`). (FIXED)
 5. Remote metadata/index reads still lack size/entry limits for some backends.
@@ -66,7 +66,7 @@ Impact: after `sv list` or a canceled first `sv add -l`, later cached interactiv
 
 Suggested fix: after generic discovery, restore the sparse checkout to metadata patterns, or make `read_file()` preserve/augment metadata checkout patterns. Add a regression test: source with two generic skills -> refresh once -> cached `update=False` catalog still returns both.
 
-### High: local Git sources silently ignore sparse/partial filters
+### High: local Git sources silently ignore sparse/partial filters (FIXED)
 
 Evidence:
 
@@ -188,7 +188,7 @@ Impact: minor UX mismatch. Non-TTY duplicate sections should keep exact scriptab
 
 1. Fix sparse Git metadata cache narrowing and add regression coverage. (FIXED)
 2. Enforce a strict repo URL/protocol allowlist and set defensive Git protocol environment. (FIXED)
-3. Handle local path sources without silently ignoring lightweight clone requirements.
+3. Handle local path sources without silently ignoring lightweight clone requirements. (FIXED)
 4. Add metadata/index size and entry limits for all backends, including `gh` and Git local cache reads.
 5. Reject symlinked `sv index` include roots before scanning/reading.
 6. Update README and docs for first-run config, `sv add --all`, `sv update` vs `sv sync`, and missing Epic 1 commands/flags. (FIXED)

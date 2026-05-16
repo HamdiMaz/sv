@@ -1,4 +1,4 @@
-import subprocess
+import shutil
 
 import pytest
 
@@ -299,19 +299,12 @@ def test_sync_aborts_on_partial_source_refresh_failure_without_marking_orphan(
     project_skills = project / ".pi" / "skills"
     project_skill = project_skills / "alpha" / "notes.md"
 
-    def git_runner(args, cwd=None):
-        if args[:2] == ["git", "fetch"] and cwd is not None and "source-a" in str(cwd):
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=1,
-                stderr="source-a fetch failed\n",
-            )
-        return default_runner(args, cwd)
+    shutil.rmtree(source_a / ".git")
 
-    result = run_sv(["sync"], cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(["sync"], cwd=project, home=home, git_runner=default_runner)
 
     assert result.exit_code == 1
-    assert "source-a fetch failed" in result.stderr
+    assert "not a Git working tree" in result.stderr
     assert "Synced Pi skill 'alpha'." not in result.stdout
     assert project_skill.read_text() == "alpha v1\n"
     assert load_manifest(project_skills)["alpha"].orphan is False

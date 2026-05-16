@@ -16,6 +16,7 @@ from sv.source import (
     GitHubHttpResponse,
     GitHubRepoRef,
     GitTreelessPartialBackend,
+    LocalGitSourceBackend,
     SourceBackendError,
     SourceBackendFailure,
     default_runner,
@@ -102,6 +103,16 @@ def test_github_failure_hints_cover_actionable_edge_messages(detail, expected):
     assert expected in hint
 
 
+def test_github_header_lookup_is_case_insensitive_and_handles_missing_names():
+    assert (
+        source_module._header_value(
+            {"X-RateLimit-Remaining": "0"}, "x-ratelimit-remaining"
+        )
+        == "0"
+    )
+    assert source_module._header_value({"content-type": "application/json"}, "etag") is None
+
+
 def test_github_item_helpers_reject_malformed_directory_items():
     assert source_module._github_item_type(object()) is None
     assert source_module._github_item_type({"type": 123}) is None
@@ -155,6 +166,75 @@ def test_source_backends_for_repo_keeps_github_api_first_when_cache_exists(
         "git-treeless-partial",
         "git-blobless-sparse",
     ]
+
+
+def test_source_backends_for_repo_uses_direct_backend_for_local_path_sources(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path / "home")
+    source = tmp_path / "skill-source"
+    (source / ".git").mkdir(parents=True)
+    runner = FakeRunner([])
+    repo = RepoConfig(id="local-skill-source", url=str(source))
+
+    backends = source_backends_for_repo(repo, paths, runner=runner)
+
+    assert [backend.name for backend in backends] == ["git-local-source"]
+    assert backends[0].list_candidate_skill_files() == []
+    assert runner.calls == []
+
+
+def test_local_source_repo_path_detects_file_urls_and_rejects_remote_file_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = tmp_path / "skill-source"
+    source.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    assert source_module._local_source_repo_path(source.as_uri()) == source.resolve()
+    assert source_module._local_source_repo_path("file://example.com/tmp/repo") is None
+    assert source_module._local_source_repo_path("file://") is None
+    assert source_module._local_source_repo_path("ssh://git@github.com/Org/Skills.git") is None
+    assert source_module._local_source_repo_path("missing-source") is None
+
+
+def test_local_git_source_backend_materializes_and_reports_invalid_roots(
+    tmp_path: Path,
+):
+    repo_path = tmp_path / "repo"
+    skill_dir = repo_path / "skills" / "alpha"
+    skill_dir.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha.\n---\n")
+    (skill_dir / "notes.md").write_text("alpha notes\n")
+    destination = tmp_path / "materialized"
+
+    backend = LocalGitSourceBackend(repo_path)
+
+    backend.materialize_folder("skills/alpha", destination)
+    assert (destination / "notes.md").read_text() == "alpha notes\n"
+
+    with pytest.raises(SourceBackendError, match="not a directory"):
+        LocalGitSourceBackend(tmp_path / "missing").list_candidate_skill_files()
+
+    not_git = tmp_path / "not-git"
+    not_git.mkdir()
+    with pytest.raises(SourceBackendError, match="not a Git working tree"):
+        LocalGitSourceBackend(not_git).read_file("skills/alpha/SKILL.md")
+
+
+def test_local_git_source_backend_rejects_symlinked_git_metadata(tmp_path: Path):
+    if not hasattr(Path, "symlink_to"):
+        pytest.skip("symlink support is required")
+    repo_path = tmp_path / "repo"
+    git_target = tmp_path / "outside-git"
+    repo_path.mkdir()
+    git_target.mkdir()
+    (repo_path / ".git").symlink_to(git_target, target_is_directory=True)
+    backend = LocalGitSourceBackend(repo_path)
+
+    with pytest.raises(SourceBackendError, match="Local source Git metadata path"):
+        backend.read_index()
 
 
 @pytest.mark.parametrize(
@@ -1349,6 +1429,42 @@ def test_ensure_source_repos_includes_configured_skills_paths_in_metadata_checko
         args for args, _cwd in runner.calls if args[:4] == ["git", "sparse-checkout", "set", "--no-cone"]
     )
     assert "/packages/agents/pi/skills/*/SKILL.md" in sparse_set
+
+
+def test_ensure_source_repo_fails_when_git_ignores_lightweight_clone_options(
+    tmp_path: Path,
+):
+    repo_path = tmp_path / ".sv" / "sources" / "default" / "repo"
+
+    class IgnoredLightweightOptionsRunner:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, args, cwd=None):
+            command = list(args)
+            self.calls.append((command, cwd))
+            if command == ["git", "--version"]:
+                return completed(command, stdout="git version 2.0\n")
+            if command[:2] == ["git", "clone"]:
+                return completed(
+                    command,
+                    stderr=(
+                        "Cloning into cache...\n"
+                        "warning: --depth is ignored in local clones; use file:// instead.\n"
+                        "warning: --filter is ignored in local clones; use file:// instead.\n"
+                        "done.\n"
+                    ),
+                )
+            return completed(command)
+
+    runner = IgnoredLightweightOptionsRunner()
+
+    with pytest.raises(SvError, match="ignored requested lightweight clone options"):
+        ensure_source_repo(str(tmp_path / "source"), repo_path, runner=runner)
+
+    clone_calls = [args for args, _cwd in runner.calls if args[:2] == ["git", "clone"]]
+    assert len(clone_calls) == 2
+    assert not repo_path.exists()
 
 
 def test_ensure_source_repo_uses_treeless_sparse_checkout_when_missing(tmp_path: Path):

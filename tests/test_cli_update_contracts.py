@@ -1,4 +1,4 @@
-import subprocess
+import shutil
 
 import pytest
 
@@ -317,19 +317,12 @@ def test_update_aborts_on_partial_source_refresh_failure_without_marking_orphan(
 
     project_skill = project / ".pi" / "skills" / "alpha" / "notes.md"
 
-    def git_runner(args, cwd=None):
-        if args[:2] == ["git", "fetch"] and cwd is not None and "source-a" in str(cwd):
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=1,
-                stderr="source-a fetch failed\n",
-            )
-        return default_runner(args, cwd)
+    shutil.rmtree(source_a / ".git")
 
-    result = run_sv(["update"], cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(["update"], cwd=project, home=home, git_runner=default_runner)
 
     assert result.exit_code == 1
-    assert "source-a fetch failed" in result.stderr
+    assert "not a Git working tree" in result.stderr
     assert "Updating project skills..." not in result.stdout
     assert project_skill.read_text() == "alpha v1\n"
     assert load_manifest(project / ".pi" / "skills")["alpha"].orphan is False
@@ -344,7 +337,7 @@ def test_update_aborts_on_partial_source_refresh_failure_without_marking_orphan(
     assert_no_raw_control_characters(result.stderr)
 
 
-def test_update_reports_source_fetch_failure_without_syncing_project_skills(
+def test_update_reports_source_refresh_failure_without_syncing_project_skills(
     tmp_path, run_sv
 ):
     source = make_source_repo(tmp_path)
@@ -366,30 +359,15 @@ def test_update_reports_source_fetch_failure_without_syncing_project_skills(
 
     write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
 
-    def git_runner(args, cwd=None):
-        if args == ["git", "--version"]:
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=0,
-                stdout="git version 2.39.0\n",
-            )
-        if args == ["git", "remote", "get-url", "origin"]:
-            return subprocess.CompletedProcess(args=args, returncode=0, stdout=f"{source}\n")
-        if args[:2] == ["git", "fetch"]:
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=1,
-                stderr="fetch failed due to lock\n",
-            )
-        return default_runner(args, cwd)
+    shutil.rmtree(source / ".git")
 
-    result = run_sv(["update"], cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(["update"], cwd=project, home=home, git_runner=default_runner)
 
     assert result.exit_code == 1
     assert "Updating source repos..." in result.stdout
     assert "Updating project skills..." not in result.stdout
     assert "Updated Pi skill 'alpha'." not in result.stdout
-    assert "fetch failed due to lock" in result.stderr
+    assert "not a Git working tree" in result.stderr
     assert_no_traceback(result.stderr)
     assert_no_raw_control_characters(result.stderr)
     assert_no_traceback(result.stdout)

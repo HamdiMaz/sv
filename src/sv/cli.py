@@ -1060,13 +1060,15 @@ def _record_global_source_refresh(
     entries_by_repo = _catalog_entries_by_repo(catalog)
     for repo in repos:
         repo_entries = _catalog_entries_for_repo(repo, catalog, entries_by_repo)
-        source_repo_path = _source_repo_path_for_refresh_metadata(
-            paths, repo, repos, refreshed_backends_by_repo
-        )
-        source_commit, source_tree = _git_source_metadata(source_repo_path)
         backend = _source_refresh_metadata_for_repo(
             repo, repos, refreshed_backends_by_repo
         )
+        source_repo_path = _source_repo_path_for_refresh_metadata(
+            paths, repo, repos, refreshed_backends_by_repo
+        )
+        if backend == "git-local-source":
+            source_repo_path = _local_source_root_from_catalog(repo_entries) or source_repo_path
+        source_commit, source_tree = _git_source_metadata(source_repo_path)
         index_hash = _source_refresh_metadata_for_repo(repo, repos, index_hashes_by_repo)
         states[repo.id] = GlobalSourceState(
             repo_id=repo.id,
@@ -1102,6 +1104,18 @@ def _catalog_entries_for_repo(
         entry for entry in catalog if repo_source_key(entry.repo_url) == source_key
     ]
     return tuple(sorted(equivalent_entries, key=_catalog_hash_key))
+
+
+def _local_source_root_from_catalog(entries: Sequence[SourceSkill]) -> Path | None:
+    roots: set[Path] = set()
+    for entry in entries:
+        root = entry.source_path
+        for _part in entry.source_relative_path.split("/"):
+            root = root.parent
+        roots.add(root)
+    if len(roots) == 1:
+        return next(iter(roots))
+    return None
 
 
 def _source_repo_path_for_refresh_metadata(

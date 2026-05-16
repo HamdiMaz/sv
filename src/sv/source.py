@@ -14,7 +14,7 @@ import subprocess
 from typing import Any, Protocol, cast
 from urllib import error as urllib_error
 from urllib import request as urllib_request
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
@@ -634,6 +634,64 @@ class GitLocalSourceBackend:
         return normalized_roots
 
 
+class LocalGitSourceBackend:
+    """Direct backend for explicitly configured local Git working-tree sources."""
+
+    name = "git-local-source"
+
+    def __init__(self, repo_path: Path):
+        self.repo_path = repo_path
+
+    def read_file(self, path: str) -> bytes:
+        operation = "reading remote file"
+        self._ensure_available(operation)
+        return GitLocalSourceBackend(self.repo_path).read_file(path)
+
+    def read_index(self) -> bytes | None:
+        operation = "reading .sv/index.toml"
+        self._ensure_available(operation)
+        return GitLocalSourceBackend(self.repo_path).read_index()
+
+    def list_candidate_skill_files(
+        self, configured_skills_paths: Sequence[str] = ()
+    ) -> list[str]:
+        operation = "listing candidate SKILL.md files"
+        self._ensure_available(operation)
+        return GitLocalSourceBackend(self.repo_path).list_candidate_skill_files(
+            configured_skills_paths
+        )
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        operation = "materializing selected folder"
+        self._ensure_available(operation)
+        GitLocalSourceBackend(self.repo_path).materialize_folder(source_path, destination)
+
+    def local_path_for(self, source_path: str) -> Path:
+        normalized_source_path = _normalize_backend_relative_path(source_path)
+        return self.repo_path / Path(*PurePosixPath(normalized_source_path).parts)
+
+    def _ensure_available(self, operation: str) -> None:
+        try:
+            _reject_symlinked_source_cache_ancestors(self.repo_path)
+            _reject_symlinked_source_path(self.repo_path, "Local source repo path")
+            _reject_symlinked_source_path(
+                self.repo_path / ".git", "Local source Git metadata path"
+            )
+        except SvError as exc:
+            raise SourceBackendError(operation, str(exc)) from exc
+        if not self.repo_path.is_dir():
+            raise SourceBackendError(
+                operation,
+                f"local source repo path is not a directory: {self.repo_path}",
+            )
+        if not (self.repo_path / ".git").exists():
+            raise SourceBackendError(
+                operation,
+                "local source repo path is not a Git working tree: "
+                f"{self.repo_path}",
+            )
+
+
 class GitSparseSourceBackend:
     """Lightweight Git fallback using partial clone plus sparse checkout."""
 
@@ -1040,6 +1098,7 @@ def _ensure_sparse_git_repo_after_git_check(
                 cwd=repo_path,
                 runner=runner,
                 action="Updating lightweight source repo",
+                fail_on_ignored_lightweight_options=True,
             )
             checkout_ref = "FETCH_HEAD"
     else:
@@ -1064,6 +1123,7 @@ def _ensure_sparse_git_repo_after_git_check(
             cwd=None,
             runner=runner,
             action=f"Preparing lightweight source repo with {filter_spec} filter",
+            fail_on_ignored_lightweight_options=True,
         )
 
     _run_git(
@@ -1191,6 +1251,10 @@ def source_backends_for_repo(
     """Return lightweight source backends in preference order for a repo."""
 
     _validate_repo_url(repo.url)
+    local_repo_path = _local_source_repo_path(repo.url)
+    if local_repo_path is not None:
+        return (LocalGitSourceBackend(local_repo_path),)
+
     backends: list[SourceBackend] = []
     repo_path = paths.source_repo_for(repo.id)
     github_ref = parse_github_repo_ref(repo.url)
@@ -1216,6 +1280,23 @@ def source_backends_for_repo(
         )
     )
     return tuple(backends)
+
+
+def _local_source_repo_path(repo_url: str) -> Path | None:
+    parsed = urlsplit(repo_url)
+    scheme = parsed.scheme.lower()
+    if scheme == "file":
+        if parsed.netloc not in {"", "localhost"}:
+            return None
+        if not parsed.path:
+            return None
+        return Path(unquote(parsed.path)).expanduser().resolve()
+    if scheme or repo_url.startswith("git@"):
+        return None
+    candidate = Path(repo_url).expanduser()
+    if candidate.is_absolute() or repo_url.startswith((".", "~")) or candidate.exists():
+        return candidate.resolve()
+    return None
 
 
 def _github_contents_endpoint(repo: GitHubRepoRef, path: str) -> str:
@@ -1556,7 +1637,14 @@ def _reject_symlinked_backend_path_or_ancestors(
         _reject_symlinked_source_path(current, label)
 
 
-def _run_git(args: Sequence[str], cwd: Path | None, runner: Runner, action: str) -> str:
+def _run_git(
+    args: Sequence[str],
+    cwd: Path | None,
+    runner: Runner,
+    action: str,
+    *,
+    fail_on_ignored_lightweight_options: bool = False,
+) -> str:
     command = ["git", *args]
     try:
         result = runner(command, cwd)
@@ -1573,7 +1661,25 @@ def _run_git(args: Sequence[str], cwd: Path | None, runner: Runner, action: str)
             raise SvError(f"{action} failed: {details}")
         raise SvError(f"{action} failed with exit code {result.returncode}.")
 
+    if fail_on_ignored_lightweight_options:
+        ignored_warning = _ignored_lightweight_option_warning(result.stderr or "")
+        if ignored_warning:
+            raise SvError(
+                f"{action} failed: Git ignored requested lightweight clone options: "
+                f"{ignored_warning}"
+            )
+
     return (result.stdout or "").strip()
+
+
+def _ignored_lightweight_option_warning(stderr: str) -> str | None:
+    for line in stderr.splitlines():
+        normalized = line.lower()
+        ignored_filter = "filter" in normalized and "ignor" in normalized
+        ignored_depth = "depth" in normalized and "ignor" in normalized
+        if ignored_filter or ignored_depth:
+            return _escape_control_characters(line.strip())
+    return None
 
 
 def _missing_git_guidance() -> str:
