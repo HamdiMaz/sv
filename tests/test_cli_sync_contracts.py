@@ -79,6 +79,37 @@ def test_sync_updates_managed_skill_with_recorded_origin_when_duplicates_exist(t
     assert load_manifest(managed.parent)["alpha"].repo_id == repo_ids[1]
 
 
+def test_sync_from_git_subdirectory_targets_repo_root(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    nested = project / "nested" / "work"
+    nested.mkdir(parents=True)
+    run_git(["init"], project)
+    configure_source(source, project, home)
+
+    add_result = run_sv(
+        ["add", "alpha"],
+        cwd=project,
+        home=home,
+        git_runner=default_runner,
+    )
+    _assert_sync_success(add_result)
+
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    result = run_sv(["sync"], cwd=nested, home=home, git_runner=default_runner)
+
+    _assert_sync_success(result)
+    assert "Synced Pi skill 'alpha'." in result.stdout
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert not (nested / ".pi").exists()
+    assert not (nested / ".sv").exists()
+    assert load_manifest(project / ".pi" / "skills")["alpha"].target_path == ".pi/skills/alpha"
+
+
 def test_sync_replaces_locally_modified_managed_skill_and_clears_state(tmp_path, run_sv):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"

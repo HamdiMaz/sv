@@ -7,6 +7,7 @@ from tests.helpers import (
     assert_no_partial_sv_dirs,
     assert_no_raw_control_characters,
     assert_no_traceback,
+    run_git,
 )
 
 
@@ -121,6 +122,35 @@ def test_remove_existing_skill_updates_canonical_manifest_and_removes_directory(
     assert manifest["beta"].repo_id == "Org/Skills"
     assert manifest["beta"].target_path == ".pi/skills/beta"
     assert_no_partial_sv_dirs(project_skills)
+
+
+def test_remove_from_git_subdirectory_targets_repo_root_manifest(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    nested = project / "nested" / "work"
+    nested.mkdir(parents=True)
+    run_git(["init"], project)
+    project_skills = project / ".pi" / "skills"
+    target = project_skills / "alpha"
+    target.mkdir(parents=True)
+    (target / "notes.md").write_text("alpha local\n")
+    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    result = run_sv(
+        ["remove", "alpha"],
+        cwd=nested,
+        home=home,
+        git_runner=_forbid_git_calls,
+    )
+
+    assert result.exit_code == 0
+    assert "Removed Pi skill 'alpha'" in result.stdout
+    assert not target.exists()
+    assert load_manifest(project_skills) == {}
+    assert not (nested / ".pi").exists()
+    assert not (nested / ".sv").exists()
 
 
 def test_remove_interactive_skills_with_no_projects_skills_does_nothing_without_git(tmp_path: Path, run_sv):

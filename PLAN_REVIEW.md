@@ -155,7 +155,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Versioned TOML helpers | Fixed (FIXED) | Future schema errors exist; new versioned config, canonical project manifest, and global manifest files now reject missing `schema_version`, while legacy single-repo config and legacy Pi manifests remain readable for migration. |
 | Safe hashing/materialization | Mostly implemented | Symlink checks and atomic helpers are present. Security hardening still recommended for quotas/timeouts. |
 | Source path-aware catalog | Mostly implemented | Same-name/source-path models exist. |
-| Canonical project manifest | Mostly implemented | New `.sv/manifest.toml` support exists. Root/cwd inconsistency is a major bug. |
+| Canonical project manifest | Fixed (FIXED) | New `.sv/manifest.toml` support exists, and project add/remove/sync/update operations now target the detected repository root consistently with status. |
 | Legacy Pi manifest migration | Implemented in code paths reviewed | Needs final verification after root/cwd fix. |
 | Global source manifest | Fixed (FIXED) | Refresh state records the successful lightweight backend and remote index hash, with legacy missing backend values rendered as `unknown` in status output. |
 | Explicit `--skills-path` | Implemented | Config validation rejects unsafe paths. |

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added subdirectory regression coverage for project remove, sync, and update targeting the detected repository root.
+- Marked canonical project manifest PLAN alignment fixed after verifying subdirectory project operations target the detected repository root.
 - Marked the `sv index` PLAN alignment review item fixed after verifying include/exclude CLI flags and `.sv/index-config.toml` scan defaults are implemented and covered.
 - Fixed TTY duplicate source selection to use the aligned Skill/Source/Description picker layout.
 - Fixed versioned TOML loading so new config, canonical project manifest, and global manifest files reject missing `schema_version` values while preserving legacy migration reads.

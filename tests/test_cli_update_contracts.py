@@ -128,7 +128,9 @@ def test_update_updates_sources_and_syncs_project_skills(tmp_path, run_sv):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
-    project.mkdir()
+    nested = project / "nested" / "work"
+    nested.mkdir(parents=True)
+    run_git(["init"], project)
     configure_source(source, project, home)
 
     add_result = run_sv(
@@ -145,7 +147,7 @@ def test_update_updates_sources_and_syncs_project_skills(tmp_path, run_sv):
     run_git(["add", "skills/alpha"], source)
     run_git(["commit", "-m", "update alpha"], source)
 
-    result = run_sv(["update"], cwd=project, home=home, git_runner=default_runner)
+    result = run_sv(["update"], cwd=nested, home=home, git_runner=default_runner)
 
     assert result.exit_code == 0
     assert "Updating source repos..." in result.stdout
@@ -158,6 +160,8 @@ def test_update_updates_sources_and_syncs_project_skills(tmp_path, run_sv):
     assert (
         project / ".pi" / "skills" / "alpha" / "notes.md"
     ).read_text() == "alpha v2\n"
+    assert not (nested / ".pi").exists()
+    assert not (nested / ".sv").exists()
 
 
 def test_update_preserves_local_edits_and_marks_update_available(tmp_path, run_sv):
