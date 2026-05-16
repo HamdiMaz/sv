@@ -21,6 +21,33 @@ def test_run_builds_isolated_command_with_no_args(tmp_path, run_sv):
     assert calls == [["pi", "--no-skills", "--skill", ".pi/skills"]]
 
 
+def test_run_from_git_subdirectory_uses_repo_root_pi_skills(tmp_path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    subdir = project / "subdir"
+    project_skills = project / ".pi" / "skills"
+    (project / ".git").mkdir(parents=True)
+    (project_skills / "alpha").mkdir(parents=True)
+    subdir.mkdir()
+    calls: list[list[str]] = []
+
+    def process_runner(command: list[str]) -> int:
+        calls.append(command)
+        return 0
+
+    result = run_sv(
+        ["run", "--", "--model", "fast"],
+        cwd=subdir,
+        home=home,
+        process_runner=process_runner,
+    )
+
+    assert result.exit_code == 0
+    assert calls == [
+        ["pi", "--no-skills", "--skill", str(project_skills), "--model", "fast"]
+    ]
+
+
 def test_run_strips_arg_separator_and_forwards_pi_args(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"

@@ -377,8 +377,13 @@ def handle(
             return _handle_index(cwd, args=args)
 
         if args.command == "run":
+            local_context = _detect_local_context(cwd)
             return _handle_run(
-                args.pi_args, cwd=cwd, adapter=adapter, process_runner=process_runner
+                args.pi_args,
+                cwd=cwd,
+                adapter=adapter,
+                process_runner=process_runner,
+                context=local_context,
             )
 
         if args.command == "status":
@@ -1713,11 +1718,17 @@ def _confirm_repo_removal(repos: Sequence[RepoConfig], *, yes: bool) -> bool:
 
 
 def _handle_run(
-    args: Sequence[str], cwd: Path, adapter: PiAdapter, process_runner
+    args: Sequence[str], cwd: Path, adapter: PiAdapter, process_runner, context: LocalContext
 ) -> int:
     """Run Pi and turn launch failures into user-facing errors."""
-    list_project_skills(adapter.project_skill_dir(cwd))
-    command = adapter.run_command(_strip_arg_separator(args))
+    project_skills_dir = adapter.project_skill_dir(context.repo_root)
+    list_project_skills(project_skills_dir)
+    skills_path = (
+        ".pi/skills"
+        if cwd.resolve() == context.repo_root.resolve()
+        else str(project_skills_dir)
+    )
+    command = adapter.run_command(_strip_arg_separator(args), skills_path=skills_path)
     try:
         return process_runner(command)
     except FileNotFoundError as exc:
