@@ -29,6 +29,8 @@ README_SKILLS_START_MARKER = "<!-- sv:skills:start -->"
 README_SKILLS_END_MARKER = "<!-- sv:skills:end -->"
 IndexKind = Literal["skill-vault", "project-index"]
 _VALID_KINDS: tuple[IndexKind, ...] = ("skill-vault", "project-index")
+_MAX_INDEX_SKILL_ENTRIES = 5000
+_MAX_INDEX_FIELD_LENGTH = 8192
 
 
 @dataclass(frozen=True)
@@ -496,6 +498,11 @@ def _parse_scan_path_list(raw_paths: Any, field: str, path: Path) -> tuple[str, 
 def _parse_skill_entries(raw_skills: Any, path: Path) -> tuple[IndexSkillEntry, ...]:
     if not isinstance(raw_skills, list):
         raise SvError(f"Invalid {INDEX_DOCUMENT} at {path}: skills must be a list.")
+    if len(raw_skills) > _MAX_INDEX_SKILL_ENTRIES:
+        raise SvError(
+            f"Invalid {INDEX_DOCUMENT} at {path}: skills exceeds skill entry limit "
+            f"({_MAX_INDEX_SKILL_ENTRIES})."
+        )
 
     entries: list[IndexSkillEntry] = []
     for index, item in enumerate(raw_skills, start=1):
@@ -565,6 +572,11 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
     _expect_kind(document.kind, path)
     _validate_top_level_string(document.generated_by, "generated_by", path)
     _validate_top_level_string(document.generated_at, "generated_at", path)
+    if len(document.skills) > _MAX_INDEX_SKILL_ENTRIES:
+        raise SvError(
+            f"Invalid {INDEX_DOCUMENT} at {path}: skills exceeds skill entry limit "
+            f"({_MAX_INDEX_SKILL_ENTRIES})."
+        )
     entries: list[IndexSkillEntry] = []
     for index, entry in enumerate(document.skills, start=1):
         _validate_skill_string(entry.name, "name", index, path)
@@ -625,6 +637,7 @@ def _expect_top_level_string(value: Any, field: str, path: Path) -> str:
         raise SvError(
             f"Invalid {INDEX_DOCUMENT} at {path}: field {field!r} must be a string."
         )
+    _validate_index_field_length(value, field, path)
     return value
 
 
@@ -633,6 +646,7 @@ def _validate_top_level_string(value: str, field: str, path: Path) -> None:
         raise SvError(
             f"Invalid {INDEX_DOCUMENT} at {path}: field {field!r} must be a string."
         )
+    _validate_index_field_length(value, field, path)
 
 
 def _expect_skill_string(value: Any, field: str, index: int, path: Path) -> str:
@@ -640,6 +654,7 @@ def _expect_skill_string(value: Any, field: str, index: int, path: Path) -> str:
         raise SvError(
             f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field {field!r} must be a string."
         )
+    _validate_index_field_length(value, field, path, index=index)
     return value
 
 
@@ -648,6 +663,21 @@ def _validate_skill_string(value: str, field: str, index: int, path: Path) -> No
         raise SvError(
             f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field {field!r} must be a string."
         )
+    _validate_index_field_length(value, field, path, index=index)
+
+
+def _validate_index_field_length(
+    value: str, field: str, path: Path, *, index: int | None = None
+) -> None:
+    if len(value) <= _MAX_INDEX_FIELD_LENGTH:
+        return
+    location = f"field {field!r}"
+    if index is not None:
+        location = f"skill entry {index} field {field!r}"
+    raise SvError(
+        f"Invalid {INDEX_DOCUMENT} at {path}: {location} exceeds field length limit "
+        f"({_MAX_INDEX_FIELD_LENGTH})."
+    )
 
 
 def _reject_symlinked_index_dir(path: Path) -> None:

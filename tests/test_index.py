@@ -6,6 +6,7 @@ import tomllib
 import pytest
 
 from sv.errors import SvError
+import sv.index as index_module
 from sv.index import (
     INDEX_SCHEMA_VERSION,
     IndexDocument,
@@ -860,6 +861,82 @@ def test_load_index_bytes_and_validation_errors_are_actionable(tmp_path: Path):
                 generated_by="sv",
                 generated_at="now",
                 skills=(IndexSkillEntry("alpha", "desc", "../bad", "sha256:1", "sha256:2"),),
+            ),
+        )
+
+
+def test_load_index_bytes_rejects_too_many_skill_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from sv.index import load_index_bytes
+
+    monkeypatch.setattr(index_module, "_MAX_INDEX_SKILL_ENTRIES", 0, raising=False)
+    path = tmp_path / ".sv" / "index.toml"
+    content = b"""
+    schema_version = 1
+    kind = "skill-vault"
+    generated_by = "sv"
+    generated_at = "now"
+
+    [[skills]]
+    name = "alpha"
+    description = "Alpha."
+    source_path = "skills/alpha"
+    content_hash = "sha256:alpha"
+    skill_file_hash = "sha256:alpha-skill"
+    """
+
+    with pytest.raises(SvError, match="skill entry limit"):
+        load_index_bytes(content, path)
+
+
+def test_load_index_bytes_rejects_oversized_skill_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from sv.index import load_index_bytes
+
+    monkeypatch.setattr(index_module, "_MAX_INDEX_FIELD_LENGTH", 4, raising=False)
+    path = tmp_path / ".sv" / "index.toml"
+    content = b"""
+    schema_version = 1
+    kind = "skill-vault"
+    generated_by = "sv"
+    generated_at = "now"
+
+    [[skills]]
+    name = "a"
+    description = "Alpha."
+    source_path = "a"
+    content_hash = "h"
+    skill_file_hash = "s"
+    """
+
+    with pytest.raises(SvError, match="description.*exceeds"):
+        load_index_bytes(content, path)
+
+
+def test_save_index_rejects_too_many_skill_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(index_module, "_MAX_INDEX_SKILL_ENTRIES", 0, raising=False)
+    path = tmp_path / ".sv" / "index.toml"
+
+    with pytest.raises(SvError, match="skill entry limit"):
+        save_index(
+            path,
+            IndexDocument(
+                kind="skill-vault",
+                generated_by="sv",
+                generated_at="now",
+                skills=(
+                    IndexSkillEntry(
+                        "alpha",
+                        "Alpha.",
+                        "skills/alpha",
+                        "sha256:alpha",
+                        "sha256:alpha-skill",
+                    ),
+                ),
             ),
         )
 

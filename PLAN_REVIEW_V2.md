@@ -14,7 +14,7 @@ However, I would **not call the Epic 1 implementation fully complete yet**. I fo
 2. Local path Git sources can silently ignore `--filter`/`--depth`, violating the plan's “never silently full-clone” rule. (FIXED)
 3. Unknown/unsafe Git URL schemes such as `git://` and `ext::` are accepted and passed to Git. (FIXED)
 4. README and command docs still describe removed or changed behavior (`sv add all`, default `HamdiMaz/Skills`, and destructive `sv update`). (FIXED)
-5. Remote metadata/index reads still lack size/entry limits for some backends.
+5. Remote metadata/index reads still lack size/entry limits for some backends. (FIXED)
 
 ## Verification run
 
@@ -123,7 +123,7 @@ Impact: users following docs will run wrong commands or expect wrong overwrite b
 
 Suggested fix: update README and docs to match current CLI help and Epic 1 semantics. Add doc tests that catch semantic stale examples such as `sv add all`.
 
-### Medium: metadata/index reads are still unbounded for Git and `gh api` backends
+### Medium: metadata/index reads are still unbounded for Git and `gh api` backends (FIXED)
 
 Evidence:
 
@@ -189,7 +189,7 @@ Impact: minor UX mismatch. Non-TTY duplicate sections should keep exact scriptab
 1. Fix sparse Git metadata cache narrowing and add regression coverage. (FIXED)
 2. Enforce a strict repo URL/protocol allowlist and set defensive Git protocol environment. (FIXED)
 3. Handle local path sources without silently ignoring lightweight clone requirements. (FIXED)
-4. Add metadata/index size and entry limits for all backends, including `gh` and Git local cache reads.
+4. Add metadata/index size and entry limits for all backends, including `gh` and Git local cache reads. (FIXED)
 5. Reject symlinked `sv index` include roots before scanning/reading. (FIXED)
 6. Update README and docs for first-run config, `sv add --all`, `sv update` vs `sv sync`, and missing Epic 1 commands/flags. (FIXED)
 7. Make `sv status` avoid remote refresh when no managed local entries exist. (FIXED)

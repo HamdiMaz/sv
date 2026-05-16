@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Protocol, cast
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -32,6 +33,9 @@ _MAX_GITHUB_MATERIALIZATION_ENTRIES = 2000
 _MAX_GITHUB_MATERIALIZATION_BYTES = 10 * 1024 * 1024
 _MAX_GITHUB_MATERIALIZATION_DEPTH = 25
 _MAX_GITHUB_API_RESPONSE_BYTES = 16 * 1024 * 1024
+_MAX_GITHUB_API_ERROR_BYTES = 64 * 1024
+_MAX_SOURCE_INDEX_BYTES = 4 * 1024 * 1024
+_MAX_SOURCE_SKILL_FILE_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -163,14 +167,25 @@ class GitHubGhApiBackend:
     def __init__(self, repo: GitHubRepoRef, runner: Runner | None = None):
         self.repo = repo
         self._runner = default_runner if runner is None else runner
+        self._use_bounded_default_runner = runner is None or runner is default_runner
 
     def read_file(self, path: str) -> bytes:
-        return self._read_file(path, operation="reading remote file")
+        return self._read_file(
+            path,
+            operation="reading remote file",
+            max_decoded_bytes=_MAX_SOURCE_SKILL_FILE_BYTES,
+            size_limit_label="source metadata size limit",
+        )
 
     def read_index(self) -> bytes | None:
         operation = "reading .sv/index.toml"
         try:
-            return self._read_file(".sv/index.toml", operation=operation)
+            return self._read_file(
+                ".sv/index.toml",
+                operation=operation,
+                max_decoded_bytes=_MAX_SOURCE_INDEX_BYTES,
+                size_limit_label="source index size limit",
+            )
         except SourceBackendError as exc:
             if not _looks_like_not_found(exc.detail):
                 raise
@@ -340,6 +355,7 @@ class GitHubGhApiBackend:
                     item_path,
                     operation=operation,
                     max_decoded_bytes=remaining_bytes,
+                    size_limit_label="GitHub API materialization byte limit",
                 )
                 if len(content) > remaining_bytes:
                     raise SourceBackendError(
@@ -371,7 +387,12 @@ class GitHubGhApiBackend:
                 )
 
     def _read_file(
-        self, path: str, *, operation: str, max_decoded_bytes: int | None = None
+        self,
+        path: str,
+        *,
+        operation: str,
+        max_decoded_bytes: int | None = None,
+        size_limit_label: str = "GitHub API file byte limit",
     ) -> bytes:
         normalized_path = _normalize_backend_relative_path(path)
         output = self._run_api(
@@ -385,15 +406,21 @@ class GitHubGhApiBackend:
         ):
             raise SourceBackendError(
                 operation,
-                f"{normalized_path} exceeds GitHub API materialization byte limit",
+                f"{normalized_path} exceeds {size_limit_label}",
             )
         try:
-            return base64.b64decode(encoded, validate=True)
+            content = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise SourceBackendError(
                 operation,
                 f"GitHub API response for {normalized_path} did not contain valid base64 content",
             ) from exc
+        if max_decoded_bytes is not None and len(content) > max_decoded_bytes:
+            raise SourceBackendError(
+                operation,
+                f"{normalized_path} exceeds {size_limit_label}",
+            )
+        return content
 
     def _list_directory(
         self, path: str, *, operation: str, missing_ok: bool
@@ -429,7 +456,10 @@ class GitHubGhApiBackend:
     def _run_api(self, args: Sequence[str], *, operation: str) -> str:
         command = ["gh", "api", *args]
         try:
-            result = self._runner(command, None)
+            if self._use_bounded_default_runner:
+                result = _run_gh_api_with_limited_output(command, operation=operation)
+            else:
+                result = self._runner(command, None)
         except FileNotFoundError as exc:
             raise SourceBackendError(
                 operation,
@@ -448,7 +478,13 @@ class GitHubGhApiBackend:
             if not detail:
                 detail = f"gh api exited with status {result.returncode}"
             raise SourceBackendError(operation, detail, hint=_gh_failure_hint(detail))
-        return result.stdout or ""
+        output = result.stdout or ""
+        if len(output.encode("utf-8")) > _MAX_GITHUB_API_RESPONSE_BYTES:
+            raise SourceBackendError(
+                operation,
+                "GitHub API response exceeded size limit",
+            )
+        return output
 
 
 class GitHubHttpsApiBackend(GitHubGhApiBackend):
@@ -543,18 +579,28 @@ class GitLocalSourceBackend:
         _reject_symlinked_backend_path_or_ancestors(
             target, self.repo_path, "Source file path"
         )
-        try:
-            return target.read_bytes()
-        except OSError as exc:
-            raise SourceBackendError(
-                "reading remote file", f"{normalized_path} could not be read: {exc}"
-            ) from exc
+        return _read_limited_backend_file(
+            target,
+            normalized_path,
+            operation="reading remote file",
+        )
 
     def read_index(self) -> bytes | None:
+        normalized_path = ".sv/index.toml"
+        target = self.repo_path / ".sv" / "index.toml"
+        _reject_symlinked_backend_path_or_ancestors(
+            target, self.repo_path, "Source file path"
+        )
         try:
-            return self.read_file(".sv/index.toml")
-        except SourceBackendError:
-            return None
+            return _read_limited_backend_file(
+                target,
+                normalized_path,
+                operation="reading .sv/index.toml",
+            )
+        except SourceBackendError as exc:
+            if _looks_like_not_found(exc.detail):
+                return None
+            raise
 
     def list_candidate_skill_files(
         self, configured_skills_paths: Sequence[str] = ()
@@ -858,14 +904,26 @@ class FakeSourceBackend:
     def read_file(self, path: str) -> bytes:
         normalized_path = _normalize_backend_relative_path(path)
         try:
-            return self._files[normalized_path]
+            content = self._files[normalized_path]
         except KeyError as exc:
             raise SourceBackendError(
                 "reading remote file", f"{normalized_path} was not found"
             ) from exc
+        return _enforce_source_metadata_size(
+            content,
+            normalized_path,
+            operation="reading remote file",
+        )
 
     def read_index(self) -> bytes | None:
-        return self._files.get(".sv/index.toml")
+        content = self._files.get(".sv/index.toml")
+        if content is None:
+            return None
+        return _enforce_source_metadata_size(
+            content,
+            ".sv/index.toml",
+            operation="reading .sv/index.toml",
+        )
 
     def list_candidate_skill_files(
         self, configured_skills_paths: Sequence[str] = ()
@@ -907,6 +965,113 @@ class FakeSourceBackend:
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
+
+
+def _read_limited_backend_file(
+    target: Path, normalized_path: str, *, operation: str
+) -> bytes:
+    max_bytes, limit_label = _source_metadata_limit_for_path(normalized_path)
+    try:
+        with target.open("rb") as handle:
+            content = handle.read(max_bytes + 1)
+    except FileNotFoundError as exc:
+        raise SourceBackendError(
+            operation, f"{normalized_path} was not found and could not be read"
+        ) from exc
+    except OSError as exc:
+        raise SourceBackendError(
+            operation, f"{normalized_path} could not be read: {exc}"
+        ) from exc
+    return _enforce_source_metadata_size(
+        content,
+        normalized_path,
+        operation=operation,
+        max_bytes=max_bytes,
+        limit_label=limit_label,
+    )
+
+
+def _enforce_source_metadata_size(
+    content: bytes,
+    normalized_path: str,
+    *,
+    operation: str,
+    max_bytes: int | None = None,
+    limit_label: str | None = None,
+) -> bytes:
+    if max_bytes is None or limit_label is None:
+        max_bytes, limit_label = _source_metadata_limit_for_path(normalized_path)
+    if len(content) > max_bytes:
+        raise SourceBackendError(
+            operation,
+            f"{normalized_path} exceeds {limit_label}",
+        )
+    return content
+
+
+def _source_metadata_limit_for_path(path: str) -> tuple[int, str]:
+    normalized_path = _normalize_backend_relative_path(path)
+    if normalized_path == ".sv/index.toml":
+        return _MAX_SOURCE_INDEX_BYTES, "source index size limit"
+    return _MAX_SOURCE_SKILL_FILE_BYTES, "source metadata size limit"
+
+
+def _run_gh_api_with_limited_output(
+    command: Sequence[str], *, operation: str
+) -> subprocess.CompletedProcess[str]:
+    command_list = list(command)
+    with tempfile.TemporaryDirectory(prefix="sv-gh-api-") as temp_dir:
+        temp_path = Path(temp_dir)
+        stdout_path = temp_path / "stdout"
+        stderr_path = temp_path / "stderr"
+        try:
+            with stdout_path.open("w+b") as stdout_file, stderr_path.open(
+                "w+b"
+            ) as stderr_file:
+                result = subprocess.run(
+                    command_list,
+                    cwd=None,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    timeout=DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+                    env=_noninteractive_subprocess_env(),
+                )
+        except subprocess.TimeoutExpired as exc:
+            return subprocess.CompletedProcess(
+                args=command_list,
+                returncode=_COMMAND_TIMEOUT_EXIT_CODE,
+                stdout="",
+                stderr=_timeout_error_message(exc),
+            )
+        stdout = _read_limited_process_output_file(
+            stdout_path,
+            _MAX_GITHUB_API_RESPONSE_BYTES,
+            "GitHub API response",
+            operation,
+        )
+        stderr = _read_limited_process_output_file(
+            stderr_path,
+            _MAX_GITHUB_API_ERROR_BYTES,
+            "GitHub API error output",
+            operation,
+        )
+    return subprocess.CompletedProcess(
+        args=command_list,
+        returncode=result.returncode,
+        stdout=stdout.decode("utf-8", errors="replace"),
+        stderr=stderr.decode("utf-8", errors="replace"),
+    )
+
+
+def _read_limited_process_output_file(
+    path: Path, max_bytes: int, label: str, operation: str
+) -> bytes:
+    try:
+        if path.stat().st_size > max_bytes:
+            raise SourceBackendError(operation, f"{label} exceeded size limit")
+        return path.read_bytes()
+    except OSError as exc:
+        raise SourceBackendError(operation, f"Failed to read {label}: {exc}") from exc
 
 
 def default_runner(

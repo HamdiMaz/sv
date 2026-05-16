@@ -577,6 +577,107 @@ def test_github_gh_api_backend_rejects_oversized_decoded_content_after_read(
         backend.materialize_folder("skills/alpha", tmp_path / "materialized")
 
 
+def test_github_gh_api_backend_limits_metadata_file_size(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(source_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
+    runner = FakeRunner([completed(["gh", "api"], stdout="bGFyZ2UK")])
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
+
+    with pytest.raises(SourceBackendError, match="source metadata size limit"):
+        backend.read_file("skills/alpha/SKILL.md")
+
+
+def test_github_gh_api_backend_limits_index_file_size(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(source_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
+    runner = FakeRunner(
+        [completed(["gh", "api"], stdout="c2NoZW1hX3ZlcnNpb24gPSAxCg==")]
+    )
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
+
+    with pytest.raises(SourceBackendError, match="source index size limit"):
+        backend.read_index()
+
+
+def test_github_gh_api_backend_limits_raw_api_output(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(source_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
+    runner = FakeRunner([completed(["gh", "api"], stdout="[]\n")])
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
+
+    with pytest.raises(SourceBackendError, match="exceeded size limit"):
+        backend.list_candidate_skill_files()
+
+
+def test_github_gh_api_backend_default_runner_captures_output_without_memory_buffer(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_run(args, **kwargs):
+        assert "capture_output" not in kwargs
+        kwargs["stdout"].write(b"b2s=\n")
+        return completed(args)
+
+    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
+
+    assert backend.read_file("skills/alpha/SKILL.md") == b"ok"
+
+
+def test_github_gh_api_backend_default_runner_rejects_oversized_output_file(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(source_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
+
+    def fake_run(args, **kwargs):
+        kwargs["stdout"].write(b"[]\n")
+        return completed(args)
+
+    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
+
+    with pytest.raises(SourceBackendError, match="exceeded size limit"):
+        backend.list_candidate_skill_files()
+
+
+def test_github_gh_api_backend_default_runner_limits_error_output(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(source_module, "_MAX_GITHUB_API_ERROR_BYTES", 2)
+
+    def fake_run(args, **kwargs):
+        kwargs["stderr"].write(b"err")
+        return completed(args, returncode=1)
+
+    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
+
+    with pytest.raises(SourceBackendError, match="error output exceeded size limit"):
+        backend.read_file("skills/alpha/SKILL.md")
+
+
+def test_github_gh_api_backend_default_runner_reports_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_run(_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=["gh", "api"], timeout=1)
+
+    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
+
+    with pytest.raises(SourceBackendError, match="command timed out"):
+        backend.read_file("skills/alpha/SKILL.md")
+
+
+def test_read_limited_process_output_file_reports_read_errors(tmp_path: Path):
+    with pytest.raises(SourceBackendError, match="Failed to read test output"):
+        source_module._read_limited_process_output_file(
+            tmp_path / "missing", 4, "test output", "reading test output"
+        )
+
+
 def test_github_api_helpers_limit_listing_size_item_size_and_response_body(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1094,6 +1195,67 @@ def test_git_local_backend_rejects_symlinked_index_ancestor(tmp_path: Path):
 
     with pytest.raises(SvError, match="Source file path must not be a symlink"):
         backend.read_index()
+
+
+def test_git_local_backend_limits_metadata_file_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    skill_file = repo_path / "skills" / "alpha" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text("large\n")
+    backend = GitLocalSourceBackend(repo_path)
+    monkeypatch.setattr(source_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
+
+    with pytest.raises(SourceBackendError, match="source metadata size limit"):
+        backend.read_file("skills/alpha/SKILL.md")
+
+
+def test_git_local_backend_limits_index_file_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    index_file = repo_path / ".sv" / "index.toml"
+    index_file.parent.mkdir(parents=True)
+    index_file.write_text("schema_version = 1\n")
+    backend = GitLocalSourceBackend(repo_path)
+    monkeypatch.setattr(source_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
+
+    with pytest.raises(SourceBackendError, match="source index size limit"):
+        backend.read_index()
+
+
+def test_git_local_backend_reports_metadata_read_os_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    skill_file = repo_path / "skills" / "alpha" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text("alpha\n")
+    backend = GitLocalSourceBackend(repo_path)
+    original_open = Path.open
+
+    def fail_open(path, *args, **kwargs):
+        if path == skill_file:
+            raise OSError("boom")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_open)
+
+    with pytest.raises(SourceBackendError, match="could not be read: boom"):
+        backend.read_file("skills/alpha/SKILL.md")
+
+
+def test_fake_source_backend_limits_metadata_reads(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(source_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
+    monkeypatch.setattr(source_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
+    skill_backend = FakeSourceBackend({"skills/alpha/SKILL.md": "large\n"})
+    index_backend = FakeSourceBackend({".sv/index.toml": "schema_version = 1\n"})
+
+    with pytest.raises(SourceBackendError, match="source metadata size limit"):
+        skill_backend.read_file("skills/alpha/SKILL.md")
+    with pytest.raises(SourceBackendError, match="source index size limit"):
+        index_backend.read_index()
 
 
 def test_fake_source_backend_reads_index_and_materializes_selected_folder(
