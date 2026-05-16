@@ -2014,7 +2014,9 @@ def _handle_add_interactive(
         print("No valid skills found in configured source repos.")
         return 0
 
-    selected_skills = skill_selector(catalog, item_label=_source_skill_label)
+    selected_skills = skill_selector(
+        catalog, item_label=_source_skill_picker_labeler(catalog)
+    )
     if not selected_skills:
         print("No skills selected.")
         return 0
@@ -3085,6 +3087,46 @@ def _format_source_skill_scriptable_choices(matches: Sequence[SourceSkill]) -> s
 
 def _source_skill_label(entry: SourceSkill) -> str:
     return entry.display_label
+
+
+def _source_skill_picker_labeler(
+    catalog: Sequence[SourceSkill],
+) -> Callable[[SourceSkill], str]:
+    skill_width = max(
+        [_display_width(_escape_control_characters(entry.name)) for entry in catalog],
+        default=_display_width("Skill"),
+    )
+    source_width = max(
+        [
+            _display_width(_source_skill_picker_source_label(entry))
+            for entry in catalog
+        ],
+        default=_display_width("Source"),
+    )
+
+    def label(entry: SourceSkill) -> str:
+        skill = _escape_control_characters(entry.name)
+        source = _source_skill_picker_source_label(entry)
+        description = _escape_control_characters(entry.description)
+        return (
+            f"{_pad_display_width(skill, skill_width)}  "
+            f"{_pad_display_width(source, source_width)}  "
+            f"{description}"
+        )
+
+    return label
+
+
+def _source_skill_picker_source_label(entry: SourceSkill) -> str:
+    if entry.is_default_source_path:
+        return _escape_control_characters(entry.repo_id)
+    return _escape_control_characters(
+        f"{entry.repo_id}:{entry.source_relative_path}"
+    )
+
+
+def _pad_display_width(value: str, width: int) -> str:
+    return value + " " * max(width - _display_width(value), 0)
 
 
 def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:
