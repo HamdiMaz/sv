@@ -25,6 +25,8 @@ Runner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]
 
 DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 60
 _COMMAND_TIMEOUT_EXIT_CODE = 124
+_ALLOWED_GIT_PROTOCOLS = "file:https:ssh"
+_ALLOWED_REPO_URL_SCHEMES = frozenset(_ALLOWED_GIT_PROTOCOLS.split(":"))
 _MAX_GITHUB_MATERIALIZATION_FILES = 1000
 _MAX_GITHUB_MATERIALIZATION_ENTRIES = 2000
 _MAX_GITHUB_MATERIALIZATION_BYTES = 10 * 1024 * 1024
@@ -875,6 +877,7 @@ def _noninteractive_subprocess_env() -> dict[str, str]:
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSH_COMMAND"] = _ssh_batch_mode_command(env.get("GIT_SSH_COMMAND"))
     env["GH_PROMPT_DISABLED"] = "1"
+    env["GIT_ALLOW_PROTOCOL"] = _ALLOWED_GIT_PROTOCOLS
     return env
 
 
@@ -1484,11 +1487,14 @@ def _validate_repo_url(repo_url: str) -> None:
     if any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in repo_url):
         raise SvError("Invalid source repo: repo cannot contain control characters.")
     parsed = urlsplit(repo_url)
-    if parsed.scheme == "http":
+    scheme = parsed.scheme.lower()
+    if scheme == "http":
         raise SvError("Invalid source repo: repo URL must use HTTPS instead of cleartext HTTP.")
+    if scheme and scheme not in _ALLOWED_REPO_URL_SCHEMES:
+        raise SvError("Invalid source repo: repo URL scheme is not supported.")
     if parsed.password is not None:
         raise SvError("Invalid source repo: repo URL cannot contain credentials.")
-    if parsed.scheme in {"http", "https"} and parsed.username is not None:
+    if scheme in {"http", "https"} and parsed.username is not None:
         raise SvError("Invalid source repo: repo URL cannot contain credentials.")
 
 

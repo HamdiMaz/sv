@@ -30,6 +30,7 @@ _GITHUB_SSH_URL = re.compile(
 )
 _SAFE_ID_PART = re.compile(r"[^A-Za-z0-9_.-]+")
 _REPO_ID_ALLOWED = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
+_ALLOWED_REPO_URL_SCHEMES = frozenset({"file", "https", "ssh"})
 
 
 @dataclass(frozen=True)
@@ -102,12 +103,7 @@ def normalize_repo(repo: str) -> str:
     if _contains_control_character(value):
         raise ValueError("repo cannot contain control characters")
     parsed = urlsplit(value)
-    if value.startswith("git@") or parsed.scheme.lower() in {
-        "https",
-        "http",
-        "ssh",
-        "file",
-    }:
+    if value.startswith("git@") or parsed.scheme:
         _validate_repo_url_safety(value)
         return value
     local_path = _resolve_local_repo_path(value)
@@ -458,11 +454,14 @@ def _contains_control_character(value: str) -> bool:
 
 def _validate_repo_url_safety(value: str) -> None:
     parsed = urlsplit(value)
-    if parsed.scheme == "http":
+    scheme = parsed.scheme.lower()
+    if scheme == "http":
         raise ValueError("repo URL must use HTTPS instead of cleartext HTTP")
+    if scheme and scheme not in _ALLOWED_REPO_URL_SCHEMES:
+        raise ValueError("repo URL scheme is not supported")
     if parsed.password is not None:
         raise ValueError("repo URL cannot contain credentials")
-    if parsed.scheme in {"http", "https"} and parsed.username is not None:
+    if scheme in {"http", "https"} and parsed.username is not None:
         raise ValueError("repo URL cannot contain credentials")
 
 

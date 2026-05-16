@@ -191,6 +191,9 @@ def test_normalize_repo_rejects_empty_value():
         ("https://example.com/skills\trepo.git", "repo cannot contain control characters"),
         ("https://example.com/skills\nrepo.git", "repo cannot contain control characters"),
         ("\x00repo", "repo cannot contain control characters"),
+        ("git://github.com/HamdiMaz/Skills.git", "repo URL scheme is not supported"),
+        ("ext::sh -c echo-pwn", "repo URL scheme is not supported"),
+        ("foo::bar", "repo URL scheme is not supported"),
     ],
 )
 def test_repo_parser_invalid_input_matrix(raw_repo: str, match: str):

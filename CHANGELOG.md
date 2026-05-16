@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed repo URL handling to reject unsupported Git URL schemes such as `git://`, `ext::`, and other remote-helper forms while constraining Git subprocess protocols to `file`, `https`, and `ssh`.
 - Fixed stale README and command docs for explicit first-run source configuration, `sv add --all`, safe `sv update`, and missing Epic 1 commands/flags.
 - Fixed `sv status` to avoid refreshing unreachable configured sources when the current project or skill-vault has no managed skills.
 - Fixed source refresh commands run from `$HOME` to update the global source-state manifest when it is not occupied by a home-project manifest.

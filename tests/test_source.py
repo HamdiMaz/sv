@@ -1460,6 +1460,7 @@ def test_default_runner_uses_timeout_and_noninteractive_environment(monkeypatch)
     assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert kwargs["env"]["GIT_SSH_COMMAND"] == "ssh -o BatchMode=yes"
     assert kwargs["env"]["GH_PROMPT_DISABLED"] == "1"
+    assert kwargs["env"]["GIT_ALLOW_PROTOCOL"] == "file:https:ssh"
 
 
 def test_default_runner_reports_timeouts_as_command_failures(monkeypatch):
@@ -1658,6 +1659,9 @@ def test_ensure_source_repo_rejects_option_like_repo_url(tmp_path: Path):
         ("HTTPS://token@example.com/skills.git", "repo URL cannot contain credentials"),
         ("ssh://git:secret@example.com/skills.git", "repo URL cannot contain credentials"),
         ("SSH://git:secret@example.com/skills.git", "repo URL cannot contain credentials"),
+        ("git://example.com/skills.git", "repo URL scheme is not supported"),
+        ("ext::sh -c echo-pwn", "repo URL scheme is not supported"),
+        ("foo::bar", "repo URL scheme is not supported"),
     ],
 )
 def test_ensure_source_repo_rejects_cleartext_and_credentialed_repo_urls(
