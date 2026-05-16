@@ -160,7 +160,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Global source manifest | Fixed (FIXED) | Refresh state records the successful lightweight backend and remote index hash, with legacy missing backend values rendered as `unknown` in status output. |
 | Explicit `--skills-path` | Implemented | Config validation rejects unsafe paths. |
 | `.sv/index.toml` parser/writer | Implemented | Duplicate names with paths are supported. |
-| `sv index` scanner | Partial | Recursive scanner exists, but `PLAN.md` requires include/exclude path flags and config equivalents; parser exposes no flags (`src/sv/cli.py:147-153`, `src/sv/index.py:161`). |
+| `sv index` scanner | Fixed (FIXED) | Recursive scanner supports repeatable `--include`/`--exclude` path flags plus `.sv/index-config.toml` defaults, with tests covering CLI/config integration and scan filtering. |
 | README generated table | Implemented | Marker-only updates are present. |
 | `sv init` | Partial | Works in simple current-folder cases, but nested folder inside an existing worktree is broken. |
 | Vault mode targeting | Partially implemented | Root-vault add/remove exists. Nested init/context bug can make vault mode invisible. |
