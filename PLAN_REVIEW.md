@@ -162,7 +162,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | `.sv/index.toml` parser/writer | Implemented | Duplicate names with paths are supported. |
 | `sv index` scanner | Fixed (FIXED) | Recursive scanner supports repeatable `--include`/`--exclude` path flags plus `.sv/index-config.toml` defaults, with tests covering CLI/config integration and scan filtering. |
 | README generated table | Implemented | Marker-only updates are present. |
-| `sv init` | Partial | Works in simple current-folder cases, but nested folder inside an existing worktree is broken. |
+| `sv init` | Implemented (FIXED) | Nested folder initialization inside an existing worktree now creates a real, detectable skill-vault Git repository; regression tests cover both init and status detection. |
 | Vault mode targeting | Partially implemented | Root-vault add/remove exists. Nested init/context bug can make vault mode invisible. |
 | Lightweight backend order | Fixed (FIXED) | `source_backends_for_repo()` now keeps GitHub API backends first even when the local cache path already exists, so later refreshes still try `gh api -> HTTPS -> Git`. |
 | Bounded generic discovery | Mostly implemented | Default roots and configured roots exist. |
