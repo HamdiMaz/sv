@@ -157,7 +157,7 @@ At minimum, partial failures should be surfaced to the user. For install-affecti
 | Source path-aware catalog | Fixed (FIXED) | Same-name/source-path models exist, and indexed catalog entries now reject mismatched skill names and `source_path` folder names before list/search expose them. |
 | Canonical project manifest | Fixed (FIXED) | New `.sv/manifest.toml` support exists, and project add/remove/sync/update operations now target the detected repository root consistently with status. |
 | Legacy Pi manifest migration | Fixed (FIXED) | Added subdirectory sync regression coverage proving legacy `.pi/skills/.sv-manifest.toml` origins are read from the detected repo root and migrated into the canonical `.sv/manifest.toml`. |
-| Global source manifest | Fixed (FIXED) | Refresh state records the successful lightweight backend and remote index hash, with legacy missing backend values rendered as `unknown` in status output. |
+| Global source manifest | Fixed (FIXED) | Refresh state records the successful lightweight backend and remote index hash, including source commands run from `$HOME` when the global manifest path is not occupied by a project manifest; legacy missing backend values render as `unknown` in status output. |
 | Explicit `--skills-path` | Fixed (FIXED) | Config validation rejects unsafe paths, and adding `--skills-path` to an already configured repo now merges the new bounded discovery roots instead of ignoring them. |
 | `.sv/index.toml` parser/writer | Implemented (FIXED) | Duplicate names with paths are supported. |
 | `sv index` scanner | Fixed (FIXED) | Recursive scanner supports repeatable `--include`/`--exclude` path flags plus `.sv/index-config.toml` defaults, with tests covering CLI/config integration and scan filtering. |

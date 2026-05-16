@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed source refresh commands run from `$HOME` to update the global source-state manifest when it is not occupied by a home-project manifest.
 - Fixed `sv status` from nested non-Git projects with only a canonical `.sv/manifest.toml` to report project skill state instead of global source status, and updated manifest documentation to reference `.sv/manifest.toml`.
 - Documented the `sv repo -l` and `svx <repo>` aliases in the command reference and marked the PLAN alignment review item fixed.
 - Marked the `.sv/index.toml` parser/writer PLAN alignment review item fixed after verifying parser, deterministic writer, duplicate-name, and future-schema coverage.

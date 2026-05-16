@@ -664,7 +664,7 @@ def _find_nearest_git_root(cwd: Path) -> Path | None:
 
 
 def _should_record_global_source_state(cwd: Path, home: Path) -> bool:
-    return cwd.resolve() != home.resolve()
+    return True
 
 
 def _load_config_for_source_command(paths: SvPaths) -> SvConfig:
@@ -1203,12 +1203,22 @@ def _remove_global_source_state(paths: SvPaths, repo_id: str) -> None:
 def _load_global_manifest_for_source_state(
     paths: SvPaths,
 ) -> dict[str, GlobalSourceState] | None:
+    if _global_manifest_path_has_project_only_shape(paths):
+        return None
     try:
         return load_global_manifest(paths)
     except SvError as exc:
         if _PROJECT_STATE_IN_GLOBAL_MANIFEST in str(exc):
             return None
         raise
+
+
+def _global_manifest_path_has_project_only_shape(paths: SvPaths) -> bool:
+    path = paths.global_manifest_file
+    if not path.is_file():
+        return False
+    data = load_toml_document(path, "sv manifest")
+    return "sources" not in data and "skills" not in data
 
 
 def _git_source_metadata(repo_path: Path) -> tuple[str | None, str | None]:

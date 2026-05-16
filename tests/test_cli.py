@@ -1502,9 +1502,9 @@ def test_cli_list_and_search_without_source_config_print_guidance(tmp_path: Path
     assert "No skill source repos are configured" in search_result.stderr
 
 
-def test_cli_global_status_records_not_run_at_home(tmp_path: Path):
+def test_cli_global_status_records_source_state_in_every_cwd(tmp_path: Path):
     assert cli_module._should_record_global_source_state(tmp_path / "project", tmp_path / "home")
-    assert not cli_module._should_record_global_source_state(tmp_path / "home", tmp_path / "home")
+    assert cli_module._should_record_global_source_state(tmp_path / "home", tmp_path / "home")
 
 
 def test_cli_prompt_for_initial_sources_handles_cancel_custom_repo_and_retries(

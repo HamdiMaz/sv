@@ -253,6 +253,25 @@ def test_lightweight_refresh_records_backend_and_index_hash_for_equivalent_sourc
     assert states[alias.id].health_details == "catalog contains 1 skills"
 
 
+def test_list_from_home_without_project_manifest_records_global_source_state(
+    tmp_path: Path, run_sv
+) -> None:
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    configure_source(source, home, home)
+
+    result = run_sv(["list"], cwd=home, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    states = load_global_manifest(SvPaths.from_home(home))
+    assert len(states) == 1
+    state = next(iter(states.values()))
+    assert state.repo_url == str(source)
+    assert state.last_refresh_status == "ok"
+    assert state.catalog_skill_count == 2
+
+
 def test_failed_refresh_records_global_source_health(
     tmp_path: Path, run_sv
 ) -> None:
@@ -298,6 +317,21 @@ def test_repo_remove_prunes_global_source_state(tmp_path: Path, run_sv) -> None:
 
     assert result.exit_code == 0
     assert load_global_manifest(paths) == {}
+
+
+def test_list_in_empty_home_project_does_not_overwrite_project_manifest(
+    tmp_path: Path, run_sv
+) -> None:
+    home = tmp_path / "home"
+    source = make_source_repo(tmp_path)
+    configure_source(source, home, home)
+    save_manifest(home / ".pi" / "skills", {})
+    project_manifest_text = (home / ".sv" / "manifest.toml").read_text()
+
+    result = run_sv(["list"], cwd=home, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert (home / ".sv" / "manifest.toml").read_text() == project_manifest_text
 
 
 def test_list_in_home_project_does_not_overwrite_project_manifest(

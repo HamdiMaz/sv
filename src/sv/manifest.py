@@ -173,6 +173,8 @@ def save_global_manifest(
     try:
         _reject_symlinked_manifest_dir(path.parent)
         lines: list[str] = [f"schema_version = {MANIFEST_SCHEMA_VERSION}"]
+        if not states:
+            lines.append("sources = []")
         for state in sorted(states.values(), key=lambda item: item.repo_id):
             lines.append("")
             lines.append("[[sources]]")

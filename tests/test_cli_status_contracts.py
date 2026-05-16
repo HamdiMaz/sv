@@ -302,7 +302,7 @@ def test_status_at_home_with_global_manifest_shows_global_source_health(
     assert_no_raw_control_characters(result.stderr)
 
 
-def test_status_at_home_with_schema_only_global_manifest_and_pi_skills_is_global(
+def test_status_at_home_with_empty_global_manifest_and_pi_skills_is_global(
     tmp_path: Path, run_sv
 ):
     home = tmp_path / "home"
