@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Marked the `sv status` PLAN alignment review item fixed after confirming project, vault, and global status handlers now cover backend/index reporting and legacy missing-backend states.
 - Added subdirectory regression coverage for project remove, sync, and update targeting the detected repository root.
 - Marked canonical project manifest PLAN alignment fixed after verifying subdirectory project operations target the detected repository root.
 - Marked the `sv index` PLAN alignment review item fixed after verifying include/exclude CLI flags and `.sv/index-config.toml` scan defaults are implemented and covered.
