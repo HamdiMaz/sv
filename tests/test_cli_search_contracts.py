@@ -53,8 +53,8 @@ def test_search_uses_github_index_without_cloning_or_downloading_skill_folders(
     name = "alpha"
     description = "Alpha remote index skill."
     source_path = "skills/alpha"
-    content_hash = "sha256:alpha"
-    skill_file_hash = "sha256:alpha-skill"
+    content_hash = "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+    skill_file_hash = "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf"
     """
     calls: list[tuple[list[str], Path | None]] = []
 
@@ -124,8 +124,8 @@ def test_search_with_no_matches_prints_empty_message(
     name = "alpha"
     description = "Alpha remote index skill."
     source_path = "skills/alpha"
-    content_hash = "sha256:alpha"
-    skill_file_hash = "sha256:alpha-skill"
+    content_hash = "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+    skill_file_hash = "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf"
     """
 
     def git_runner(args, cwd=None):
@@ -181,15 +181,15 @@ def test_search_matches_description_repo_id_and_source_path_with_ranked_output(
     name = "doc-helper"
     description = "Writes docs for release notes."
     source_path = "skills/doc-helper"
-    content_hash = "sha256:doc"
-    skill_file_hash = "sha256:doc-skill"
+    content_hash = "sha256:139d544b821b13ebea14f1b0fe18577222e415c2966e3a3511c4196055232202"
+    skill_file_hash = "sha256:83cdead05d09802d969010b7ebb4d71654a29fd6582029e20ec151c211f0f463"
 
     [[skills]]
     name = "other"
     description = "Unrelated skill."
     source_path = "skills/other"
-    content_hash = "sha256:other"
-    skill_file_hash = "sha256:other-skill"
+    content_hash = "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa"
+    skill_file_hash = "sha256:33733b9c9a59de37251edb1af6d3ecb3b6551dc5a40e5b37aeea50b14d537778"
     """
     path_index = """
     schema_version = 1
@@ -201,8 +201,8 @@ def test_search_matches_description_repo_id_and_source_path_with_ranked_output(
     name = "deep-skill"
     description = "Specialized helper."
     source_path = "packages/pi/skills/deep-skill"
-    content_hash = "sha256:deep"
-    skill_file_hash = "sha256:deep-skill"
+    content_hash = "sha256:74611c1d6455b534323a21f8133a6f43dc3a8188e7b946f96dcc28dde932fcb2"
+    skill_file_hash = "sha256:0d3a78084b5d74bb21cb33cc0982b382fba1c43eabfb584a048219a23f2eef40"
     """
 
     def git_runner(args, cwd=None):

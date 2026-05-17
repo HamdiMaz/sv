@@ -383,9 +383,12 @@ def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
         r"alpha\\beta",
         "repo:skill",
         "bad\x1bname",
+        "-option-like",
+        "zero\u200bwidth",
+        "rtl\u202eoverride",
     ],
 )
-def test_normalize_skill_name_rejects_path_like_skill_names(skill: str):
+def test_normalize_skill_name_rejects_path_like_and_deceptive_skill_names(skill: str):
     with pytest.raises(SvError, match="Invalid skill name"):
         normalize_skill_name(skill)
 
@@ -402,8 +405,8 @@ def test_project_private_source_hash_helpers_prefer_known_values_and_handle_miss
         repo_path=entry.repo_path,
         source_path=entry.source_path,
         source_relative_path=entry.source_relative_path,
-        source_content_hash="sha256:known-content",
-        source_skill_file_hash="sha256:known-skill-file",
+        source_content_hash="sha256:c651ccb96b0c0e490de4cc12b9b46d643e6dba87840fab27e2c8d4d5cc2037fa",
+        source_skill_file_hash="sha256:1b19abd1bfc5c54a3807a697a0f3b4b26d4c670926b8077aef876e87bab02bdb",
     )
     missing = SourceSkill(
         name="missing",
@@ -416,10 +419,10 @@ def test_project_private_source_hash_helpers_prefer_known_values_and_handle_miss
     )
 
     assert project_module._known_source_content_hash(None) is None
-    assert project_module._known_source_content_hash(known) == "sha256:known-content"
+    assert project_module._known_source_content_hash(known) == "sha256:c651ccb96b0c0e490de4cc12b9b46d643e6dba87840fab27e2c8d4d5cc2037fa"
     assert project_module._known_source_skill_file_hash(None) is None
-    assert project_module._known_source_skill_file_hash(known) == "sha256:known-skill-file"
-    assert project_module._available_source_content_hash(known) == "sha256:known-content"
+    assert project_module._known_source_skill_file_hash(known) == "sha256:1b19abd1bfc5c54a3807a697a0f3b4b26d4c670926b8077aef876e87bab02bdb"
+    assert project_module._available_source_content_hash(known) == "sha256:c651ccb96b0c0e490de4cc12b9b46d643e6dba87840fab27e2c8d4d5cc2037fa"
     assert project_module._available_source_content_hash(missing) is None
 
 

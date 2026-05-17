@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from sv.errors import SvError
+from sv.hashformat import SHA256_DIGEST_DESCRIPTION, is_sha256_digest
 from sv.tomlutil import (
     atomic_write_text,
     load_toml_document,
@@ -59,6 +60,8 @@ class ManifestEntry:
     orphan: bool = False
     modified: bool = False
     update_available: bool = False
+    target_missing: bool = False
+    target_invalid: bool = False
 
     def __post_init__(self) -> None:
         if self.target_path is None:
@@ -143,10 +146,10 @@ def _parse_global_source_states(
             source_tree=_optional_global_string(
                 source_item.get("source_tree"), "source_tree", index, path
             ),
-            index_hash=_optional_global_string(
+            index_hash=_optional_global_hash(
                 source_item.get("index_hash"), "index_hash", index, path
             ),
-            catalog_hash=_optional_global_string(
+            catalog_hash=_optional_global_hash(
                 source_item.get("catalog_hash"), "catalog_hash", index, path
             ),
             catalog_skill_count=_optional_global_int(
@@ -175,7 +178,10 @@ def save_global_manifest(
         lines: list[str] = [f"schema_version = {MANIFEST_SCHEMA_VERSION}"]
         if not states:
             lines.append("sources = []")
-        for state in sorted(states.values(), key=lambda item: item.repo_id):
+        for index, state in enumerate(
+            sorted(states.values(), key=lambda item: item.repo_id), start=1
+        ):
+            _validate_global_source_state_hashes(state, index, path)
             lines.append("")
             lines.append("[[sources]]")
             _append_global_source_state(lines, state)
@@ -228,6 +234,41 @@ def _optional_global_string(
     if value is None:
         return None
     return _expect_global_string(value, field, index, path)
+
+
+def _optional_global_hash(
+    value: Any, field: str, index: int, path: Path
+) -> str | None:
+    hash_value = _optional_global_string(value, field, index, path)
+    if hash_value is None:
+        return None
+    _validate_hash_field(
+        hash_value,
+        field,
+        index,
+        path,
+        GLOBAL_MANIFEST_DOCUMENT,
+        entry_label="source entry",
+    )
+    return hash_value
+
+
+def _validate_global_source_state_hashes(
+    state: GlobalSourceState, index: int, path: Path
+) -> None:
+    for field, value in (
+        ("index_hash", state.index_hash),
+        ("catalog_hash", state.catalog_hash),
+    ):
+        if value is not None:
+            _validate_hash_field(
+                value,
+                field,
+                index,
+                path,
+                GLOBAL_MANIFEST_DOCUMENT,
+                entry_label="source entry",
+            )
 
 
 def _optional_global_int(value: Any, field: str, index: int, path: Path) -> int | None:
@@ -385,28 +426,28 @@ def _parse_manifest_entries(
                     path,
                     document_name,
                 ),
-                source_content_hash=_optional_string(
+                source_content_hash=_optional_hash(
                     skill_item.get("source_content_hash"),
                     "source_content_hash",
                     index,
                     path,
                     document_name,
                 ),
-                source_skill_file_hash=_optional_string(
+                source_skill_file_hash=_optional_hash(
                     skill_item.get("source_skill_file_hash"),
                     "source_skill_file_hash",
                     index,
                     path,
                     document_name,
                 ),
-                installed_content_hash=_optional_string(
+                installed_content_hash=_optional_hash(
                     skill_item.get("installed_content_hash"),
                     "installed_content_hash",
                     index,
                     path,
                     document_name,
                 ),
-                local_content_hash=_optional_string(
+                local_content_hash=_optional_hash(
                     skill_item.get("local_content_hash"),
                     "local_content_hash",
                     index,
@@ -499,6 +540,45 @@ def _optional_string(
     return _expect_string(value, field, index, path, document_name)
 
 
+def _optional_hash(
+    value: Any, field: str, index: int, path: Path, document_name: str
+) -> str | None:
+    hash_value = _optional_string(value, field, index, path, document_name)
+    if hash_value is None:
+        return None
+    _validate_hash_field(hash_value, field, index, path, document_name)
+    return hash_value
+
+
+def _validate_manifest_entry_hashes(
+    entry: ManifestEntry, index: int, path: Path, document_name: str
+) -> None:
+    for field, value in (
+        ("source_content_hash", entry.source_content_hash),
+        ("source_skill_file_hash", entry.source_skill_file_hash),
+        ("installed_content_hash", entry.installed_content_hash),
+        ("local_content_hash", entry.local_content_hash),
+    ):
+        if value is not None:
+            _validate_hash_field(value, field, index, path, document_name)
+
+
+def _validate_hash_field(
+    value: str,
+    field: str,
+    index: int,
+    path: Path,
+    document_name: str,
+    *,
+    entry_label: str = "skill entry",
+) -> None:
+    if not is_sha256_digest(value):
+        raise SvError(
+            f"Invalid {document_name} at {path}: {entry_label} {index} field "
+            f"{field!r} must be a {SHA256_DIGEST_DESCRIPTION}."
+        )
+
+
 def _optional_bool(
     value: Any, field: str, index: int, path: Path, document_name: str
 ) -> bool:
@@ -514,7 +594,12 @@ def save_manifest(project_skills_dir: Path, entries: dict[str, ManifestEntry]) -
     try:
         _reject_symlinked_manifest_dir(path.parent)
         lines: list[str] = [f"schema_version = {MANIFEST_SCHEMA_VERSION}"]
-        for entry in (entries[name] for name in sorted(entries)):
+        for index, entry in enumerate(
+            (entries[name] for name in sorted(entries)), start=1
+        ):
+            _validate_manifest_entry_hashes(
+                entry, index, path, CANONICAL_MANIFEST_DOCUMENT
+            )
             lines.append("")
             lines.append("[[skills]]")
             _append_entry(lines, entry)

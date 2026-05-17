@@ -39,6 +39,33 @@ def _manifest_entry(skill: str) -> ManifestEntry:
     )
 
 
+def _vault_manifest_entry(skill: str) -> ManifestEntry:
+    return ManifestEntry(
+        name=skill,
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        source_path=f"skills/{skill}",
+        description=f"{skill.title()} skill.",
+        target_kind="skill-vault",
+        target_agent=None,
+        target_path=f"skills/{skill}",
+    )
+
+
+def _write_empty_vault_index(vault: Path) -> None:
+    (vault / ".git").mkdir(parents=True)
+    index_file = vault / ".sv" / "index.toml"
+    index_file.parent.mkdir(exist_ok=True)
+    index_file.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "skills = []\n",
+        encoding="utf-8",
+    )
+
+
 def test_remove_missing_skill_fails_without_git_or_mutation(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -327,6 +354,92 @@ def test_remove_all_yes_removes_only_manifest_managed_skills(tmp_path: Path, run
     assert "Removed Pi skill 'alpha'" in result.stdout
     assert "Removed Pi skill 'beta'" in result.stdout
     assert "manual" not in result.stdout
+
+
+def test_remove_all_yes_prunes_manifest_entries_for_missing_targets(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    alpha = project_skills / "alpha"
+    alpha.mkdir(parents=True)
+    (alpha / "notes.md").write_text("alpha\n")
+    save_manifest(
+        project_skills,
+        {"alpha": _manifest_entry("alpha"), "beta": _manifest_entry("beta")},
+    )
+
+    result = run_sv(
+        ["remove", "--all", "--yes"],
+        cwd=project,
+        home=home,
+        git_runner=_forbid_git_calls,
+    )
+
+    assert result.exit_code == 0
+    assert not alpha.exists()
+    assert load_manifest(project_skills) == {}
+    assert "Removed Pi skill 'alpha'" in result.stdout
+    assert "Pruned missing Pi skill 'beta'" in result.stdout
+
+
+def test_remove_all_yes_prunes_manifest_entries_for_invalid_targets_without_deleting_file(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    target = project_skills / "alpha"
+    target.parent.mkdir(parents=True)
+    target.write_text("not a skill directory\n", encoding="utf-8")
+    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    result = run_sv(
+        ["remove", "--all", "--yes"],
+        cwd=project,
+        home=home,
+        git_runner=_forbid_git_calls,
+    )
+
+    assert result.exit_code == 0
+    assert target.is_file()
+    assert target.read_text(encoding="utf-8") == "not a skill directory\n"
+    assert load_manifest(project_skills) == {}
+    assert "Pruned invalid Pi skill 'alpha'" in result.stdout
+
+
+
+def test_remove_all_yes_prunes_vault_manifest_entries_for_missing_targets(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    _write_empty_vault_index(vault)
+    vault_skills = vault / "skills"
+    alpha = vault_skills / "alpha"
+    alpha.mkdir(parents=True)
+    (alpha / "notes.md").write_text("alpha\n")
+    save_manifest(
+        vault_skills,
+        {
+            "alpha": _vault_manifest_entry("alpha"),
+            "beta": _vault_manifest_entry("beta"),
+        },
+    )
+
+    result = run_sv(
+        ["remove", "--all", "--yes"],
+        cwd=vault,
+        home=home,
+        git_runner=_forbid_git_calls,
+    )
+
+    assert result.exit_code == 0
+    assert not alpha.exists()
+    assert load_manifest(vault_skills) == {}
+    assert "Removed vault skill 'alpha'" in result.stdout
+    assert "Pruned missing vault skill 'beta'" in result.stdout
 
 
 def test_remove_interactive_lists_managed_rows_and_ignores_unmanaged(tmp_path: Path, run_sv):

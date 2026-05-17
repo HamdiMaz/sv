@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 
 from sv.catalog import normalize_source_relative_path
 from sv.errors import SvError
+from sv.hashformat import SHA256_DIGEST_DESCRIPTION, is_sha256_digest
 from sv.hashing import sha256_file, sha256_skill_directory
 from sv.project import normalize_skill_name
 from sv.skills import InvalidSkillError, parse_skill_file
@@ -550,10 +551,10 @@ def _parse_skill_entries(raw_skills: Any, path: Path) -> tuple[IndexSkillEntry, 
                     skill_item.get("description"), "description", index, path
                 ),
                 source_path=normalized_source_path,
-                content_hash=_expect_skill_string(
+                content_hash=_expect_skill_hash(
                     skill_item.get("content_hash"), "content_hash", index, path
                 ),
-                skill_file_hash=_expect_skill_string(
+                skill_file_hash=_expect_skill_hash(
                     skill_item.get("skill_file_hash"), "skill_file_hash", index, path
                 ),
             )
@@ -599,8 +600,12 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
     for index, entry in enumerate(document.skills, start=1):
         _validate_skill_string(entry.name, "name", index, path)
         _validate_skill_string(entry.description, "description", index, path)
-        _validate_skill_string(entry.content_hash, "content_hash", index, path)
-        _validate_skill_string(entry.skill_file_hash, "skill_file_hash", index, path)
+        content_hash = _validate_skill_hash(
+            entry.content_hash, "content_hash", index, path
+        )
+        skill_file_hash = _validate_skill_hash(
+            entry.skill_file_hash, "skill_file_hash", index, path
+        )
         _validate_skill_string(entry.source_path, "source_path", index, path)
         normalized_name = _normalize_index_skill_name(entry.name, index, path)
         try:
@@ -615,8 +620,8 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
                 name=normalized_name,
                 description=entry.description,
                 source_path=source_path,
-                content_hash=entry.content_hash,
-                skill_file_hash=entry.skill_file_hash,
+                content_hash=content_hash,
+                skill_file_hash=skill_file_hash,
             )
         )
     return entries
@@ -673,6 +678,22 @@ def _expect_skill_string(value: Any, field: str, index: int, path: Path) -> str:
             f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field {field!r} must be a string."
         )
     _validate_index_field_length(value, field, path, index=index)
+    return value
+
+
+def _expect_skill_hash(value: Any, field: str, index: int, path: Path) -> str:
+    return _validate_skill_hash(
+        _expect_skill_string(value, field, index, path), field, index, path
+    )
+
+
+def _validate_skill_hash(value: str, field: str, index: int, path: Path) -> str:
+    _validate_skill_string(value, field, index, path)
+    if not is_sha256_digest(value):
+        raise SvError(
+            f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field "
+            f"{field!r} must be a {SHA256_DIGEST_DESCRIPTION}."
+        )
     return value
 
 

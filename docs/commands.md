@@ -7,7 +7,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | Command | Use when | Notes |
 | --- | --- | --- |
 | `sv init [folder]` | You want to create a skill-vault repository scaffold. | Initializes the current directory or the optional target folder and makes nested vaults detectable as Git repos. |
-| `sv status` | You want local managed-skill state. | Reports modified, update-available, orphan, index, and README status for projects, skill-vaults, or global source context. |
+| `sv status` | You want local managed-skill state. | Reports modified, update-available, orphan, missing/invalid target, index, and README status for projects, skill-vaults, or global source context. Global source index/catalog hashes are abbreviated to the first 12 digest characters for readable tables; full hashes stay in `~/.sv/manifest.toml`. |
 | `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values, showing each duplicate skill name once per group. |
 | `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser so Enter can show details. |
 | `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
@@ -16,8 +16,8 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |
 | `sv add --all --repo <repo>` | You want every non-conflicting skill from one source. | Restricts bulk add to the configured repo ID, useful when other repos contain duplicate skill names. |
 | `sv remove <skill>` | You want to remove one project skill. | Updates the canonical `.sv/manifest.toml` project manifest. |
-| `sv remove -l` | You want to remove several project skills interactively. | Lists installed project skills, not source skills. |
-| `sv remove --all` | You want to remove every sv-managed local skill. | Removes managed skills only; manual/unmanaged skill folders are kept. |
+| `sv remove -l` | You want to remove several sv-managed entries interactively. | Lists managed local skills, not source skills, and may include stale missing/invalid manifest entries so they can be pruned. |
+| `sv remove --all` | You want to remove every sv-managed local skill. | Removes managed skills only; manual/unmanaged skill folders are kept. Confirmed bulk removal also prunes stale manifest entries whose managed skill folder is missing or no longer a directory. |
 | `sv remove --all --yes` | You want non-interactive bulk removal. | Confirms bulk removal without prompting, which is required for non-TTY `--all` use. |
 | `sv update` | You want a safe refresh of sources and unchanged local skills. | Refreshes configured sources, updates only managed skill folders without local modifications, and preserves local edits by marking modified skills with update-available state. Uses the same trusted-index optimization as sync. |
 | `sv sync` | You want installed skills force-refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |

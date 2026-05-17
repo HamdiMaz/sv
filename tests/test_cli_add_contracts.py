@@ -453,8 +453,8 @@ def test_add_validates_indexed_materialized_skill_before_mutating_project(
         'name = "alpha"\n'
         'description = "Indexed alpha."\n'
         'source_path = "skills/alpha"\n'
-        'content_hash = "sha256:index"\n'
-        'skill_file_hash = "sha256:index-skill"\n'
+        'content_hash = "sha256:1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6"\n'
+        'skill_file_hash = "sha256:85d1715969d51968062095f0adfde266871fb5d5306daf7b9427670c2492d097"\n'
     )
     run_git(["add", ".sv/index.toml", "skills/alpha/SKILL.md"], source)
     run_git(["commit", "-m", "add invalid indexed alpha"], source)

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed `sv status` and bulk `sv remove` to surface managed manifest entries whose local skill folders were deleted or replaced manually, marking them as `missing`/`invalid target`, avoiding unnecessary source refreshes when every target is unavailable, and pruning stale manifest entries during confirmed bulk removal.
 - Fixed automatic local index refreshes and skill-vault freshness checks to honor persistent `.sv/index-config.toml` include/exclude paths, reject symlinked scan configs, symlinked include roots, and symlinked existing index files before mutation/indexing, and compare freshness in canonical index order.
 - Fixed source config loading and `sv repo add` to reject ambiguous repo aliases that collide with a different primary repo ID.
 - Updated README and command docs to match current sync safety behavior and clarify persistent index scan config reuse.

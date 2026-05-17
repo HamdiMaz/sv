@@ -152,15 +152,15 @@ def test_build_source_catalog_from_backend_uses_index_without_reading_skill_file
         name = "alpha"
         description = "Alpha from index."
         source_path = "skills/alpha"
-        content_hash = "sha256:alpha"
-        skill_file_hash = "sha256:alpha-skill"
+        content_hash = "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+        skill_file_hash = "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf"
 
         [[skills]]
         name = "deep"
         description = "Deep from index."
         source_path = "packages/pi/skills/deep"
-        content_hash = "sha256:deep"
-        skill_file_hash = "sha256:deep-skill"
+        content_hash = "sha256:74611c1d6455b534323a21f8133a6f43dc3a8188e7b946f96dcc28dde932fcb2"
+        skill_file_hash = "sha256:0d3a78084b5d74bb21cb33cc0982b382fba1c43eabfb584a048219a23f2eef40"
         """
     )
 
@@ -178,12 +178,12 @@ def test_build_source_catalog_from_backend_uses_index_without_reading_skill_file
         "indexed-backend",
     ]
     assert [entry.source_content_hash for entry in result.entries] == [
-        "sha256:alpha",
-        "sha256:deep",
+        "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8",
+        "sha256:74611c1d6455b534323a21f8133a6f43dc3a8188e7b946f96dcc28dde932fcb2",
     ]
     assert [entry.source_skill_file_hash for entry in result.entries] == [
-        "sha256:alpha-skill",
-        "sha256:deep-skill",
+        "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf",
+        "sha256:0d3a78084b5d74bb21cb33cc0982b382fba1c43eabfb584a048219a23f2eef40",
     ]
     assert backend.read_file_calls == []
     assert backend.list_candidate_calls == 0
@@ -206,8 +206,8 @@ def test_build_source_catalog_from_backend_rejects_index_name_source_path_mismat
         name = "alpha"
         description = "Alpha from index."
         source_path = "skills/beta"
-        content_hash = "sha256:alpha"
-        skill_file_hash = "sha256:alpha-skill"
+        content_hash = "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+        skill_file_hash = "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf"
         """
     )
 

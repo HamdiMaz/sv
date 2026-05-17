@@ -29,6 +29,12 @@ def _write_skill(skill_dir: Path, name: str, description: str = "Alpha skill.") 
     (skill_dir / "notes.md").write_text(f"{name}\n", encoding="utf-8")
 
 
+def _valid_hash(seed: str) -> str:
+    import hashlib
+
+    return f"sha256:{hashlib.sha256(seed.encode()).hexdigest()}"
+
+
 def test_scan_repo_for_index_recursively_includes_valid_skills_and_skips_build_dirs(
     tmp_path: Path,
 ):
@@ -166,8 +172,8 @@ def test_load_index_parses_skill_vault_file(tmp_path: Path):
         'name = "find-docs"\n'
         'description = "Retrieves docs."\n'
         'source_path = "skills/find-docs"\n'
-        'content_hash = "sha256:content"\n'
-        'skill_file_hash = "sha256:skill-file"\n'
+        'content_hash = "sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73"\n'
+        'skill_file_hash = "sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926"\n'
     )
 
     assert load_index(path) == IndexDocument(
@@ -180,11 +186,59 @@ def test_load_index_parses_skill_vault_file(tmp_path: Path):
                 name="find-docs",
                 description="Retrieves docs.",
                 source_path="skills/find-docs",
-                content_hash="sha256:content",
-                skill_file_hash="sha256:skill-file",
+                content_hash="sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73",
+                skill_file_hash="sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926",
             ),
         ),
     )
+
+
+@pytest.mark.parametrize("field", ["content_hash", "skill_file_hash"])
+def test_load_index_rejects_malformed_skill_hashes(tmp_path: Path, field: str):
+    path = tmp_path / ".sv" / "index.toml"
+    path.parent.mkdir()
+    hashes = {
+        "content_hash": _valid_hash("content"),
+        "skill_file_hash": _valid_hash("skill-file"),
+    }
+    hashes[field] = "sha256:nothex"
+    path.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "\n"
+        "[[skills]]\n"
+        'name = "find-docs"\n'
+        'description = "Retrieves docs."\n'
+        'source_path = "skills/find-docs"\n'
+        f'content_hash = "{hashes["content_hash"]}"\n'
+        f'skill_file_hash = "{hashes["skill_file_hash"]}"\n'
+    )
+
+    with pytest.raises(SvError, match=f"field '{field}' must be a sha256 digest"):
+        load_index(path)
+
+
+def test_save_index_rejects_malformed_skill_hashes(tmp_path: Path):
+    path = tmp_path / ".sv" / "index.toml"
+    document = IndexDocument(
+        kind="skill-vault",
+        generated_by="sv",
+        generated_at="2026-05-15T00:00:00Z",
+        skills=(
+            IndexSkillEntry(
+                name="find-docs",
+                description="Retrieves docs.",
+                source_path="skills/find-docs",
+                content_hash="sha256:nothex",
+                skill_file_hash=_valid_hash("skill-file"),
+            ),
+        ),
+    )
+
+    with pytest.raises(SvError, match="field 'content_hash' must be a sha256 digest"):
+        save_index(path, document)
 
 
 def test_load_index_parses_project_index_file(tmp_path: Path):
@@ -215,15 +269,15 @@ def test_load_index_allows_duplicate_skill_names_with_different_paths(tmp_path: 
         'name = "alpha"\n'
         'description = "Root alpha."\n'
         'source_path = "skills/alpha"\n'
-        'content_hash = "sha256:root"\n'
-        'skill_file_hash = "sha256:root-file"\n'
+        'content_hash = "sha256:4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2"\n'
+        'skill_file_hash = "sha256:b3c3d22f7378b7f5de4f0be46a4f3b0e9c6f268c717937f89250dbe8b477033c"\n'
         "\n"
         "[[skills]]\n"
         'name = "alpha"\n'
         'description = "Team alpha."\n'
         'source_path = "team/skills/alpha"\n'
-        'content_hash = "sha256:team"\n'
-        'skill_file_hash = "sha256:team-file"\n'
+        'content_hash = "sha256:ca8b22d0db83a22db163b560b3e4e51527e533d31d067b614a0c33c4d2df8432"\n'
+        'skill_file_hash = "sha256:3fd21d7fdf06fe1db48393eb97884e4c27c73ed12424cb95131c0accf6c15f71"\n'
     )
 
     index = load_index(path)
@@ -282,8 +336,8 @@ def test_load_index_rejects_unsafe_source_path(tmp_path: Path):
         'name = "alpha"\n'
         'description = "Alpha."\n'
         'source_path = "../alpha"\n'
-        'content_hash = "sha256:content"\n'
-        'skill_file_hash = "sha256:skill-file"\n'
+        'content_hash = "sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73"\n'
+        'skill_file_hash = "sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926"\n'
     )
 
     with pytest.raises(SvError, match="source_path"):
@@ -303,8 +357,8 @@ def test_load_index_rejects_name_source_path_mismatch(tmp_path: Path):
         'name = "alpha"\n'
         'description = "Alpha."\n'
         'source_path = "skills/beta"\n'
-        'content_hash = "sha256:content"\n'
-        'skill_file_hash = "sha256:skill-file"\n'
+        'content_hash = "sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73"\n'
+        'skill_file_hash = "sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926"\n'
     )
 
     with pytest.raises(
@@ -325,8 +379,8 @@ def test_save_index_rejects_name_source_path_mismatch(tmp_path: Path):
                 name="alpha",
                 description="Alpha.",
                 source_path="skills/beta",
-                content_hash="sha256:content",
-                skill_file_hash="sha256:skill-file",
+                content_hash="sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73",
+                skill_file_hash="sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926",
             ),
         ),
     )
@@ -349,22 +403,22 @@ def test_save_index_writes_deterministic_toml_and_round_trips(tmp_path: Path):
                 name="zeta",
                 description="Zeta \"quoted\" skill.",
                 source_path="skills/zeta",
-                content_hash="sha256:zeta-content",
-                skill_file_hash="sha256:zeta-file",
+                content_hash="sha256:7eb877826d096d05ff3fd03d102b816c78a71ce8d208fd6032e20127b37c9487",
+                skill_file_hash="sha256:60d6088492996b88f82dee3169d716235cd37c481dfcb1d88c68f361e7deb673",
             ),
             IndexSkillEntry(
                 name="alpha",
                 description="Alpha skill.\nSecond line.",
                 source_path="team/skills/alpha",
-                content_hash="sha256:team-content",
-                skill_file_hash="sha256:team-file",
+                content_hash="sha256:0e4e1a6b32b0c33952fba1555546060dfe5ed55d2f3a591ad17abaae2fa9cfca",
+                skill_file_hash="sha256:3fd21d7fdf06fe1db48393eb97884e4c27c73ed12424cb95131c0accf6c15f71",
             ),
             IndexSkillEntry(
                 name="alpha",
                 description="Root alpha.",
                 source_path="skills/alpha",
-                content_hash="sha256:root-content",
-                skill_file_hash="sha256:root-file",
+                content_hash="sha256:94eb89f9609ad5057e04ce10197276d60c3a7cf2a835839ba31488a85abb516a",
+                skill_file_hash="sha256:b3c3d22f7378b7f5de4f0be46a4f3b0e9c6f268c717937f89250dbe8b477033c",
             ),
         ),
     )
@@ -381,22 +435,22 @@ def test_save_index_writes_deterministic_toml_and_round_trips(tmp_path: Path):
         'name = "alpha"\n'
         'description = "Root alpha."\n'
         'source_path = "skills/alpha"\n'
-        'content_hash = "sha256:root-content"\n'
-        'skill_file_hash = "sha256:root-file"\n'
+        'content_hash = "sha256:94eb89f9609ad5057e04ce10197276d60c3a7cf2a835839ba31488a85abb516a"\n'
+        'skill_file_hash = "sha256:b3c3d22f7378b7f5de4f0be46a4f3b0e9c6f268c717937f89250dbe8b477033c"\n'
         "\n"
         "[[skills]]\n"
         'name = "alpha"\n'
         'description = "Alpha skill.\\nSecond line."\n'
         'source_path = "team/skills/alpha"\n'
-        'content_hash = "sha256:team-content"\n'
-        'skill_file_hash = "sha256:team-file"\n'
+        'content_hash = "sha256:0e4e1a6b32b0c33952fba1555546060dfe5ed55d2f3a591ad17abaae2fa9cfca"\n'
+        'skill_file_hash = "sha256:3fd21d7fdf06fe1db48393eb97884e4c27c73ed12424cb95131c0accf6c15f71"\n'
         "\n"
         "[[skills]]\n"
         'name = "zeta"\n'
         'description = "Zeta \\"quoted\\" skill."\n'
         'source_path = "skills/zeta"\n'
-        'content_hash = "sha256:zeta-content"\n'
-        'skill_file_hash = "sha256:zeta-file"\n'
+        'content_hash = "sha256:7eb877826d096d05ff3fd03d102b816c78a71ce8d208fd6032e20127b37c9487"\n'
+        'skill_file_hash = "sha256:60d6088492996b88f82dee3169d716235cd37c481dfcb1d88c68f361e7deb673"\n'
     )
     assert tomllib.loads(path.read_text())["skills"][0]["source_path"] == "skills/alpha"
     assert load_index(path) == IndexDocument(
@@ -408,22 +462,22 @@ def test_save_index_writes_deterministic_toml_and_round_trips(tmp_path: Path):
                 name="alpha",
                 description="Root alpha.",
                 source_path="skills/alpha",
-                content_hash="sha256:root-content",
-                skill_file_hash="sha256:root-file",
+                content_hash="sha256:94eb89f9609ad5057e04ce10197276d60c3a7cf2a835839ba31488a85abb516a",
+                skill_file_hash="sha256:b3c3d22f7378b7f5de4f0be46a4f3b0e9c6f268c717937f89250dbe8b477033c",
             ),
             IndexSkillEntry(
                 name="alpha",
                 description="Alpha skill.\nSecond line.",
                 source_path="team/skills/alpha",
-                content_hash="sha256:team-content",
-                skill_file_hash="sha256:team-file",
+                content_hash="sha256:0e4e1a6b32b0c33952fba1555546060dfe5ed55d2f3a591ad17abaae2fa9cfca",
+                skill_file_hash="sha256:3fd21d7fdf06fe1db48393eb97884e4c27c73ed12424cb95131c0accf6c15f71",
             ),
             IndexSkillEntry(
                 name="zeta",
                 description="Zeta \"quoted\" skill.",
                 source_path="skills/zeta",
-                content_hash="sha256:zeta-content",
-                skill_file_hash="sha256:zeta-file",
+                content_hash="sha256:7eb877826d096d05ff3fd03d102b816c78a71ce8d208fd6032e20127b37c9487",
+                skill_file_hash="sha256:60d6088492996b88f82dee3169d716235cd37c481dfcb1d88c68f361e7deb673",
             ),
         ),
     )
@@ -501,7 +555,7 @@ def test_load_index_rejects_missing_skill_fields(tmp_path: Path):
         'name = "alpha"\n'
         'description = "Alpha."\n'
         'source_path = "skills/alpha"\n'
-        'content_hash = "sha256:content"\n'
+        'content_hash = "sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73"\n'
     )
 
     with pytest.raises(
@@ -534,8 +588,8 @@ def test_save_index_rejects_invalid_source_path(tmp_path: Path):
                 name="alpha",
                 description="Alpha.",
                 source_path="/alpha",
-                content_hash="sha256:content",
-                skill_file_hash="sha256:skill-file",
+                content_hash="sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73",
+                skill_file_hash="sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926",
             ),
         ),
     )
@@ -555,8 +609,8 @@ def test_save_index_writes_canonical_source_paths(tmp_path: Path):
                 name="alpha",
                 description="Alpha.",
                 source_path="skills/./alpha",
-                content_hash="sha256:content",
-                skill_file_hash="sha256:skill-file",
+                content_hash="sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73",
+                skill_file_hash="sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926",
             ),
         ),
     )
@@ -593,7 +647,7 @@ def test_save_index_rejects_non_string_skill_fields(tmp_path: Path):
                 description="Alpha.",
                 source_path="skills/alpha",
                 content_hash=invalid_content_hash,
-                skill_file_hash="sha256:skill-file",
+                skill_file_hash="sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926",
             ),
         ),
     )
@@ -676,15 +730,15 @@ def test_update_readme_skill_table_preserves_user_content_outside_markers(
                 name="beta",
                 description="Beta | skill.\nSecond line.",
                 source_path="skills/beta",
-                content_hash="sha256:beta",
-                skill_file_hash="sha256:beta-file",
+                content_hash="sha256:f44e64e75f3948e9f73f8dfa94721c4ce8cbb4f265c4790c702b2d41cfbf2753",
+                skill_file_hash="sha256:8f6eff1c1389014e1c2cea786b6288a6850795d2a8c68981b61a1edb3ace655f",
             ),
             IndexSkillEntry(
                 name="alpha",
                 description="Alpha skill.",
                 source_path="skills/alpha",
-                content_hash="sha256:alpha",
-                skill_file_hash="sha256:alpha-file",
+                content_hash="sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8",
+                skill_file_hash="sha256:7022812ae2a8317794a07db06fe9d7cda7867b9b5bccb0713ac8357f7d09ff4f",
             ),
         ),
     )
@@ -719,8 +773,8 @@ def test_update_readme_skill_table_escapes_marker_text_in_skill_descriptions(
                 name="alpha",
                 description="Contains <!-- sv:skills:start --> marker.",
                 source_path="skills/alpha",
-                content_hash="sha256:alpha",
-                skill_file_hash="sha256:alpha-file",
+                content_hash="sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8",
+                skill_file_hash="sha256:7022812ae2a8317794a07db06fe9d7cda7867b9b5bccb0713ac8357f7d09ff4f",
             ),
         ),
     )
@@ -774,7 +828,7 @@ def test_readme_skill_table_helpers_handle_project_kind_and_marker_errors(tmp_pa
         kind="skill-vault",
         generated_by="sv",
         generated_at="now",
-        skills=(IndexSkillEntry("a|b", "Line\n<&>", "skills/a", "sha256:1", "sha256:2"),),
+        skills=(IndexSkillEntry("a|b", "Line\n<&>", "skills/a", "sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b", "sha256:d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"),),
     )
     path.write_text("# Title\n", encoding="utf-8")
     update_readme_skill_table(path, vault_doc)
@@ -886,7 +940,7 @@ def test_load_index_bytes_and_validation_errors_are_actionable(tmp_path: Path):
                 kind="skill-vault",
                 generated_by="sv",
                 generated_at="now",
-                skills=(IndexSkillEntry("alpha", "desc", "../bad", "sha256:1", "sha256:2"),),
+                skills=(IndexSkillEntry("alpha", "desc", "../bad", "sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b", "sha256:d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"),),
             ),
         )
 
@@ -908,8 +962,8 @@ def test_load_index_bytes_rejects_too_many_skill_entries(
     name = "alpha"
     description = "Alpha."
     source_path = "skills/alpha"
-    content_hash = "sha256:alpha"
-    skill_file_hash = "sha256:alpha-skill"
+    content_hash = "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+    skill_file_hash = "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf"
     """
 
     with pytest.raises(SvError, match="skill entry limit"):
@@ -959,8 +1013,8 @@ def test_save_index_rejects_too_many_skill_entries(
                         "alpha",
                         "Alpha.",
                         "skills/alpha",
-                        "sha256:alpha",
-                        "sha256:alpha-skill",
+                        "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8",
+                        "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf",
                     ),
                 ),
             ),

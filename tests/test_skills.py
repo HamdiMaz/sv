@@ -161,6 +161,20 @@ def test_parse_skill_file_reports_unreadable_text_as_sv_error(tmp_path: Path):
         parse_skill_file(skill_file, expected_folder="alpha")
 
 
+def test_parse_skill_file_rejects_oversized_skill_documents(tmp_path: Path):
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir(parents=True)
+    skill_file = skill_dir / "SKILL.md"
+    oversized_text = (
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n\n"
+        + "x" * (1024 * 1024 + 1)
+    )
+    skill_file.write_text(oversized_text, encoding="utf-8")
+
+    with pytest.raises(SvError, match="SKILL.md exceeds size limit"):
+        parse_skill_file(skill_file, expected_folder="alpha")
+
+
 def test_parse_skill_file_requires_frontmatter_at_top(tmp_path: Path):
     skill_file = write_skill(tmp_path, "# Alpha\n---\nname: alpha\n---\n")
 

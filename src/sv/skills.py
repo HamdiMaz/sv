@@ -12,6 +12,9 @@ class InvalidSkillError(SvError):
     """Raised when a source skill exists but does not match sv's skill format."""
 
 
+MAX_SKILL_FILE_BYTES = 1024 * 1024
+
+
 @dataclass(frozen=True)
 class SkillMetadata:
     name: str
@@ -28,14 +31,41 @@ def parse_skill_file(skill_file: Path, *, expected_folder: str) -> SkillMetadata
             f"Skill folder '{expected_folder}' is missing SKILL.md."
         )
 
+    text = _read_skill_file_text(skill_file, expected_folder=expected_folder)
+
+    return parse_skill_text(text, expected_folder=expected_folder)
+
+
+def _read_skill_file_text(skill_file: Path, *, expected_folder: str) -> str:
     try:
-        text = skill_file.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
+        size = skill_file.stat().st_size
+        if size > MAX_SKILL_FILE_BYTES:
+            raise InvalidSkillError(
+                f"Skill '{expected_folder}' SKILL.md exceeds size limit "
+                f"({MAX_SKILL_FILE_BYTES} bytes)."
+            )
+        with skill_file.open("rb") as file:
+            content = file.read(MAX_SKILL_FILE_BYTES + 1)
+    except InvalidSkillError:
+        raise
+    except OSError as exc:
         raise SvError(
             f"Failed to read SKILL.md for skill '{expected_folder}': {exc}"
         ) from exc
 
-    return parse_skill_text(text, expected_folder=expected_folder)
+    if len(content) > MAX_SKILL_FILE_BYTES:
+        raise InvalidSkillError(
+            f"Skill '{expected_folder}' SKILL.md exceeds size limit "
+            f"({MAX_SKILL_FILE_BYTES} bytes)."
+        )
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SvError(
+            f"Failed to read SKILL.md for skill '{expected_folder}': {exc}"
+        ) from exc
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def parse_skill_text(text: str, *, expected_folder: str) -> SkillMetadata:

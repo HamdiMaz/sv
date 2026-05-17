@@ -4,7 +4,13 @@ import pytest
 
 from sv.catalog import SourceSkill
 from sv.config import SvPaths
-from sv.manifest import GlobalSourceState, load_manifest, save_global_manifest
+from sv.manifest import (
+    GlobalSourceState,
+    ManifestEntry,
+    load_manifest,
+    save_global_manifest,
+    save_manifest,
+)
 from sv.project import add_project_skill
 from sv.source import default_runner
 from tests.helpers import (
@@ -18,6 +24,43 @@ from tests.helpers import (
 
 
 pytestmark = pytest.mark.integration
+
+
+def _manifest_entry(skill: str) -> ManifestEntry:
+    return ManifestEntry(
+        name=skill,
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        source_path=f"skills/{skill}",
+        description=f"{skill.title()} skill.",
+    )
+
+
+def _vault_manifest_entry(skill: str) -> ManifestEntry:
+    return ManifestEntry(
+        name=skill,
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        source_path=f"skills/{skill}",
+        description=f"{skill.title()} skill.",
+        target_kind="skill-vault",
+        target_agent=None,
+        target_path=f"skills/{skill}",
+    )
+
+
+def _write_empty_vault_index(vault: Path) -> None:
+    (vault / ".git").mkdir(parents=True)
+    index_file = vault / ".sv" / "index.toml"
+    index_file.parent.mkdir(exist_ok=True)
+    index_file.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "skills = []\n",
+        encoding="utf-8",
+    )
 
 
 def _source_skill(source_root: Path, name: str) -> SourceSkill:
@@ -90,6 +133,124 @@ def test_status_in_normal_project_shows_managed_pi_skill_states_and_excludes_man
     assert manifest["alpha"].modified is True
     assert manifest["beta"].update_available is True
     assert manifest["gamma"].orphan is True
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_reports_manifest_managed_pi_skills_with_missing_targets(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    result = run_sv(
+        ["status"],
+        cwd=project,
+        home=home,
+        git_runner=lambda args, cwd=None: (_ for _ in ()).throw(
+            AssertionError(f"unexpected git call: {args}")
+        ),
+    )
+
+    assert result.exit_code == 0
+    assert "Project sv-managed Pi skills" in result.stdout
+    assert "alpha" in result.stdout
+    assert ".pi/skills/alpha" in result.stdout
+    assert "missing" in result.stdout
+    assert "No sv-managed Pi skills found" not in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_reports_manifest_managed_pi_skills_with_invalid_targets(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    target = project_skills / "alpha"
+    target.parent.mkdir(parents=True)
+    target.write_text("not a skill directory\n", encoding="utf-8")
+    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    result = run_sv(
+        ["status"],
+        cwd=project,
+        home=home,
+        git_runner=lambda args, cwd=None: (_ for _ in ()).throw(
+            AssertionError(f"unexpected git call: {args}")
+        ),
+    )
+
+    assert result.exit_code == 0
+    assert "Project sv-managed Pi skills" in result.stdout
+    assert "alpha" in result.stdout
+    assert "invalid target" in result.stdout
+    assert "No sv-managed Pi skills found" not in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+
+def test_status_with_only_missing_targets_does_not_refresh_unreachable_sources(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    paths = SvPaths.from_home(home)
+    paths.config_file.parent.mkdir(parents=True)
+    missing_source = tmp_path / "missing-source"
+    paths.config_file.write_text(
+        "schema_version = 1\n"
+        "[[repos]]\n"
+        'id = "Missing/Source"\n'
+        f'url = "{missing_source}"\n',
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    result = run_sv(["status"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project sv-managed Pi skills" in result.stdout
+    assert "missing" in result.stdout
+    assert result.stderr == ""
+
+
+
+def test_status_reports_manifest_managed_vault_skills_with_missing_targets(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    _write_empty_vault_index(vault)
+    vault_skills = vault / "skills"
+    save_manifest(vault_skills, {"alpha": _vault_manifest_entry("alpha")})
+
+    result = run_sv(
+        ["status"],
+        cwd=vault,
+        home=home,
+        git_runner=lambda args, cwd=None: (_ for _ in ()).throw(
+            AssertionError(f"unexpected git call: {args}")
+        ),
+    )
+
+    assert result.exit_code == 0
+    assert "Skill-vault sv-managed skills" in result.stdout
+    assert "alpha" in result.stdout
+    assert "skills/alpha" in result.stdout
+    assert "missing" in result.stdout
+    assert "No sv-managed vault skills found" not in result.stdout
     assert_no_traceback(result.stdout)
     assert_no_traceback(result.stderr)
     assert_no_raw_control_characters(result.stdout)
@@ -373,7 +534,7 @@ def test_status_at_home_with_global_manifest_shows_global_source_health(
                 repo_url="https://github.com/Org/Skills.git",
                 backend="github-api",
                 last_refresh_status="ok",
-                index_hash="sha256:index",
+                index_hash="sha256:1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6",
                 catalog_skill_count=3,
             )
         },
@@ -426,7 +587,7 @@ def test_status_under_home_with_global_manifest_shows_global_source_health(
                 repo_url="https://github.com/Org/Skills.git",
                 backend="github-api",
                 last_refresh_status="ok",
-                index_hash="sha256:index",
+                index_hash="sha256:1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6",
                 catalog_skill_count=3,
             )
         },
@@ -485,8 +646,8 @@ def test_status_outside_git_project_shows_global_source_health(
                 last_refresh_started_at="2026-05-15T00:00:00Z",
                 last_refresh_finished_at="2026-05-15T00:00:02Z",
                 last_refresh_status="ok",
-                index_hash="sha256:index",
-                catalog_hash="sha256:catalog",
+                index_hash="sha256:1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6",
+                catalog_hash="sha256:652f55016243bf1b9f1bbea46d5749ef892dbe394e46de9d66ab1aacf0b4af57",
                 catalog_skill_count=3,
                 health_status="ok",
                 health_details="catalog refreshed",
@@ -501,7 +662,9 @@ def test_status_outside_git_project_shows_global_source_health(
     assert "Org/Skills" in result.stdout
     assert "github-api" in result.stdout
     assert "ok" in result.stdout
-    assert "sha256:index" in result.stdout
+    assert "1bc04b5291c2..." in result.stdout
+    assert "652f55016243..." in result.stdout
+    assert "sha256:" not in result.stdout
     assert "3" in result.stdout
     assert "No Git project found" not in result.stdout
     assert_no_traceback(result.stdout)

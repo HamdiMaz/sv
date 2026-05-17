@@ -32,6 +32,19 @@ def test_load_toml_document_reports_parse_errors_with_file_context(tmp_path: Pat
     assert str(path) in message
 
 
+def test_load_toml_document_rejects_oversized_documents_before_parsing(
+    tmp_path: Path,
+):
+    path = tmp_path / "index.toml"
+    path.write_text(
+        "schema_version = 1\n# " + "x" * (1024 * 1024 + 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SvError, match="exceeds size limit"):
+        load_toml_document(path, "sv index")
+
+
 def test_require_schema_version_rejects_missing_required_schema_version(tmp_path: Path):
     path = tmp_path / "manifest.toml"
 

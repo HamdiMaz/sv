@@ -41,8 +41,8 @@ def test_save_and_load_global_source_state_deterministically(tmp_path: Path) -> 
             last_refresh_started_at="2026-05-15T00:00:00Z",
             last_refresh_finished_at="2026-05-15T00:00:02Z",
             last_refresh_status="ok",
-            index_hash="sha256:index-b",
-            catalog_hash="sha256:catalog-b",
+            index_hash="sha256:921900bd3d9be61b88f5c38962d1e011e59a730c0cbf9dd910c4db3acda91a80",
+            catalog_hash="sha256:65e9d6f275b5d83438804bef52cbd7e7611ec467ab4b4a864659240746ca5634",
             catalog_skill_count=3,
             health_status="ok",
             health_details="catalog refreshed",
@@ -75,8 +75,8 @@ def test_save_and_load_global_source_state_deterministically(tmp_path: Path) -> 
         'last_refresh_started_at = "2026-05-15T00:00:00Z"\n'
         'last_refresh_finished_at = "2026-05-15T00:00:02Z"\n'
         'last_refresh_status = "ok"\n'
-        'index_hash = "sha256:index-b"\n'
-        'catalog_hash = "sha256:catalog-b"\n'
+        'index_hash = "sha256:921900bd3d9be61b88f5c38962d1e011e59a730c0cbf9dd910c4db3acda91a80"\n'
+        'catalog_hash = "sha256:65e9d6f275b5d83438804bef52cbd7e7611ec467ab4b4a864659240746ca5634"\n'
         "catalog_skill_count = 3\n"
         'health_status = "ok"\n'
         'health_details = "catalog refreshed"\n'
@@ -174,8 +174,8 @@ def test_lightweight_refresh_records_backend_and_index_hash(
         b"name = \"alpha\"\n"
         b"description = \"Alpha skill.\"\n"
         b"source_path = \"skills/alpha\"\n"
-        b"content_hash = \"sha256:content\"\n"
-        b"skill_file_hash = \"sha256:skill-file\"\n"
+        b"content_hash = \"sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73\"\n"
+        b"skill_file_hash = \"sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926\"\n"
     )
 
     class GitHubApiBackend(FakeSourceBackend):
@@ -219,8 +219,8 @@ def test_lightweight_refresh_records_backend_and_index_hash_for_equivalent_sourc
         b"name = \"alpha\"\n"
         b"description = \"Alpha skill.\"\n"
         b"source_path = \"skills/alpha\"\n"
-        b"content_hash = \"sha256:content\"\n"
-        b"skill_file_hash = \"sha256:skill-file\"\n"
+        b"content_hash = \"sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73\"\n"
+        b"skill_file_hash = \"sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926\"\n"
     )
 
     class GitHubApiBackend(FakeSourceBackend):

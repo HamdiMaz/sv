@@ -46,8 +46,8 @@ def test_list_uses_github_index_without_cloning_or_downloading_skill_folders(
     name = "alpha"
     description = "Alpha from remote index."
     source_path = "skills/alpha"
-    content_hash = "sha256:alpha"
-    skill_file_hash = "sha256:alpha-skill"
+    content_hash = "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+    skill_file_hash = "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf"
     """
     calls: list[tuple[list[str], Path | None]] = []
 
@@ -116,8 +116,8 @@ def test_list_reports_future_index_schema_even_when_another_repo_has_entries(
     name = "alpha"
     description = "Alpha from remote index."
     source_path = "skills/alpha"
-    content_hash = "sha256:alpha"
-    skill_file_hash = "sha256:alpha-skill"
+    content_hash = "sha256:8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+    skill_file_hash = "sha256:63b6db06d8ca622e5986709498b492dfc53aad421a238dba44b7146d37d934bf"
     """
     future_index = """
     schema_version = 999

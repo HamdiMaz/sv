@@ -5,14 +5,24 @@ import pytest
 
 from sv import manifest as manifest_module
 from sv import tomlutil as tomlutil_module
+from sv.config import SvPaths
 from sv.errors import SvError
 from sv.manifest import (
+    GlobalSourceState,
     ManifestEntry,
+    load_global_manifest,
     load_manifest,
     remove_manifest_entry,
+    save_global_manifest,
     save_manifest,
     upsert_manifest_entry,
 )
+
+
+def _valid_hash(seed: str) -> str:
+    import hashlib
+
+    return f"sha256:{hashlib.sha256(seed.encode()).hexdigest()}"
 
 
 def test_load_manifest_returns_empty_when_file_missing(tmp_path: Path):
@@ -36,10 +46,10 @@ def test_save_and_load_manifest_entries(tmp_path: Path):
             source_backend="git",
             source_commit="abc123",
             source_tree="tree123",
-            source_content_hash="sha256:source",
-            source_skill_file_hash="sha256:skill-file",
-            installed_content_hash="sha256:installed",
-            local_content_hash="sha256:local",
+            source_content_hash="sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d",
+            source_skill_file_hash="sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926",
+            installed_content_hash="sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c",
+            local_content_hash="sha256:25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
             orphan=True,
             modified=True,
             update_available=True,
@@ -67,10 +77,10 @@ def test_save_and_load_manifest_entries(tmp_path: Path):
         'source_backend = "git"\n'
         'source_commit = "abc123"\n'
         'source_tree = "tree123"\n'
-        'source_content_hash = "sha256:source"\n'
-        'source_skill_file_hash = "sha256:skill-file"\n'
-        'installed_content_hash = "sha256:installed"\n'
-        'local_content_hash = "sha256:local"\n'
+        'source_content_hash = "sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d"\n'
+        'source_skill_file_hash = "sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926"\n'
+        'installed_content_hash = "sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c"\n'
+        'local_content_hash = "sha256:25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6"\n'
         "orphan = true\n"
         "modified = true\n"
         "update_available = true\n"
@@ -191,6 +201,107 @@ def test_load_manifest_rejects_future_schema_with_update_message(tmp_path: Path)
     message = str(exc_info.value)
     assert "Unsupported sv project manifest schema_version 99" in message
     assert "update sv" in message.lower()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "source_content_hash",
+        "source_skill_file_hash",
+        "installed_content_hash",
+        "local_content_hash",
+    ],
+)
+def test_load_manifest_rejects_malformed_hash_fields(tmp_path: Path, field: str):
+    project_skills = tmp_path / ".pi" / "skills"
+    path = manifest_module.manifest_path(project_skills)
+    path.parent.mkdir(parents=True)
+    hashes = {
+        "source_content_hash": _valid_hash("source"),
+        "source_skill_file_hash": _valid_hash("source-skill-file"),
+        "installed_content_hash": _valid_hash("installed"),
+        "local_content_hash": _valid_hash("local"),
+    }
+    hashes[field] = "sha256:nothex"
+    path.write_text(
+        "schema_version = 1\n"
+        "\n"
+        "[[skills]]\n"
+        'name = "alpha"\n'
+        'source_repo_id = "Org/Skills"\n'
+        'source_repo_url = "https://github.com/Org/Skills.git"\n'
+        'source_path = "skills/alpha"\n'
+        'description = "Alpha skill."\n'
+        f'source_content_hash = "{hashes["source_content_hash"]}"\n'
+        f'source_skill_file_hash = "{hashes["source_skill_file_hash"]}"\n'
+        f'installed_content_hash = "{hashes["installed_content_hash"]}"\n'
+        f'local_content_hash = "{hashes["local_content_hash"]}"\n'
+    )
+
+    with pytest.raises(SvError, match=f"field '{field}' must be a sha256 digest"):
+        load_manifest(project_skills)
+
+
+def test_save_manifest_rejects_malformed_hash_fields(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+
+    with pytest.raises(
+        SvError, match="field 'source_content_hash' must be a sha256 digest"
+    ):
+        save_manifest(
+            project_skills,
+            {
+                "alpha": ManifestEntry(
+                    name="alpha",
+                    repo_id="Org/Skills",
+                    repo_url="https://github.com/Org/Skills.git",
+                    source_path="skills/alpha",
+                    description="Alpha skill.",
+                    source_content_hash="sha256:nothex",
+                )
+            },
+        )
+
+
+@pytest.mark.parametrize("field", ["index_hash", "catalog_hash"])
+def test_load_global_manifest_rejects_malformed_hash_fields(
+    tmp_path: Path, field: str
+):
+    paths = SvPaths.from_home(tmp_path)
+    hashes = {
+        "index_hash": _valid_hash("index"),
+        "catalog_hash": _valid_hash("catalog"),
+    }
+    hashes[field] = "sha256:nothex"
+    paths.global_manifest_file.parent.mkdir(parents=True)
+    paths.global_manifest_file.write_text(
+        "schema_version = 1\n"
+        "\n"
+        "[[sources]]\n"
+        'repo_id = "Org/Skills"\n'
+        'repo_url = "https://github.com/Org/Skills.git"\n'
+        f'index_hash = "{hashes["index_hash"]}"\n'
+        f'catalog_hash = "{hashes["catalog_hash"]}"\n'
+    )
+
+    with pytest.raises(SvError, match=f"field '{field}' must be a sha256 digest"):
+        load_global_manifest(paths)
+
+
+def test_save_global_manifest_rejects_malformed_hash_fields(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+
+    with pytest.raises(SvError, match="field 'index_hash' must be a sha256 digest"):
+        save_global_manifest(
+            paths,
+            {
+                "Org/Skills": GlobalSourceState(
+                    repo_id="Org/Skills",
+                    repo_url="https://github.com/Org/Skills.git",
+                    index_hash="sha256:nothex",
+                )
+            },
+        )
 
 
 def test_load_manifest_reads_legacy_manifest_when_canonical_is_missing(

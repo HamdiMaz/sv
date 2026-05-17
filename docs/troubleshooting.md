@@ -39,7 +39,13 @@ sv add <repo-id>:<skill>
 COLUMNS=120 sv list
 ```
 
-Wide Unicode characters are counted by display width so rows should stay within the reported terminal width.
+Wide Unicode characters are counted by display width so rows should stay within the reported terminal width. In `sv status`, index and catalog hashes are intentionally abbreviated in the table; inspect `~/.sv/manifest.toml` when you need the full digest.
+
+## Metadata validation errors
+
+`sv` rejects oversized metadata before parsing it: TOML config/index/manifest files and `SKILL.md` files are limited to 1 MiB. Source indexes and manifests also must store hashes as `sha256:<64 lowercase hex characters>`. If you see a size-limit or hash-format error, regenerate the source index or manifest with a current `sv` instead of editing placeholder values by hand.
+
+Skill names must be safe folder names. Rename source skill folders and frontmatter names that start with `-`, contain path separators or `:`, or include invisible Unicode format controls such as zero-width spaces or bidi override characters.
 
 ## The same source appears twice
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import hashlib
 from pathlib import Path
@@ -34,6 +34,7 @@ from sv.config import (
     repo_source_key,
 )
 from sv.errors import SvError
+from sv.hashformat import SHA256_PREFIX, is_sha256_digest
 from sv.index import (
     IndexDocument,
     IndexKind,
@@ -2493,6 +2494,10 @@ def _remove_managed_entries(
     entries: Sequence[ManifestEntry], project_skills_dir: Path, context: LocalContext
 ) -> None:
     for entry in entries:
+        if _manifest_target_is_unavailable(entry):
+            _prune_unavailable_manifest_entry(project_skills_dir, entry)
+            _print_pruned_unavailable_result(entry, project_skills_dir, context)
+            continue
         if context.is_skill_vault:
             result = remove_vault_skill(entry.name, project_skills_dir)
         else:
@@ -2526,9 +2531,46 @@ def _confirm_prompt(prompt: str) -> bool:
     return input(prompt).strip().lower() in {"y", "yes"}
 
 
+def _prune_unavailable_manifest_entry(
+    project_skills_dir: Path, entry: ManifestEntry
+) -> None:
+    manifest = load_manifest(project_skills_dir)
+    for key, existing_entry in list(manifest.items()):
+        if _same_manifest_target(existing_entry, entry):
+            del manifest[key]
+            save_manifest(project_skills_dir, manifest)
+            return
+
+
+def _same_manifest_target(first: ManifestEntry, second: ManifestEntry) -> bool:
+    return (
+        first.name == second.name
+        and first.target_kind == second.target_kind
+        and first.target_agent == second.target_agent
+        and first.target_path == second.target_path
+    )
+
+
 def _print_remove_result(result: RemoveSkillResult) -> None:
     target = _escape_output_path(result.target)
     print(f"Removed {_result_skill_label(result.target_kind)} '{result.skill}' from {target}")
+
+
+def _manifest_target_is_unavailable(entry: ManifestEntry) -> bool:
+    return entry.target_missing or entry.target_invalid
+
+
+def _print_pruned_unavailable_result(
+    entry: ManifestEntry, project_skills_dir: Path, context: LocalContext
+) -> None:
+    target = _escape_output_path(project_skills_dir / entry.name)
+    reason = "invalid" if entry.target_invalid else "missing"
+    detail = "is not a directory" if entry.target_invalid else "was already gone"
+    label = _result_skill_label(_context_target_kind(context))
+    print(
+        f"Pruned {reason} {label} '{entry.name}' from sv manifest "
+        f"(target {target} {detail})."
+    )
 
 
 def _handle_sync(
@@ -2586,16 +2628,17 @@ def _handle_status(
         print("No sv-managed Pi skills found in this project.")
         return 0
 
-    catalog = _status_catalog_if_configured(
-        paths,
-        git_runner,
-        record_global_source_state=record_global_source_state,
-    )
-    if catalog is None:
-        refresh_project_skill_local_states(project_skills_dir)
-    else:
-        refresh_project_skill_states(catalog, project_skills_dir)
-    entries = _project_status_entries(project_skills_dir)
+    if _entries_require_source_status_refresh(entries):
+        catalog = _status_catalog_if_configured(
+            paths,
+            git_runner,
+            record_global_source_state=record_global_source_state,
+        )
+        if catalog is None:
+            refresh_project_skill_local_states(project_skills_dir)
+        else:
+            refresh_project_skill_states(catalog, project_skills_dir)
+        entries = _project_status_entries(project_skills_dir)
 
     print("Project sv-managed Pi skills")
     print(
@@ -2632,7 +2675,7 @@ def _handle_vault_status(
     vault_skills_dir = context.vault_skills_dir
     _reject_symlinked_status_vault_skills_path(vault_skills_dir)
     entries = _vault_status_entries(vault_skills_dir)
-    if entries:
+    if _entries_require_source_status_refresh(entries):
         catalog = _status_catalog_if_configured(
             paths,
             git_runner,
@@ -2743,8 +2786,8 @@ def _handle_global_status(paths: SvPaths) -> int:
                 _escape_control_characters(repo_url),
                 _escape_control_characters(state.backend if state and state.backend else "unknown"),
                 _escape_control_characters(_global_refresh_label(state)),
-                _escape_control_characters(state.index_hash if state and state.index_hash else "-"),
-                _escape_control_characters(state.catalog_hash if state and state.catalog_hash else "-"),
+                _escape_control_characters(_global_hash_label(state.index_hash if state else None)),
+                _escape_control_characters(_global_hash_label(state.catalog_hash if state else None)),
                 str(state.catalog_skill_count) if state and state.catalog_skill_count is not None else "-",
                 _escape_control_characters(_global_health_label(state)),
             ]
@@ -2801,6 +2844,15 @@ def _global_health_label(state: GlobalSourceState | None) -> str:
     return status
 
 
+def _global_hash_label(value: str | None) -> str:
+    if not value:
+        return "-"
+    if not is_sha256_digest(value):
+        return value
+    visible_hex = 12
+    return f"{value.removeprefix(SHA256_PREFIX)[:visible_hex]}..."
+
+
 def _status_catalog_if_configured(
     paths: SvPaths,
     git_runner,
@@ -2839,6 +2891,12 @@ def _reject_symlinked_status_vault_skills_path(vault_skills_dir: Path) -> None:
         )
 
 
+def _entries_require_source_status_refresh(
+    entries: Sequence[ManifestEntry],
+) -> bool:
+    return any(not _manifest_target_is_unavailable(entry) for entry in entries)
+
+
 def _project_status_entries(project_skills_dir: Path) -> list[ManifestEntry]:
     entries: list[ManifestEntry] = []
     for entry in load_manifest(project_skills_dir).values():
@@ -2851,6 +2909,10 @@ def _project_status_entries(project_skills_dir: Path) -> list[ManifestEntry]:
             )
         if target.is_dir():
             entries.append(entry)
+        elif target.exists():
+            entries.append(replace(entry, target_invalid=True))
+        else:
+            entries.append(replace(entry, target_missing=True))
     return sorted(entries, key=lambda item: item.name)
 
 
@@ -2876,6 +2938,10 @@ def _vault_status_entries(vault_skills_dir: Path) -> list[ManifestEntry]:
             )
         if target.is_dir():
             entries.append(entry)
+        elif target.exists():
+            entries.append(replace(entry, target_invalid=True))
+        else:
+            entries.append(replace(entry, target_missing=True))
     return sorted(entries, key=lambda item: item.name)
 
 
@@ -2920,6 +2986,10 @@ def _manifest_source_reference(entry: ManifestEntry) -> str:
 
 def _status_state_label(entry: ManifestEntry) -> str:
     flags: list[str] = []
+    if entry.target_missing:
+        flags.append("missing")
+    if entry.target_invalid:
+        flags.append("invalid target")
     if entry.modified:
         flags.append("modified")
     if entry.update_available:

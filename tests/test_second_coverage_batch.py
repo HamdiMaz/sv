@@ -492,6 +492,7 @@ def test_cli_status_catalog_and_global_status_empty_branches(tmp_path: Path, cap
 def test_cli_project_and_vault_status_entry_filters_and_symlink_rejections(tmp_path: Path):
     project_skills = tmp_path / "project" / ".pi" / "skills"
     (project_skills / "alpha").mkdir(parents=True)
+    (project_skills / "blocked").write_text("not a directory", encoding="utf-8")
     outside = tmp_path / "outside"
     outside.mkdir()
     (project_skills / "linked").symlink_to(outside, target_is_directory=True)
@@ -507,6 +508,16 @@ def test_cli_project_and_vault_status_entry_filters_and_symlink_rejections(tmp_p
                 target_kind="project-agent",
                 target_agent="pi",
                 target_path=".pi/skills/alpha",
+            ),
+            "blocked": ManifestEntry(
+                name="blocked",
+                repo_id="Repo",
+                repo_url="url",
+                source_path="skills/blocked",
+                description="Blocked",
+                target_kind="project-agent",
+                target_agent="pi",
+                target_path=".pi/skills/blocked",
             ),
             "ignored": ManifestEntry(
                 name="ignored",
@@ -533,10 +544,19 @@ def test_cli_project_and_vault_status_entry_filters_and_symlink_rejections(tmp_p
     with pytest.raises(SvError, match="symlinked Pi skill"):
         cli_module._project_status_entries(project_skills)
     (project_skills / "linked").unlink()
-    assert [entry.name for entry in cli_module._project_status_entries(project_skills)] == ["alpha"]
+    project_entries = cli_module._project_status_entries(project_skills)
+    assert [
+        (entry.name, entry.target_missing, entry.target_invalid)
+        for entry in project_entries
+    ] == [
+        ("alpha", False, False),
+        ("blocked", False, True),
+        ("linked", True, False),
+    ]
 
     vault_skills = tmp_path / "vault" / "skills"
     (vault_skills / "alpha").mkdir(parents=True)
+    (vault_skills / "blocked").write_text("not a directory", encoding="utf-8")
     (vault_skills / "linked").symlink_to(outside, target_is_directory=True)
     save_manifest(
         vault_skills,
@@ -550,6 +570,16 @@ def test_cli_project_and_vault_status_entry_filters_and_symlink_rejections(tmp_p
                 target_kind="skill-vault",
                 target_agent=None,
                 target_path="skills/alpha",
+            ),
+            "blocked": ManifestEntry(
+                name="blocked",
+                repo_id="Repo",
+                repo_url="url",
+                source_path="skills/blocked",
+                description="Blocked",
+                target_kind="skill-vault",
+                target_agent=None,
+                target_path="skills/blocked",
             ),
             "linked": ManifestEntry(
                 name="linked",
@@ -566,7 +596,14 @@ def test_cli_project_and_vault_status_entry_filters_and_symlink_rejections(tmp_p
     with pytest.raises(SvError, match="symlinked vault skill"):
         cli_module._vault_status_entries(vault_skills)
     (vault_skills / "linked").unlink()
-    assert [entry.name for entry in cli_module._vault_status_entries(vault_skills)] == ["alpha"]
+    vault_entries = cli_module._vault_status_entries(vault_skills)
+    assert [
+        (entry.name, entry.target_missing, entry.target_invalid) for entry in vault_entries
+    ] == [
+        ("alpha", False, False),
+        ("blocked", False, True),
+        ("linked", True, False),
+    ]
 
 
 def test_selector_empty_and_filtered_interactive_paths(monkeypatch):
@@ -820,7 +857,7 @@ def test_cli_failure_reports_and_mixed_refresh_state(tmp_path: Path):
         (api_failure, git_failure),
         "2026-01-01T00:00:00Z",
         refreshed_backends_by_repo={"Good": "fake"},
-        index_hashes_by_repo={"Good": "sha256:index"},
+        index_hashes_by_repo={"Good": "sha256:1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6"},
     )
     states = load_global_manifest(paths)
     assert states["Good"].last_refresh_status == "ok"
@@ -1349,8 +1386,8 @@ def test_index_readme_and_scan_error_edges(tmp_path: Path, monkeypatch):
                 name="a|b",
                 description="A & <B>",
                 source_path="skills/a",
-                content_hash="sha256:content",
-                skill_file_hash="sha256:skill",
+                content_hash="sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73",
+                skill_file_hash="sha256:9c53c074d7ac6a2728b638ac1f376c5fa9eb8f71603017c3ea638c2fd40548df",
             ),
         ),
     )

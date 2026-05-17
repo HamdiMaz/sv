@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 import shutil
+import unicodedata
 from typing import Protocol
 
 from sv.config import repo_source_key
@@ -126,8 +127,10 @@ def normalize_skill_name(skill: str) -> str:
     if (
         not name
         or name.startswith(".")
+        or name.startswith("-")
         or any(char in name for char in ("/", "\\", ":"))
         or _contains_control_character(name)
+        or _contains_unicode_format_character(name)
     ):
         raise SvError(
             f"Invalid skill name {skill!r}. Use a single source skill folder name."
@@ -918,6 +921,10 @@ def _source_matches_recorded_key(
 
 def _contains_control_character(value: str) -> bool:
     return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
+
+
+def _contains_unicode_format_character(value: str) -> bool:
+    return any(unicodedata.category(char) == "Cf" for char in value)
 
 
 def _ensure_safe_project_skills_dir(

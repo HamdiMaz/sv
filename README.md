@@ -59,6 +59,7 @@ Removing the last repo writes `repos = []`, which intentionally disables all sou
 ## Quick start
 
 ```bash
+sv repo add HamdiMaz/Skills
 sv list
 sv add find-docs
 sv sync
@@ -182,7 +183,7 @@ description: Use when creating or publishing GitHub releases.
 ---
 ```
 
-The frontmatter `name` must match the folder name, and `description` must be non-empty. Skill folders with missing or malformed metadata are skipped by `sv list`, `sv add`, `sv add --all`, `sv sync`, and `sv update`. Unreadable or non-UTF-8 `SKILL.md` files stop the command with a clear error so source repository problems are not missed.
+The frontmatter `name` must match the folder name, and `description` must be non-empty. Skill names must be plain single-folder names: no leading `.`, no leading `-`, no slashes, backslashes, colons, control characters, or Unicode format controls such as zero-width and bidi override characters. Each `SKILL.md` metadata file is limited to 1 MiB so a hostile source cannot exhaust memory during discovery. Skill folders with missing or malformed metadata are skipped by `sv list`, `sv add`, `sv add --all`, `sv sync`, and `sv update`. Unreadable or non-UTF-8 `SKILL.md` files stop the command with a clear error so source repository problems are not missed.
 
 ## Project manifest
 
@@ -194,13 +195,15 @@ Existing project skills without manifest entries stay unmanaged during sync. `sv
 
 `sv add` does not overwrite an existing project skill. It copies into a temporary sibling directory first, then records the installed skill in the project manifest. If the copy or manifest update fails, `sv` removes temporary files and reports a user-facing error.
 
+`sv status` reports managed manifest entries even when their local skill folder was deleted or replaced manually, marking them as `missing` or `invalid target` so stale metadata is visible. If every recorded target is unavailable, status stays local and avoids refreshing configured sources just to print that local state. Confirming `sv remove --all` also cleans those stale entries from the manifest while still leaving unmanaged folders or files alone.
+
 `sv remove` validates the project manifest before changing files. If manifest cleanup fails during removal, `sv` restores the local skill directory so the project is not left with a missing skill and stale metadata.
 
 `sv sync` replaces managed skills from their recorded source repo. It copies the source skill first and keeps a temporary backup of the local skill so the previous version can be restored if replacement or manifest update fails.
 
 Hidden directories matching `.<skill>.sv-*` inside `.pi/skills` are sv internals for in-progress or rolled-back file operations and should not be edited by hand.
 
-For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlinked project skill directories, symlinked source cache paths, symlinked source `skills/` roots, and symlinks inside source skill folders. Symlinked source skill directories are skipped during catalog loading. Manifest writes also refuse symlinked temporary manifest files. These checks prevent a project or source repo from redirecting add, remove, sync, or run operations outside the expected directories.
+For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlinked project skill directories, symlinked source cache paths, symlinked source `skills/` roots, and symlinks inside source skill folders. Symlinked source skill directories are skipped during catalog loading. Manifest writes also refuse symlinked temporary manifest files. TOML config, index, and manifest files are limited to 1 MiB and content hashes must use the canonical `sha256:<64 lowercase hex characters>` form before `sv` trusts them. These checks prevent a project or source repo from redirecting add, remove, sync, or run operations outside the expected directories or feeding unbounded metadata into the CLI.
 
 ## Pi isolation
 

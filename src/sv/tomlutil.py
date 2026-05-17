@@ -10,17 +10,45 @@ import tomllib
 from sv.errors import SvError
 
 SchemaMigration = Callable[[dict[str, Any]], Mapping[str, Any]]
+MAX_TOML_DOCUMENT_BYTES = 1024 * 1024
 
 
 def load_toml_document(path: Path, document_name: str) -> dict[str, Any]:
-    """Load a TOML document with user-facing parse and IO errors."""
+    """Load a TOML document with user-facing parse, size, and IO errors."""
     try:
-        with path.open("rb") as file:
-            return tomllib.load(file)
+        content = _read_limited_toml_document(path, document_name)
+        return tomllib.loads(content.decode("utf-8"))
+    except SvError:
+        raise
+    except UnicodeDecodeError as exc:
+        raise SvError(
+            f"Failed to read {document_name} at {path}: not valid UTF-8"
+        ) from exc
     except tomllib.TOMLDecodeError as exc:
         raise SvError(f"Failed to read {document_name} at {path}: {exc}") from exc
+
+
+def _read_limited_toml_document(path: Path, document_name: str) -> bytes:
+    try:
+        size = path.stat().st_size
+        if size > MAX_TOML_DOCUMENT_BYTES:
+            raise SvError(
+                f"Failed to read {document_name} at {path}: document exceeds size "
+                f"limit ({MAX_TOML_DOCUMENT_BYTES} bytes)."
+            )
+        with path.open("rb") as file:
+            content = file.read(MAX_TOML_DOCUMENT_BYTES + 1)
+    except SvError:
+        raise
     except OSError as exc:
         raise SvError(f"Failed to read {document_name} at {path}: {exc}") from exc
+
+    if len(content) > MAX_TOML_DOCUMENT_BYTES:
+        raise SvError(
+            f"Failed to read {document_name} at {path}: document exceeds size "
+            f"limit ({MAX_TOML_DOCUMENT_BYTES} bytes)."
+        )
+    return content
 
 
 def require_schema_version(

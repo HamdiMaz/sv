@@ -50,6 +50,8 @@ find-docs  Team/Skills  Retrieves documentation
 
 Terminal control characters from repo metadata or skill descriptions are escaped before printing, so source content cannot clear your screen or hide output.
 
+`sv status` keeps global source status readable by abbreviating validated index and catalog hashes to the first 12 digest characters plus `...` in the table. The full canonical `sha256:<64 lowercase hex characters>` values remain in `~/.sv/manifest.toml` for auditing or debugging. Project and skill-vault status rows can include `missing` when a manifest still records a managed skill but the local target folder has already been deleted manually, or `invalid target` when that path exists but is no longer a directory.
+
 ## Interactive picker output
 
 `sv add -l` uses an inline picker instead of a full-screen interface. Each row is kept to one terminal line so arrow-key navigation remains predictable. A muted help line shows the visible range and controls: ↑/↓ move, ←/→ page, Space select, Enter confirm, and `q` cancel. Long skill labels and the help line are truncated to the current terminal width, and control characters from source names or descriptions are escaped before display.

@@ -5,9 +5,9 @@ import stat
 from pathlib import Path
 
 from sv.errors import SvError
+from sv.hashformat import SHA256_PREFIX
 from sv.project import normalize_skill_name
 
-_HASH_PREFIX = "sha256:"
 _CHUNK_SIZE = 1024 * 1024
 
 
@@ -17,7 +17,7 @@ def sha256_file(path: Path) -> str:
     Symlinked files are rejected so callers do not accidentally hash content outside
     the validated source or project skill tree.
     """
-    return f"{_HASH_PREFIX}{_sha256_file_digest(path).hex()}"
+    return f"{SHA256_PREFIX}{_sha256_file_digest(path).hex()}"
 
 
 def sha256_skill_directory(skill_dir: Path, *, expected_name: str | None = None) -> str:
@@ -43,7 +43,7 @@ def sha256_skill_directory(skill_dir: Path, *, expected_name: str | None = None)
         digest.update(file_digest)
         digest.update(b"\0")
 
-    return f"{_HASH_PREFIX}{digest.hexdigest()}"
+    return f"{SHA256_PREFIX}{digest.hexdigest()}"
 
 
 def _sha256_file_digest(path: Path) -> bytes:
