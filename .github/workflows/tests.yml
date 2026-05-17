@@ -32,13 +32,17 @@ jobs:
         run: uv run pytest --cov=sv --cov-report=term-missing
 
       - name: Build package
-        run: uv build
+        run: |
+          rm -rf dist
+          uv build
 
       - name: Smoke test built wheel
         run: |
           tmp_venv="$(mktemp -d)"
           trap 'rm -rf "$tmp_venv"' EXIT
           python -m venv "$tmp_venv"
-          uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index dist/sv-0.1.0-py3-none-any.whl
+          wheel_path="$(python -c 'from pathlib import Path; wheels = sorted(Path("dist").glob("sv-*.whl")); assert len(wheels) == 1, wheels; print(wheels[0])')"
+          expected_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index "$wheel_path"
           "$tmp_venv/bin/sv" --help
-          "$tmp_venv/bin/python" -c 'import sv; assert sv.__version__ == "0.1.0", sv.__version__'
+          EXPECTED_SV_VERSION="$expected_version" "$tmp_venv/bin/python" -c 'import os, sv; assert sv.__version__ == os.environ["EXPECTED_SV_VERSION"], sv.__version__'

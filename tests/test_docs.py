@@ -30,13 +30,16 @@ FULL_RELEASE_COMMANDS = [
     "uv run ruff check .",
     "uv run ty check src tests",
     "uv run pytest --cov=sv --cov-report=term-missing",
+    "rm -rf dist",
     "uv build",
     'tmp_venv="$(mktemp -d)"',
     "trap 'rm -rf \"$tmp_venv\"' EXIT",
     'python -m venv "$tmp_venv"',
-    'uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index dist/sv-0.1.0-py3-none-any.whl',
+    'wheel_path="$(python -c \'from pathlib import Path; wheels = sorted(Path("dist").glob("sv-*.whl")); assert len(wheels) == 1, wheels; print(wheels[0])\')"',
+    'expected_version="$(python -c \'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])\')"',
+    'uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index "$wheel_path"',
     '"$tmp_venv/bin/sv" --help',
-    '"$tmp_venv/bin/python" -c \'import sv; assert sv.__version__ == "0.1.0", sv.__version__\'',
+    'EXPECTED_SV_VERSION="$expected_version" "$tmp_venv/bin/python" -c \'import os, sv; assert sv.__version__ == os.environ["EXPECTED_SV_VERSION"], sv.__version__\'',
 ]
 
 COMMON_DOC_COMMAND_EXAMPLES = [
@@ -387,6 +390,20 @@ def test_testing_guide_full_release_commands_match_ci():
         " Actions run-step sequence after setup/install commands. Saw"
         f" {workflow_release_commands!r}."
     )
+
+
+def test_release_verification_commands_do_not_hardcode_package_version():
+    release_text = "\n".join(
+        [
+            (DOCS_DIR / "testing.md").read_text(encoding="utf-8"),
+            WORKFLOW_PATH.read_text(encoding="utf-8"),
+        ]
+    )
+
+    assert not re.search(r"dist/sv-[^\s\"']+-py3-none-any\.whl", release_text)
+    assert not re.search(r"sv\.__version__ == [\"'][^\"']+[\"']", release_text)
+    assert "rm -rf dist" in release_text
+    assert "assert len(wheels) == 1" in release_text
 
 
 @pytest.mark.parametrize(
