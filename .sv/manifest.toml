@@ -1,0 +1,37 @@
+schema_version = 1
+
+[[skills]]
+name = "find-docs"
+target_kind = "project-agent"
+target_agent = "pi"
+target_path = ".pi/skills/find-docs"
+source_repo_id = "HamdiMaz/Skills"
+source_repo_url = "https://github.com/HamdiMaz/Skills.git"
+source_path = "skills/find-docs"
+description = ">-"
+local_content_hash = "sha256:df751451480938e5fd1dae23b6cb13cfef8973a6759e261f9ccd3367dc5d3a66"
+orphan = true
+
+[[skills]]
+name = "systematic-debugging"
+target_kind = "project-agent"
+target_agent = "pi"
+target_path = ".pi/skills/systematic-debugging"
+source_repo_id = "HamdiMaz/Skills"
+source_repo_url = "https://github.com/HamdiMaz/Skills.git"
+source_path = "skills/systematic-debugging"
+description = "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes"
+local_content_hash = "sha256:9c1dd56561526b65195f12af9cdd4c589284aa53734d0b09194674aa15710bbd"
+orphan = true
+
+[[skills]]
+name = "web-search"
+target_kind = "project-agent"
+target_agent = "pi"
+target_path = ".pi/skills/web-search"
+source_repo_id = "HamdiMaz/Skills"
+source_repo_url = "https://github.com/HamdiMaz/Skills.git"
+source_path = "skills/web-search"
+description = "Use when needing general web search, current public web facts, news, factual research, source grounding, non-documentation lookups, fact-checking, or public web content via the Brave Search CLI; not for library, framework, SDK, CLI, cloud-service, API, setup, configuration, or migration documentation, where find-docs applies."
+local_content_hash = "sha256:7cd42c16cafbed2e27cadeeb48dbd4c6252b30cdbee1bf1c20bb062cbc3c3079"
+orphan = true

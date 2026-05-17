@@ -20,7 +20,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
-from sv.materialization import validate_materialization_source_tree
+from sv.materialization import remove_materialization_path, validate_materialization_source_tree
 from sv.terminal import escape_terminal_controls
 
 Runner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]]
@@ -669,7 +669,12 @@ class GitLocalSourceBackend:
                 shutil.rmtree(destination)
             else:
                 destination.unlink()
-        shutil.copytree(source, destination)
+        try:
+            shutil.copytree(source, destination)
+            validate_materialization_source_tree(destination)
+        except (OSError, SvError):
+            remove_materialization_path(destination, ignore_errors=True)
+            raise
 
     def _candidate_roots(self, configured_skills_paths: Sequence[str]) -> list[str]:
         roots = ["skills"]

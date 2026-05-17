@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Hardened local and cached-Git skill materialization by revalidating copied temporary trees and removing unsafe partial destinations if a symlink or other unsupported path appears during copy.
 - Hardened local skill materialization by bounding total source-tree entries before copying, preventing hostile sources with many empty directories from exhausting filesystem traversal/copy work.
 - Hardened release version checks by resolving `sv.__version__` from source-tree metadata or installed package metadata, cleaning stale build artifacts before release builds, and removing hardcoded wheel/version strings from release verification docs and CI smoke tests.
 - Hardened skill-vault README, index output, and source path handling by bounding README reads before generated table updates, reporting non-UTF-8 README files as user-facing errors, escaping `sv index` output paths, rejecting Unicode format controls in backend/index/configured source paths, and updating docs for TTY skill browsing plus README metadata limits.

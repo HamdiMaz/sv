@@ -55,6 +55,35 @@ def test_copy_skill_folder_to_temp_rejects_symlink_in_source_tree(tmp_path: Path
     assert not target.exists()
 
 
+def test_copy_skill_folder_to_temp_rejects_symlink_created_during_copy(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "source" / "alpha"
+    temp_target = tmp_path / "project" / ".alpha.sv-tmp"
+    _write_skill(source, "remote\n")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n")
+
+    def copy_with_symlink(source_path, destination_path):
+        destination_path.mkdir(parents=True)
+        (destination_path / "SKILL.md").write_text(
+            (source_path / "SKILL.md").read_text()
+        )
+        (destination_path / "outside-link.txt").symlink_to(outside)
+
+    monkeypatch.setattr(shutil, "copytree", copy_with_symlink)
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        copy_skill_folder_to_temp(
+            source,
+            temp_target,
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    assert not temp_target.exists()
+    assert outside.read_text() == "outside\n"
+
+
 def test_copy_skill_folder_to_temp_rejects_source_trees_over_file_limit(
     tmp_path: Path, monkeypatch
 ):

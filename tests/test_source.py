@@ -233,6 +233,34 @@ def test_local_git_source_backend_materializes_and_reports_invalid_roots(
         LocalGitSourceBackend(not_git).read_file("skills/alpha/SKILL.md")
 
 
+def test_local_git_source_backend_rejects_symlink_created_during_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    skill_dir = repo_path / "skills" / "alpha"
+    skill_dir.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha.\n---\n")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n")
+    destination = tmp_path / "materialized"
+
+    def copy_with_symlink(source_path, destination_path):
+        destination_path.mkdir(parents=True)
+        (destination_path / "SKILL.md").write_text(
+            (source_path / "SKILL.md").read_text()
+        )
+        (destination_path / "outside-link.txt").symlink_to(outside)
+
+    monkeypatch.setattr(source_module.shutil, "copytree", copy_with_symlink)
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        LocalGitSourceBackend(repo_path).materialize_folder("skills/alpha", destination)
+
+    assert not destination.exists()
+    assert outside.read_text() == "outside\n"
+
+
 def test_local_git_source_backend_rejects_symlinked_git_metadata(tmp_path: Path):
     if not hasattr(Path, "symlink_to"):
         pytest.skip("symlink support is required")

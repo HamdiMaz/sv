@@ -32,6 +32,10 @@ def copy_skill_folder_to_temp(
     try:
         validate_materialization_source_tree(source)
         shutil.copytree(source, temp_target)
+        validate_materialization_source_tree(temp_target)
+    except SvError:
+        remove_materialization_path(temp_target, ignore_errors=True)
+        raise
     except OSError as exc:
         remove_materialization_path(temp_target, ignore_errors=True)
         raise SvError(f"{error_message}: {exc}") from exc
