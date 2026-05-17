@@ -4,7 +4,7 @@
 
 ## Skill lists
 
-`sv list` shows one row per skill name so the main list stays easy to scan:
+In an interactive terminal, `sv list` opens a read-only browser so you can move through source skills before choosing anything. In non-interactive output, or when the browser is unavailable, `sv list` shows one row per skill name so the main table stays easy to scan:
 
 | Column | Meaning |
 | --- | --- |
@@ -52,6 +52,10 @@ find-docs  Team/Skills  Retrieves documentation
 Terminal control characters from repo metadata or skill descriptions are escaped before printing, so source content cannot clear your screen or hide output.
 
 `sv status` keeps global source status readable by abbreviating validated index and catalog hashes to the first 12 digest characters plus `...` in the table. The full canonical `sha256:<64 lowercase hex characters>` values remain in `~/.sv/manifest.toml` for auditing or debugging. Project and skill-vault status rows can include `missing` when a manifest still records a managed skill but the local target folder has already been deleted manually, or `invalid target` when that path exists but is no longer a directory.
+
+## Interactive table browser
+
+`sv list`, `sv search`, and TTY `sv repo list` output use the same inline table browser when stdin and stdout are interactive. Use ↑/↓ to move, ←/→ to page when available, `/` to filter rows, Enter to open details or the highlighted action, and `q` or Esc to go back. `sv list` and `sv search` details show focused skill metadata such as source, path, and description; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts.
 
 ## Interactive picker output
 

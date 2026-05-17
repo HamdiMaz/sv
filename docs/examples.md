@@ -10,7 +10,7 @@ sv repo list
 sv list
 ```
 
-`sv list` prints the main skill table as `Skill`, `Source`, and `Description`. If a name appears in more than one source, the main table shows one `N sources` row and a separate `Duplicate skill names` section shows each repo, description, and exact `Add as` value to copy. Duplicate groups show the skill name once so repeated source choices are easier to scan.
+In an interactive terminal, `sv list` opens the read-only skill browser; use ↑/↓ to move, `/` to filter, Enter for details, and `q` to quit. In scripts, logs, or other non-interactive output, it prints the main skill table as `Skill`, `Source`, and `Description`. If a name appears in more than one source, the table shows one `N sources` row and a separate `Duplicate skill names` section shows each repo, description, and exact `Add as` value to copy. Duplicate groups show the skill name once so repeated source choices are easier to scan.
 
 ## Add one skill
 

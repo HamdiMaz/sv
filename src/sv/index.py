@@ -33,6 +33,7 @@ _VALID_KINDS: tuple[IndexKind, ...] = ("skill-vault", "project-index")
 _MAX_INDEX_SKILL_ENTRIES = 5000
 _MAX_INDEX_SCAN_CANDIDATES = _MAX_INDEX_SKILL_ENTRIES
 _MAX_INDEX_FIELD_LENGTH = 8192
+_MAX_README_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,7 @@ def update_readme_skill_table(path: Path, document: IndexDocument) -> None:
 
     _reject_symlinked_readme_path(path)
     try:
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        text = _read_limited_readme_text(path)
         updated = _replace_or_append_readme_skill_block(text, document.skills)
         atomic_write_text(
             path,
@@ -101,7 +102,7 @@ def readme_skill_table_is_fresh(path: Path, document: IndexDocument) -> bool:
 
     _reject_symlinked_readme_path(path)
     try:
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        text = _read_limited_readme_text(path)
         return text == _replace_or_append_readme_skill_block(text, document.skills)
     except SvError:
         raise
@@ -176,6 +177,36 @@ def _reject_symlinked_readme_path(path: Path) -> None:
         raise SvError(f"Failed to inspect README path {path}: {exc}") from exc
 
 
+def _read_limited_readme_text(path: Path) -> str:
+    if not path.exists():
+        return ""
+    try:
+        size = path.stat().st_size
+        if size > _MAX_README_BYTES:
+            raise SvError(
+                f"Failed to read {README_DOCUMENT} at {path}: document exceeds size "
+                f"limit ({_MAX_README_BYTES} bytes)."
+            )
+        with path.open("rb") as file:
+            content = file.read(_MAX_README_BYTES + 1)
+    except SvError:
+        raise
+    except OSError as exc:
+        raise SvError(f"Failed to read {README_DOCUMENT} at {path}: {exc}") from exc
+
+    if len(content) > _MAX_README_BYTES:
+        raise SvError(
+            f"Failed to read {README_DOCUMENT} at {path}: document exceeds size "
+            f"limit ({_MAX_README_BYTES} bytes)."
+        )
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SvError(
+            f"Failed to read {README_DOCUMENT} at {path}: not valid UTF-8"
+        ) from exc
+
+
 def scan_repo_for_index(
     repo_root: Path,
     *,
@@ -190,7 +221,7 @@ def scan_repo_for_index(
     includes = _normalize_scan_paths(include_paths, field="include_paths")
     excludes = _normalize_scan_paths(exclude_paths, field="exclude_paths")
     entries: list[IndexSkillEntry] = []
-    for skill_file in _iter_candidate_skill_files(root, includes, excludes):
+    for skill_file in _iter_candidate_skill_files(root, includes, excludes, warn=warn):
         skill_dir = skill_file.parent
         try:
             metadata = parse_skill_file(skill_file, expected_folder=skill_dir.name)
@@ -247,7 +278,11 @@ _SKIPPED_SCAN_DIRS = {
 
 
 def _iter_candidate_skill_files(
-    root: Path, include_paths: Sequence[str], exclude_paths: Sequence[str]
+    root: Path,
+    include_paths: Sequence[str],
+    exclude_paths: Sequence[str],
+    *,
+    warn: Callable[[str], None] | None = None,
 ) -> list[Path]:
     candidates: list[Path] = []
     seen: set[str] = set()
@@ -261,16 +296,27 @@ def _iter_candidate_skill_files(
             continue
         if path.is_file():
             if path.name == "SKILL.md" and not _is_excluded(relative_root, exclude_paths):
-                _append_candidate(path, root, candidates, seen)
+                _append_candidate(path, root, candidates, seen, warn=warn)
             continue
-        _collect_candidate_skill_files(path, root, candidates, exclude_paths, seen)
+        _collect_candidate_skill_files(
+            path, root, candidates, exclude_paths, seen, warn=warn
+        )
     return candidates
 
 
 def _append_candidate(
-    path: Path, root: Path, candidates: list[Path], seen: set[str]
+    path: Path,
+    root: Path,
+    candidates: list[Path],
+    seen: set[str],
+    *,
+    warn: Callable[[str], None] | None = None,
 ) -> None:
-    relative_path = _repo_relative_path(path, root)
+    try:
+        relative_path = _repo_relative_path(path, root)
+    except SvError as exc:
+        _warn_invalid_skill(warn, path.parent, exc)
+        return
     if relative_path in seen:
         return
     if len(candidates) >= _MAX_INDEX_SCAN_CANDIDATES:
@@ -287,17 +333,19 @@ def _collect_candidate_skill_files(
     candidates: list[Path],
     exclude_paths: Sequence[str],
     seen: set[str],
+    *,
+    warn: Callable[[str], None] | None = None,
 ) -> None:
     try:
         with os.scandir(path) as entries:
             sorted_entries = sorted(entries, key=lambda entry: entry.name)
             for entry in sorted_entries:
                 child = Path(entry.path)
-                relative_child = _repo_relative_path(child, root)
+                relative_child = _raw_repo_relative_path(child, root)
                 if _is_excluded(relative_child, exclude_paths):
                     continue
                 if entry.name == "SKILL.md":
-                    _append_candidate(child, root, candidates, seen)
+                    _append_candidate(child, root, candidates, seen, warn=warn)
                     continue
                 try:
                     is_dir = entry.is_dir(follow_symlinks=False)
@@ -306,7 +354,9 @@ def _collect_candidate_skill_files(
                 if is_dir:
                     if entry.name in _SKIPPED_SCAN_DIRS:
                         continue
-                    _collect_candidate_skill_files(child, root, candidates, exclude_paths, seen)
+                    _collect_candidate_skill_files(
+                        child, root, candidates, exclude_paths, seen, warn=warn
+                    )
     except OSError as exc:
         raise SvError(f"Failed to scan directory {path}: {exc}") from exc
 
@@ -361,11 +411,15 @@ def _is_excluded(path: str, exclude_paths: Sequence[str]) -> bool:
 
 
 def _repo_relative_path(path: Path, root: Path) -> str:
+    return normalize_source_relative_path(_raw_repo_relative_path(path, root))
+
+
+def _raw_repo_relative_path(path: Path, root: Path) -> str:
     try:
         relative = path.relative_to(root)
     except ValueError as exc:
         raise SvError(f"Path {path} is outside repository root {root}.") from exc
-    return normalize_source_relative_path(relative.as_posix())
+    return relative.as_posix()
 
 
 def _warn_invalid_skill(

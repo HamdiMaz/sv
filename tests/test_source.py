@@ -130,7 +130,17 @@ def test_github_item_helpers_reject_malformed_directory_items():
 
 
 def test_normalize_backend_relative_path_rejects_unsafe_edge_cases():
-    for value in ("bad\x1fname", "/absolute", "windows\\path", "bad:name", "", ".", "../up"):
+    for value in (
+        "bad\x1fname",
+        "/absolute",
+        "windows\\path",
+        "bad:name",
+        "",
+        ".",
+        "../up",
+        "skills/zero\u200bwidth/SKILL.md",
+        "skills/rtl\u202eoverride/SKILL.md",
+    ):
         with pytest.raises(SvError):
             source_module._normalize_backend_relative_path(value)
 

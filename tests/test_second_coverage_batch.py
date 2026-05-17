@@ -1452,19 +1452,20 @@ def test_index_readme_and_scan_error_edges(tmp_path: Path, monkeypatch):
         )
 
     readme.write_text("old")
-    original_read_text = Path.read_text
+    original_open = Path.open
 
     def fail_read(self, *args, **kwargs):
-        if self == readme:
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self == readme and mode == "rb":
             raise OSError("read failed")
-        return original_read_text(self, *args, **kwargs)
+        return original_open(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", fail_read)
+    monkeypatch.setattr(Path, "open", fail_read)
     with pytest.raises(SvError, match="Failed to read README"):
         index_module.readme_skill_table_is_fresh(readme, vault_doc)
-    with pytest.raises(SvError, match="Failed to update README"):
+    with pytest.raises(SvError, match="Failed to read README"):
         index_module.update_readme_skill_table(readme, vault_doc)
-    monkeypatch.setattr(Path, "read_text", original_read_text)
+    monkeypatch.setattr(Path, "open", original_open)
 
     root = tmp_path / "repo"
     (root / "skills" / "alpha").mkdir(parents=True)

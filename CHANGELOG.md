@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Hardened skill-vault README, index output, and source path handling by bounding README reads before generated table updates, reporting non-UTF-8 README files as user-facing errors, escaping `sv index` output paths, rejecting Unicode format controls in backend/index/configured source paths, and updating docs for TTY skill browsing plus README metadata limits.
 - Hardened release safety by rejecting symlinked manifest reads, validating project skill trees before `sv run`, bounding skill-directory hashing and index candidate scans, safely decoding subprocess output with invalid UTF-8, rejecting Unicode format controls in qualified repo IDs, failing closed on non-UTF-8 remote `SKILL.md` metadata, and documenting path-aware `Add as` references plus current source-refresh behavior.
 - Fixed `sv status` and bulk `sv remove` to surface managed manifest entries whose local skill folders were deleted or replaced manually, marking them as `missing`/`invalid target`, avoiding unnecessary source refreshes when every target is unavailable, and pruning stale manifest entries during confirmed bulk removal.
 - Fixed automatic local index refreshes and skill-vault freshness checks to honor persistent `.sv/index-config.toml` include/exclude paths, reject symlinked scan configs, symlinked include roots, and symlinked existing index files before mutation/indexing, and compare freshness in canonical index order.

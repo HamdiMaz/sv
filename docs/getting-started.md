@@ -24,7 +24,7 @@ sv repo list
 sv list
 ```
 
-The main list shows `Skill`, `Source`, and `Description`. If two repos or source paths provide the same skill name, `sv` shows one `N sources` row in the main list and adds a separate `Duplicate skill names` section with each repo, description, and `Add as` value. Duplicate groups show the skill name once, then list each source choice beneath it. Copy the exact `Add as` value when you need a specific source:
+In an interactive terminal, `sv list` opens a read-only browser with `Skill`, `Source`, and `Description` columns. Use ↑/↓ to move, `/` to filter, Enter to view details, and `q` to quit. In non-interactive output, or if the browser is unavailable, `sv list` prints the same columns as a table. If two repos or source paths provide the same skill name, the table shows one `N sources` row and adds a separate `Duplicate skill names` section with each repo, description, and `Add as` value. Duplicate groups show the skill name once, then list each source choice beneath it. Copy the exact `Add as` value when you need a specific source:
 
 ```bash
 sv add HamdiMaz/Skills:find-docs

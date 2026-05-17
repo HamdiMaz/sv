@@ -8,7 +8,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | --- | --- | --- |
 | `sv init [folder]` | You want to create a skill-vault repository scaffold. | Initializes the current directory or the optional target folder and makes nested vaults detectable as Git repos. |
 | `sv status` | You want local managed-skill state. | Reports modified, update-available, orphan, missing/invalid target, index, and README status for projects, skill-vaults, or global source context. Global source index/catalog hashes are abbreviated to the first 12 digest characters for readable tables; full hashes stay in `~/.sv/manifest.toml`. |
-| `sv list` | You want to see available source skills. | Refreshes configured sources before listing, using GitHub API backends before lightweight Git fallback for GitHub repos. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values, showing each duplicate skill name once per group. |
+| `sv list` | You want to see available source skills. | Refreshes configured sources before listing, using GitHub API backends before lightweight Git fallback for GitHub repos. If no repos are configured, prints the `sv repo add` next step. TTY output opens a read-only browser with filtering and Enter-for-details; non-TTY output prints the compact table and duplicate-name `Add as` section. |
 | `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser so Enter can show details. |
 | `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
 | `sv add <repo>:<skill>` or `sv add <repo>:<path/to/skill>` | Multiple repos or source paths provide the same skill name. | Copy the exact `Add as` value from the `Duplicate skill names` section in `sv list`. |
@@ -31,7 +31,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv repo add <owner/repo>` | Add a GitHub source repo. |
 | `sv repo add <path-or-url>` | Add a local or Git URL source repo. |
 | `sv repo add <repo> --skills-path <path>` | Add a source repo with one bounded discovery root. Repeat `--skills-path` to scan multiple repo-relative skill roots. |
-| `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. |
+| `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skills; Enter on a skill installs it; `a` installs all non-conflicting skills from that repo. |
 | `sv repo -l` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
 | `sv repo remove -l` | Choose one or more source repos to remove from an interactive list. Use `--yes` to skip the confirmation prompt. |
@@ -41,7 +41,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 
 ## Index publishing
 
-Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`; `sv` uses the same persistent scan config when it auto-refreshes a local index or checks skill-vault index/README freshness:
+Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. In a skill-vault repo, it also refreshes the generated README skill table; README files touched by that update must be UTF-8 and no larger than 4 MiB. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`; `sv` uses the same persistent scan config when it auto-refreshes a local index or checks skill-vault index/README freshness:
 
 ```toml
 schema_version = 1

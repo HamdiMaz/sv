@@ -1565,7 +1565,7 @@ def _handle_index(cwd: Path, *, args: argparse.Namespace) -> int:
         update_readme_skill_table(readme_path(repo_root), document)
     skill_count = len(document.skills)
     suffix = "" if skill_count == 1 else "s"
-    print(f"Wrote sv index with {skill_count} skill{suffix} to {path}")
+    print(f"Wrote sv index with {skill_count} skill{suffix} to {_escape_output_path(path)}")
     return 0
 
 

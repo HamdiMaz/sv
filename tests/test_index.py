@@ -106,6 +106,38 @@ def test_scan_repo_for_index_deduplicates_overlapping_include_paths(tmp_path: Pa
     ]
 
 
+def test_scan_repo_for_index_ignores_unrelated_unicode_format_paths(tmp_path: Path):
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+    (tmp_path / "notes\u202e.md").write_text("not a skill\n", encoding="utf-8")
+    (tmp_path / "drafts\u202e").mkdir()
+    (tmp_path / "drafts\u202e" / "notes.txt").write_text("not a skill\n", encoding="utf-8")
+
+    document = scan_repo_for_index(tmp_path, generated_at="2026-05-15T00:00:00Z")
+
+    assert [(entry.name, entry.source_path) for entry in document.skills] == [
+        ("alpha", "skills/alpha"),
+    ]
+
+
+def test_scan_repo_for_index_warns_and_skips_unicode_format_candidate_paths(
+    tmp_path: Path,
+):
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+    _write_skill(tmp_path / "unsafe\u202e" / "beta", "beta", "Beta skill.")
+    warnings: list[str] = []
+
+    document = scan_repo_for_index(
+        tmp_path,
+        generated_at="2026-05-15T00:00:00Z",
+        warn=warnings.append,
+    )
+
+    assert [(entry.name, entry.source_path) for entry in document.skills] == [
+        ("alpha", "skills/alpha"),
+    ]
+    assert warnings and "Unicode format characters" in warnings[0]
+
+
 def test_scan_repo_for_index_enforces_candidate_limit_before_hashing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -356,6 +388,27 @@ def test_load_index_rejects_unsafe_source_path(tmp_path: Path):
     )
 
     with pytest.raises(SvError, match="source_path"):
+        load_index(path)
+
+
+def test_load_index_rejects_unicode_format_source_path(tmp_path: Path):
+    path = tmp_path / ".sv" / "index.toml"
+    path.parent.mkdir()
+    path.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "\n"
+        "[[skills]]\n"
+        'name = "alpha"\n'
+        'description = "Alpha."\n'
+        'source_path = "skills/rtl\u202eoverride/alpha"\n'
+        'content_hash = "sha256:ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73"\n'
+        'skill_file_hash = "sha256:fac608e8879fb4f49e6adeb8a35e48d431e8e3d9fbd3c50416a805cf70403926"\n'
+    )
+
+    with pytest.raises(SvError, match="Unicode format characters"):
         load_index(path)
 
 
@@ -831,6 +884,36 @@ def test_update_readme_skill_table_creates_missing_markers(tmp_path: Path):
         "<!-- sv:skills:end -->\n"
     )
     assert readme_skill_table_is_fresh(readme, document) is True
+
+
+def test_readme_skill_table_helpers_reject_oversized_readme_before_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(index_module, "_MAX_README_BYTES", 4, raising=False)
+    readme = tmp_path / "README.md"
+    readme.write_bytes(b"12345")
+    document = IndexDocument(kind="skill-vault", generated_by="sv", generated_at="now")
+
+    with pytest.raises(SvError, match="README.*exceeds size limit"):
+        readme_skill_table_is_fresh(readme, document)
+    with pytest.raises(SvError, match="README.*exceeds size limit"):
+        update_readme_skill_table(readme, document)
+
+    assert readme.read_bytes() == b"12345"
+    assert not (tmp_path / ".README.md.sv-tmp").exists()
+
+
+def test_readme_skill_table_helpers_report_invalid_utf8(tmp_path: Path):
+    readme = tmp_path / "README.md"
+    readme.write_bytes(b"\xff")
+    document = IndexDocument(kind="skill-vault", generated_by="sv", generated_at="now")
+
+    with pytest.raises(SvError, match="not valid UTF-8"):
+        readme_skill_table_is_fresh(readme, document)
+    with pytest.raises(SvError, match="not valid UTF-8"):
+        update_readme_skill_table(readme, document)
+
+    assert readme.read_bytes() == b"\xff"
 
 
 def test_readme_skill_table_helpers_handle_project_kind_and_marker_errors(tmp_path: Path):

@@ -7,6 +7,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 import hashlib
 import re
+import unicodedata
 
 from sv.errors import SvError
 from sv.tomlutil import (
@@ -464,6 +465,7 @@ def _relative_repo_path_validation_error(value: str) -> str | None:
         or "\\" in value
         or ":" in value
         or _contains_control_character(value)
+        or _contains_unicode_format_character(value)
         or any(part in {"", ".", ".."} for part in parts)
     ):
         return "contains unsafe path components"
@@ -472,6 +474,10 @@ def _relative_repo_path_validation_error(value: str) -> str | None:
 
 def _contains_control_character(value: str) -> bool:
     return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
+
+
+def _contains_unicode_format_character(value: str) -> bool:
+    return any(unicodedata.category(char) == "Cf" for char in value)
 
 
 def _validate_repo_url_safety(value: str) -> None:

@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from typing import Any, Protocol, cast
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -1697,6 +1698,10 @@ def _gh_failure_hint(detail: str) -> str | None:
 def _normalize_backend_relative_path(path: str) -> str:
     if _contains_control_character(path):
         raise SvError(f"Source backend path contains control characters: {path!r}.")
+    if _contains_unicode_format_character(path):
+        raise SvError(
+            f"Source backend path contains Unicode format characters: {path!r}."
+        )
     candidate = PurePosixPath(path)
     if candidate.is_absolute() or "\\" in path:
         raise SvError(f"Source backend path must be a relative POSIX path: {path!r}.")
@@ -1710,6 +1715,10 @@ def _normalize_backend_relative_path(path: str) -> str:
 
 def _contains_control_character(value: str) -> bool:
     return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
+
+
+def _contains_unicode_format_character(value: str) -> bool:
+    return any(unicodedata.category(char) == "Cf" for char in value)
 
 
 def _is_default_candidate_skill_file(path: str) -> bool:

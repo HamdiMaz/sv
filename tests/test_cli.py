@@ -627,6 +627,23 @@ def test_index_command_writes_project_index_and_warns_for_invalid_skills(
     assert "Wrote sv index with 1 skill" in result.stdout
 
 
+def test_index_command_escapes_output_path(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project\x1b[31m"
+    skill = project / "skills" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        encoding="utf-8",
+    )
+
+    result = run_sv(parse(["index"]), cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "\x1b" not in result.stdout
+    assert "\\x1b[31m" in result.stdout
+
+
 def test_index_command_updates_readme_only_for_skill_vaults(
     tmp_path: Path, run_sv
 ):

@@ -433,6 +433,8 @@ def test_load_config_deduplicates_repo_skills_paths(tmp_path: Path):
         "../outside",
         "skills/../outside",
         "skills\\u001b/bad",
+        "skills/zero\u200bwidth",
+        "skills/rtl\u202eoverride",
     ],
 )
 def test_load_config_rejects_unsafe_repo_skills_paths(
@@ -595,6 +597,15 @@ def test_add_repo_rejects_non_string_skills_path_value(tmp_path: Path):
 
     with pytest.raises(SvError, match="--skills-path: value must be a string"):
         add_repo(paths, "Org/Skills", skills_paths=bad_skills_paths)
+
+    assert not paths.config_file.exists()
+
+
+def test_add_repo_rejects_unicode_format_skills_path(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+
+    with pytest.raises(SvError, match="--skills-path.*unsafe path components"):
+        add_repo(paths, "Org/Skills", skills_paths=("skills/zero\u200bwidth",))
 
     assert not paths.config_file.exists()
 
