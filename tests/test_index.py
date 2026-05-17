@@ -819,6 +819,32 @@ def test_index_scan_config_validation_and_dedupes_paths(tmp_path: Path):
         load_index_scan_config(tmp_path)
 
 
+def test_load_index_scan_config_rejects_symlinked_config_file(tmp_path: Path):
+    from sv.index import load_index_scan_config
+
+    config_dir = tmp_path / ".sv"
+    config_dir.mkdir()
+    outside_config = tmp_path / "outside-index-config.toml"
+    outside_config.write_text("schema_version = 1\n", encoding="utf-8")
+    (config_dir / "index-config.toml").symlink_to(outside_config)
+
+    with pytest.raises(SvError, match="symlinked sv index scan config"):
+        load_index_scan_config(tmp_path)
+
+
+def test_load_index_scan_config_rejects_broken_symlinked_config_file(
+    tmp_path: Path,
+):
+    from sv.index import load_index_scan_config
+
+    config_dir = tmp_path / ".sv"
+    config_dir.mkdir()
+    (config_dir / "index-config.toml").symlink_to(tmp_path / "missing.toml")
+
+    with pytest.raises(SvError, match="symlinked sv index scan config"):
+        load_index_scan_config(tmp_path)
+
+
 def test_load_index_bytes_and_validation_errors_are_actionable(tmp_path: Path):
     from sv.index import load_index_bytes
 

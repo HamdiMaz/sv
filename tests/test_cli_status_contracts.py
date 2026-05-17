@@ -198,6 +198,66 @@ def test_status_in_skill_vault_reports_stale_index_and_readme(
     assert "stale" in result.stdout
 
 
+def test_status_in_skill_vault_freshness_honors_persistent_scan_config(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    result = run_sv(["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner)
+    assert result.exit_code == 0
+    (vault / ".sv" / "index-config.toml").write_text(
+        "schema_version = 1\n"
+        'exclude_paths = ["skills/draft"]\n',
+        encoding="utf-8",
+    )
+    draft = vault / "skills" / "draft"
+    draft.mkdir()
+    (draft / "SKILL.md").write_text(
+        "---\nname: draft\ndescription: Draft skill.\n---\n",
+        encoding="utf-8",
+    )
+
+    result = run_sv(["status"], cwd=vault, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "Index: fresh" in result.stdout
+    assert "README: fresh" in result.stdout
+
+
+def test_status_in_skill_vault_compares_freshness_in_canonical_index_order(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    result = run_sv(["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner)
+    assert result.exit_code == 0
+    (vault / ".sv" / "index-config.toml").write_text(
+        "schema_version = 1\n"
+        'include_paths = ["z-root", "a-root"]\n',
+        encoding="utf-8",
+    )
+    alpha = vault / "z-root" / "alpha"
+    beta = vault / "a-root" / "beta"
+    alpha.mkdir(parents=True)
+    beta.mkdir(parents=True)
+    (alpha / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        encoding="utf-8",
+    )
+    (beta / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: Beta skill.\n---\n",
+        encoding="utf-8",
+    )
+    index_result = run_sv(["index"], cwd=vault, home=home, git_runner=default_runner)
+    assert index_result.exit_code == 0
+
+    result = run_sv(["status"], cwd=vault, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "Index: fresh" in result.stdout
+    assert "README: fresh" in result.stdout
+
+
 def test_status_in_empty_skill_vault_does_not_refresh_unreachable_sources(
     tmp_path: Path, run_sv
 ):

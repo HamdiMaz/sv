@@ -177,6 +177,7 @@ def add_repo(
     if not paths.config_file.exists():
         config = SvConfig(repos=())
 
+    _reject_ambiguous_repo_references((*config.repos, repo_config), paths)
     repo_key = repo_source_key(repo_config.url)
     for index, existing in enumerate(config.repos):
         if existing.id == repo_config.id or repo_source_key(existing.url) == repo_key:
@@ -191,7 +192,9 @@ def add_repo(
             _save_config(paths, SvConfig(repos=tuple(repos)))
             return RepoChangeResult(repo=updated, status="updated")
 
-    _save_config(paths, SvConfig(repos=(*config.repos, repo_config)))
+    updated_config = SvConfig(repos=(*config.repos, repo_config))
+    _reject_ambiguous_repo_references(updated_config.repos, paths)
+    _save_config(paths, updated_config)
     return RepoChangeResult(repo=repo_config, status="added")
 
 
@@ -284,7 +287,26 @@ def _parse_repo_entries(raw_repos: Any, paths: SvPaths) -> tuple[RepoConfig, ...
             continue
         seen_by_source[source_key] = len(repos)
         repos.append(repo_config)
-    return tuple(repos)
+    parsed_repos = tuple(repos)
+    _reject_ambiguous_repo_references(parsed_repos, paths)
+    return parsed_repos
+
+
+def _reject_ambiguous_repo_references(
+    repos: tuple[RepoConfig, ...], paths: SvPaths
+) -> None:
+    references: dict[str, tuple[str, str]] = {}
+    for repo in repos:
+        source_key = repo_source_key(repo.url)
+        for reference in (repo.id, *repo.aliases):
+            existing = references.get(reference)
+            if existing is not None and existing[0] != source_key:
+                raise SvError(
+                    f"Invalid sv config at {paths.config_file}: repo reference "
+                    f"{reference!r} is used for both {existing[1]!r} and "
+                    f"{repo.id!r}."
+                )
+            references[reference] = (source_key, repo.id)
 
 
 def _append_unique(

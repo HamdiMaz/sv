@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed automatic local index refreshes and skill-vault freshness checks to honor persistent `.sv/index-config.toml` include/exclude paths, reject symlinked scan configs, symlinked include roots, and symlinked existing index files before mutation/indexing, and compare freshness in canonical index order.
+- Fixed source config loading and `sv repo add` to reject ambiguous repo aliases that collide with a different primary repo ID.
+- Updated README and command docs to match current sync safety behavior and clarify persistent index scan config reuse.
 - Fixed TTY skill browsing details to omit copy-paste-oriented `Add as` references while keeping focused source/path metadata.
 - Fixed source metadata and index reads to enforce byte limits across Git and GitHub backends, bound `gh api` output capture, and reject oversized index entry sets and fields before parsing can exhaust resources.
 - Fixed `sv index --include` to reject symlinked include paths before scanning so index generation cannot read outside the repository through symlinked roots.

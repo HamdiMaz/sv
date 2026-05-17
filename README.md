@@ -54,7 +54,7 @@ sv repo add HamdiMaz/Skills
 sv repo add SomeOrg/TeamSkills
 ```
 
-Removing the last repo writes `repos = []`, which intentionally disables all sources until you add another repo. Removing `~/.sv/config.toml` returns to first-run behavior, not to an implicit default source.
+Removing the last repo writes `repos = []`, which intentionally disables all sources until you add another repo. Removing `~/.sv/config.toml` returns to first-run behavior, not to an implicit default source. Repo IDs and aliases must stay unambiguous; `sv` rejects config loads and `sv repo add` attempts that would make one reference point at different source repos.
 
 ## Quick start
 
@@ -148,7 +148,7 @@ Force-sync project skills from their recorded source repos:
 sv sync
 ```
 
-`sv sync` refreshes configured sources, then replaces matching project skill folders with the source copy. Local edits inside synced skill folders are overwritten. Legacy skills without manifest entries are adopted and overwritten only when exactly one configured repo provides that skill name; ambiguous or local-only skills are skipped with a clear message. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
+`sv sync` refreshes configured sources, then replaces managed project skill folders with the source copy recorded in the manifest. Local edits inside synced managed skill folders are overwritten. Unmanaged local skill folders without manifest entries are not adopted automatically; unique matches and local-only folders are skipped as local-only, while ambiguous matches report the possible sources. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
 
 Treat configured source repositories and their generated `.sv/index.toml` files as trusted inputs. When a refreshed source index reports the same content hash already recorded in the project manifest, `sv sync`/`sv update` can skip re-materializing that skill as an optimization; a stale or malicious index can therefore hide source changes until the index is regenerated or the source is removed and re-added.
 
@@ -188,7 +188,7 @@ The frontmatter `name` must match the folder name, and `description` must be non
 
 When `sv` installs or syncs a skill, it records the source repo in the canonical project manifest at `.sv/manifest.toml`. Legacy `.pi/skills/.sv-manifest.toml` files remain readable for migration. This lets `sv sync` and `sv update` refresh skills from the repo they came from, even when multiple repos contain the same skill name.
 
-Existing project skills without manifest entries are backfilled during sync when exactly one configured repo provides a valid skill with that name. Ambiguous or local-only skills are skipped with a clear message.
+Existing project skills without manifest entries stay unmanaged during sync. `sv` skips unique or local-only folders as local-only and reports ambiguous folders with the matching source repos, so accidental adoption never overwrites hand-managed skills.
 
 ## Safety and failure behavior
 

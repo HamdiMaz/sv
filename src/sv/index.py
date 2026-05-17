@@ -390,6 +390,7 @@ def load_index(path: Path) -> IndexDocument:
 
 def load_index_scan_config(repo_root: Path) -> IndexScanConfig:
     path = index_scan_config_path(repo_root)
+    _reject_symlinked_index_scan_config_path(path)
     if not path.exists():
         return IndexScanConfig()
     raw_data = load_toml_document(path, INDEX_SCAN_CONFIG_DOCUMENT)
@@ -407,6 +408,23 @@ def load_index_scan_config(repo_root: Path) -> IndexScanConfig:
         include_paths=_parse_scan_path_list(data.get("include_paths", []), "include_paths", path),
         exclude_paths=_parse_scan_path_list(data.get("exclude_paths", []), "exclude_paths", path),
     )
+
+
+def validate_index_scan_config_paths(
+    repo_root: Path, config: IndexScanConfig
+) -> None:
+    root = repo_root.resolve()
+    for relative_root in config.include_paths:
+        path = root / relative_root
+        _reject_unsafe_include_path(path, root)
+
+
+def _reject_symlinked_index_scan_config_path(path: Path) -> None:
+    try:
+        if path.is_symlink():
+            raise SvError(f"Refusing to read symlinked sv index scan config at {path}.")
+    except OSError as exc:
+        raise SvError(f"Failed to inspect sv index scan config at {path}: {exc}") from exc
 
 
 def load_index_bytes(content: bytes, path: Path) -> IndexDocument:

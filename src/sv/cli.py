@@ -36,6 +36,8 @@ from sv.config import (
 from sv.errors import SvError
 from sv.index import (
     IndexDocument,
+    IndexKind,
+    IndexSkillEntry,
     index_path,
     load_index,
     load_index_scan_config,
@@ -44,6 +46,7 @@ from sv.index import (
     save_index,
     scan_repo_for_index,
     update_readme_skill_table,
+    validate_index_scan_config_paths,
 )
 from sv.manifest import (
     GlobalSourceState,
@@ -1535,17 +1538,16 @@ def _missing_git_guidance() -> str:
 def _handle_index(cwd: Path, *, args: argparse.Namespace) -> int:
     repo_root = _find_repo_root(cwd)
     path = index_path(repo_root)
-    kind = "project-index"
+    if path.is_symlink():
+        raise SvError(f"Refusing to use symlinked sv index at {_escape_output_path(path)}.")
+    kind: IndexKind = "project-index"
     if path.exists():
         kind = load_index(path).kind
-    scan_config = load_index_scan_config(repo_root)
-    document = scan_repo_for_index(
+    document = _scan_repo_for_configured_index(
         repo_root,
         kind=kind,
-        generated_at=_utc_now(),
-        warn=lambda message: print(message, file=sys.stderr),
-        include_paths=(*scan_config.include_paths, *args.include_paths),
-        exclude_paths=(*scan_config.exclude_paths, *args.exclude_paths),
+        include_paths=args.include_paths,
+        exclude_paths=args.exclude_paths,
     )
     save_index(path, document)
     if document.kind == "skill-vault":
@@ -1562,6 +1564,24 @@ def _find_repo_root(cwd: Path) -> Path:
         if (candidate / ".git").exists():
             return candidate
     return current
+
+
+def _scan_repo_for_configured_index(
+    repo_root: Path,
+    *,
+    kind: IndexKind,
+    include_paths: Sequence[str] = (),
+    exclude_paths: Sequence[str] = (),
+) -> IndexDocument:
+    scan_config = load_index_scan_config(repo_root)
+    return scan_repo_for_index(
+        repo_root,
+        kind=kind,
+        generated_at=_utc_now(),
+        warn=lambda message: print(message, file=sys.stderr),
+        include_paths=(*scan_config.include_paths, *include_paths),
+        exclude_paths=(*scan_config.exclude_paths, *exclude_paths),
+    )
 
 
 def _handle_repo(
@@ -2056,6 +2076,7 @@ def _handle_add_all(
         if resolved_catalog is None:
             return 0
         catalog = resolved_catalog
+    _validate_local_index_refresh_config(context)
     result = _add_all_skills_to_context(
         catalog, cwd, adapter, context, replace_existing=replace_existing
     )
@@ -2119,6 +2140,7 @@ def _add_skill_to_context(
     *,
     replace_existing: bool = False,
 ) -> AddSkillResult:
+    _validate_local_index_refresh_config(context)
     if context.is_skill_vault:
         should_replace = _resolve_vault_replacement(
             entry, context.vault_skills_dir, replace_existing=replace_existing
@@ -2241,16 +2263,17 @@ def _vault_skill_replacement_warning(
     )
 
 
+def _validate_local_index_refresh_config(context: LocalContext) -> None:
+    if context.should_refresh_index:
+        scan_config = load_index_scan_config(context.repo_root)
+        validate_index_scan_config_paths(context.repo_root, scan_config)
+
+
 def _refresh_local_index_if_needed(context: LocalContext) -> None:
     if not context.should_refresh_index:
         return
-    kind = "skill-vault" if context.is_skill_vault else "project-index"
-    document = scan_repo_for_index(
-        context.repo_root,
-        kind=kind,
-        generated_at=_utc_now(),
-        warn=lambda message: print(message, file=sys.stderr),
-    )
+    kind: IndexKind = "skill-vault" if context.is_skill_vault else "project-index"
+    document = _scan_repo_for_configured_index(context.repo_root, kind=kind)
     save_index(index_path(context.repo_root), document)
     if document.kind == "skill-vault":
         update_readme_skill_table(readme_path(context.repo_root), document)
@@ -2318,6 +2341,7 @@ def _handle_remove(
     skill: str, cwd: Path, adapter: PiAdapter, context: LocalContext | None = None
 ) -> int:
     context = _detect_local_context(cwd) if context is None else context
+    _validate_local_index_refresh_config(context)
     if context.is_skill_vault:
         result = remove_vault_skill(skill, context.vault_skills_dir)
     else:
@@ -2347,6 +2371,7 @@ def _handle_remove_all(
         print("No skills removed.")
         return 0
 
+    _validate_local_index_refresh_config(context)
     _remove_managed_entries(entries, project_skills_dir, context)
     _refresh_local_index_if_needed(context)
     return 0
@@ -2392,6 +2417,7 @@ def _handle_remove_interactive(
         print("No skills removed.")
         return 0
 
+    _validate_local_index_refresh_config(context)
     _remove_managed_entries(selected_entries, project_skills_dir, context)
     _refresh_local_index_if_needed(context)
     return 0
@@ -2512,6 +2538,7 @@ def _handle_sync(
     context: LocalContext | None = None,
 ) -> int:
     context = _detect_local_context(cwd) if context is None else context
+    _validate_local_index_refresh_config(context)
     if context.is_skill_vault:
         result = sync_vault_skills(catalog, context.vault_skills_dir)
     else:
@@ -2658,12 +2685,7 @@ class _VaultFreshnessStatus:
 
 def _vault_freshness_status(repo_root: Path) -> _VaultFreshnessStatus:
     path = index_path(repo_root)
-    current = scan_repo_for_index(
-        repo_root,
-        kind="skill-vault",
-        generated_at=_utc_now(),
-        warn=lambda message: print(message, file=sys.stderr),
-    )
+    current = _scan_repo_for_configured_index(repo_root, kind="skill-vault")
     if not path.is_file():
         index_status = "missing"
     else:
@@ -2678,7 +2700,27 @@ def _vault_freshness_status(repo_root: Path) -> _VaultFreshnessStatus:
 
 
 def _index_skills_are_fresh(existing: IndexDocument, current: IndexDocument) -> bool:
-    return existing.kind == current.kind and existing.skills == current.skills
+    return (
+        existing.kind == current.kind
+        and _canonical_index_skills(existing.skills) == _canonical_index_skills(current.skills)
+    )
+
+
+def _canonical_index_skills(
+    skills: Sequence[IndexSkillEntry],
+) -> tuple[IndexSkillEntry, ...]:
+    return tuple(
+        sorted(
+            skills,
+            key=lambda entry: (
+                entry.name,
+                entry.source_path,
+                entry.description,
+                entry.content_hash,
+                entry.skill_file_hash,
+            ),
+        )
+    )
 
 
 def _handle_global_status(paths: SvPaths) -> int:
@@ -2907,6 +2949,7 @@ def _handle_update(
         allow_partial_failures=False,
     )
     context = _detect_local_context(cwd) if context is None else context
+    _validate_local_index_refresh_config(context)
     if context.is_skill_vault:
         print("Updating vault skills...")
         result = update_vault_skills(catalog, context.vault_skills_dir)

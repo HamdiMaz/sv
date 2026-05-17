@@ -40,7 +40,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 
 ## Index publishing
 
-Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`:
+Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`; `sv` uses the same persistent scan config when it auto-refreshes a local index or checks skill-vault index/README freshness:
 
 ```toml
 schema_version = 1

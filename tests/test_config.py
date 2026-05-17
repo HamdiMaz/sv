@@ -1,5 +1,7 @@
+from collections.abc import Sequence
 from pathlib import Path
 import tomllib
+from typing import cast
 
 import pytest
 
@@ -13,6 +15,7 @@ from sv.config import (
     derive_repo_id,
     load_config,
     normalize_repo,
+    recommended_sources,
     remove_repo,
 )
 from sv.errors import SvError
@@ -236,6 +239,10 @@ def test_single_repo_compatibility_property_returns_none_for_empty_config():
     assert SvConfig(repos=()).repo is None
 
 
+def test_recommended_sources_defaults_to_empty_tuple():
+    assert recommended_sources() == ()
+
+
 def test_load_config_reads_old_single_repo_config(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
@@ -397,6 +404,27 @@ def test_load_config_reads_repo_skills_paths(tmp_path: Path):
     )
 
 
+def test_load_config_deduplicates_repo_skills_paths(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        'schema_version = 1\n[[repos]]\n'
+        'id = "Org/Skills"\n'
+        'url = "https://github.com/Org/Skills.git"\n'
+        'skills_paths = ["skills", "skills", "tools/skills"]\n'
+    )
+
+    config = load_config(paths)
+
+    assert config.repos == (
+        RepoConfig(
+            id="Org/Skills",
+            url="https://github.com/Org/Skills.git",
+            skills_paths=("skills", "tools/skills"),
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     "skills_path",
     [
@@ -470,6 +498,26 @@ def test_load_config_rejects_unsafe_aliases(tmp_path: Path):
         load_config(paths)
 
 
+def test_load_config_rejects_alias_that_collides_with_another_repo_id(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    paths.config_file.parent.mkdir(parents=True)
+    paths.config_file.write_text(
+        'schema_version = 1\n[[repos]]\n'
+        'id = "Org/Primary"\n'
+        'url = "https://github.com/Org/Primary.git"\n'
+        'aliases = ["Org/Secondary"]\n'
+        '\n'
+        '[[repos]]\n'
+        'id = "Org/Secondary"\n'
+        'url = "https://github.com/Org/Secondary.git"\n'
+    )
+
+    with pytest.raises(SvError, match="repo reference 'Org/Secondary'"):
+        load_config(paths)
+
+
 def test_load_config_rejects_non_string_repo_value(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     paths.config_file.parent.mkdir(parents=True)
@@ -537,6 +585,16 @@ def test_add_repo_rejects_unsafe_github_shorthand(tmp_path: Path):
 
     with pytest.raises(SvError, match="repo id contains unsafe path components"):
         add_repo(paths, "Org/..")
+
+    assert not paths.config_file.exists()
+
+
+def test_add_repo_rejects_non_string_skills_path_value(tmp_path: Path):
+    paths = SvPaths.from_home(tmp_path)
+    bad_skills_paths = cast("Sequence[str]", (123,))
+
+    with pytest.raises(SvError, match="--skills-path: value must be a string"):
+        add_repo(paths, "Org/Skills", skills_paths=bad_skills_paths)
 
     assert not paths.config_file.exists()
 
@@ -811,6 +869,76 @@ def test_remove_repo_does_not_remove_canonical_repo_by_alias(tmp_path: Path):
             id="Org/Skills",
             url="https://github.com/Org/Skills.git",
             aliases=("Mirror/Skills",),
+        ),
+    )
+
+
+def test_add_repo_rejects_new_repo_id_that_collides_with_existing_alias(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    _save_config(
+        paths,
+        SvConfig(
+            repos=(
+                RepoConfig(
+                    id="Org/Primary",
+                    url="https://github.com/Org/Primary.git",
+                    aliases=("Org/Secondary",),
+                ),
+            )
+        ),
+    )
+    original = paths.config_file.read_text(encoding="utf-8")
+
+    with pytest.raises(SvError, match="repo reference 'Org/Secondary'"):
+        add_repo(paths, "Org/Secondary")
+
+    assert paths.config_file.read_text(encoding="utf-8") == original
+    assert load_config(paths).repos == (
+        RepoConfig(
+            id="Org/Primary",
+            url="https://github.com/Org/Primary.git",
+            aliases=("Org/Secondary",),
+        ),
+    )
+
+
+def test_add_repo_rejects_same_source_update_when_derived_id_is_other_alias(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    _save_config(
+        paths,
+        SvConfig(
+            repos=(
+                RepoConfig(
+                    id="Mirror/Skills",
+                    url="https://github.com/Org/Skills.git",
+                ),
+                RepoConfig(
+                    id="Other/Skills",
+                    url="https://github.com/Other/Skills.git",
+                    aliases=("Org/Skills",),
+                ),
+            )
+        ),
+    )
+    original = paths.config_file.read_text(encoding="utf-8")
+
+    with pytest.raises(SvError, match="repo reference 'Org/Skills'"):
+        add_repo(paths, "Org/Skills", skills_paths=("skills",))
+
+    assert paths.config_file.read_text(encoding="utf-8") == original
+    assert load_config(paths).repos == (
+        RepoConfig(
+            id="Mirror/Skills",
+            url="https://github.com/Org/Skills.git",
+        ),
+        RepoConfig(
+            id="Other/Skills",
+            url="https://github.com/Other/Skills.git",
+            aliases=("Org/Skills",),
         ),
     )
 

@@ -567,6 +567,32 @@ def test_init_command_reports_reversed_readme_markers(tmp_path: Path, run_sv):
     assert not (project / ".sv" / "manifest.toml").exists()
 
 
+def test_index_command_rejects_existing_symlinked_index_before_reading_kind(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".sv").mkdir(parents=True)
+    outside_index = tmp_path / "outside-index.toml"
+    outside_index.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+    (project / ".sv" / "index.toml").symlink_to(outside_index)
+    readme = project / "README.md"
+    readme.write_text("# Project\n", encoding="utf-8")
+
+    result = run_sv(parse(["index"]), cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked sv index" in result.stderr
+    assert outside_index.read_text(encoding="utf-8").startswith("schema_version = 1\n")
+    assert readme.read_text(encoding="utf-8") == "# Project\n"
+
+
 def test_index_command_writes_project_index_and_warns_for_invalid_skills(
     tmp_path: Path, run_sv
 ):
