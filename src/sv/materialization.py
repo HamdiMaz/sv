@@ -10,10 +10,12 @@ from sv.errors import SvError
 _MAX_MATERIALIZATION_FILES = 1000
 _MAX_MATERIALIZATION_BYTES = 10 * 1024 * 1024
 _MAX_MATERIALIZATION_DEPTH = 25
+_MAX_MATERIALIZATION_ENTRIES = 2000
 
 
 @dataclass
 class _MaterializationStats:
+    entries: int = 0
     files: int = 0
     bytes: int = 0
 
@@ -156,6 +158,9 @@ def _record_materialization_entry(
     depth = len(path.relative_to(source).parts)
     if depth > _MAX_MATERIALIZATION_DEPTH:
         raise SvError(f"Source materialization path exceeds depth limit: {source}.")
+    if stats.entries >= _MAX_MATERIALIZATION_ENTRIES:
+        raise SvError(f"Source materialization path exceeds entry limit: {source}.")
+    stats.entries += 1
 
     if path.is_dir():
         return

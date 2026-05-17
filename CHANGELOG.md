@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Hardened local skill materialization by bounding total source-tree entries before copying, preventing hostile sources with many empty directories from exhausting filesystem traversal/copy work.
 - Hardened release version checks by resolving `sv.__version__` from source-tree metadata or installed package metadata, cleaning stale build artifacts before release builds, and removing hardcoded wheel/version strings from release verification docs and CI smoke tests.
 - Hardened skill-vault README, index output, and source path handling by bounding README reads before generated table updates, reporting non-UTF-8 README files as user-facing errors, escaping `sv index` output paths, rejecting Unicode format controls in backend/index/configured source paths, and updating docs for TTY skill browsing plus README metadata limits.
 - Hardened release safety by rejecting symlinked manifest reads, validating project skill trees before `sv run`, bounding skill-directory hashing and index candidate scans, safely decoding subprocess output with invalid UTF-8, rejecting Unicode format controls in qualified repo IDs, failing closed on non-UTF-8 remote `SKILL.md` metadata, and documenting path-aware `Add as` references plus current source-refresh behavior.

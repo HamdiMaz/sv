@@ -74,6 +74,26 @@ def test_copy_skill_folder_to_temp_rejects_source_trees_over_file_limit(
     assert not temp_target.exists()
 
 
+def test_copy_skill_folder_to_temp_rejects_source_trees_over_entry_limit(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "source" / "alpha"
+    temp_target = tmp_path / "project" / ".alpha.sv-tmp"
+    _write_skill(source, "remote\n")
+    (source / "empty-dir").mkdir()
+
+    monkeypatch.setattr(materialization_module, "_MAX_MATERIALIZATION_ENTRIES", 1)
+
+    with pytest.raises(SvError, match="entry limit"):
+        copy_skill_folder_to_temp(
+            source,
+            temp_target,
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    assert not temp_target.exists()
+
+
 def test_copy_skill_folder_to_temp_rejects_source_trees_over_byte_limit(
     tmp_path: Path, monkeypatch
 ):
