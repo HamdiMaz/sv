@@ -4,8 +4,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
+import unicodedata
 
 from sv.errors import SvError
+from sv.terminal import escape_terminal_controls
 
 _MAX_MATERIALIZATION_FILES = 1000
 _MAX_MATERIALIZATION_BYTES = 10 * 1024 * 1024
@@ -31,7 +33,7 @@ def copy_skill_folder_to_temp(
     remove_materialization_path(temp_target, ignore_errors=True)
     try:
         validate_materialization_source_tree(source)
-        shutil.copytree(source, temp_target)
+        shutil.copytree(source, temp_target, symlinks=True)
         validate_materialization_source_tree(temp_target)
     except SvError:
         remove_materialization_path(temp_target, ignore_errors=True)
@@ -137,10 +139,7 @@ def replace_with_materialized_skill_folder(
 
 
 def validate_materialization_source_tree(source: Path) -> None:
-    if source.is_symlink():
-        raise SvError(
-            f"Source materialization path must not contain symlinks; contains a symlink at {source}."
-        )
+    _reject_symlinked_materialization_path_or_ancestors(source)
     if not source.is_dir():
         raise SvError(f"Source materialization path is not a directory: {source}.")
 
@@ -156,10 +155,26 @@ def validate_materialization_source_tree(source: Path) -> None:
         raise SvError(f"Failed to inspect source materialization path {source}: {exc}") from exc
 
 
+def _reject_symlinked_materialization_path_or_ancestors(source: Path) -> None:
+    for path in (*reversed(source.parents), source):
+        try:
+            if path.is_symlink():
+                raise SvError(
+                    "Source materialization path must not contain symlinks; "
+                    f"contains a symlink at {path}."
+                )
+        except OSError as exc:
+            raise SvError(
+                f"Failed to inspect source materialization path {path}: {exc}"
+            ) from exc
+
+
 def _record_materialization_entry(
     source: Path, path: Path, stats: _MaterializationStats
 ) -> None:
-    depth = len(path.relative_to(source).parts)
+    relative_path = path.relative_to(source)
+    _validate_materialization_relative_path(path, relative_path)
+    depth = len(relative_path.parts)
     if depth > _MAX_MATERIALIZATION_DEPTH:
         raise SvError(f"Source materialization path exceeds depth limit: {source}.")
     if stats.entries >= _MAX_MATERIALIZATION_ENTRIES:
@@ -177,6 +192,29 @@ def _record_materialization_entry(
     if stats.bytes > _MAX_MATERIALIZATION_BYTES:
         raise SvError(f"Source materialization path exceeds byte limit: {source}.")
     stats.files += 1
+
+
+def _validate_materialization_relative_path(path: Path, relative_path: Path) -> None:
+    if relative_path.is_absolute() or not relative_path.parts:
+        raise SvError(
+            "Source materialization path contains unsafe path name at "
+            f"{escape_terminal_controls(path)}."
+        )
+    for part in relative_path.parts:
+        if part in {"", ".", ".."} or _contains_unsafe_path_character(part):
+            raise SvError(
+                "Source materialization path contains unsafe path name at "
+                f"{escape_terminal_controls(path)}."
+            )
+
+
+def _contains_unsafe_path_character(value: str) -> bool:
+    return any(
+        ord(char) < 0x20
+        or 0x7F <= ord(char) < 0xA0
+        or unicodedata.category(char) == "Cf"
+        for char in value
+    )
 
 
 def restore_materialization_backup(target: Path, backup_target: Path) -> None:

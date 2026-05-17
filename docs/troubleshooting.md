@@ -46,7 +46,7 @@ Wide Unicode characters are counted by display width so rows should stay within 
 
 `sv` rejects oversized metadata before parsing it: TOML config and manifest files plus `SKILL.md` files are limited to 1 MiB, while source `.sv/index.toml` files fetched from configured repos and README files touched by skill-vault table updates have a separate 4 MiB limit. Source indexes and manifests also must store hashes as `sha256:<64 lowercase hex characters>`. If you see a size-limit, UTF-8, or hash-format error, regenerate the source index or manifest with a current `sv` instead of editing placeholder values by hand.
 
-Skill names and configured/indexed source paths must be visually safe. Rename source skill folders, frontmatter names, or `--skills-path` / `.sv/index.toml` paths that start with `-`, contain path separators or `:`, or include invisible Unicode format controls such as zero-width spaces or bidi override characters.
+Skill names, configured/indexed source paths, and nested file names inside materialized skill folders must be visually safe. Rename source skill folders, frontmatter names, copied skill files, or `--skills-path` / `.sv/index.toml` paths that start with `-`, contain path separators or `:`, include terminal control characters, or include invisible Unicode format controls such as zero-width spaces or bidi override characters.
 
 ## The same source appears twice
 

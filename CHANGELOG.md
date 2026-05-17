@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hardened skill materialization to reject nested source path names containing terminal control characters or Unicode format controls before copying them into projects, and made local Git source materialization preserve newly introduced symlinks until post-copy validation can reject them.
+- Hardened atomic TOML writes, project skill targets, and local materialization sources to reject symlinked destination paths or symlinked ancestors before writing/copying state.
 - Hardened `sv index` repository scans with a directory-depth limit so deeply nested non-skill trees fail closed before unbounded traversal.
 - Hardened local and cached-Git skill materialization by revalidating copied temporary trees and removing unsafe partial destinations if a symlink or other unsupported path appears during copy.
 - Hardened local skill materialization by bounding total source-tree entries before copying, preventing hostile sources with many empty directories from exhausting filesystem traversal/copy work.

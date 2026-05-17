@@ -670,7 +670,7 @@ class GitLocalSourceBackend:
             else:
                 destination.unlink()
         try:
-            shutil.copytree(source, destination)
+            shutil.copytree(source, destination, symlinks=True)
             validate_materialization_source_tree(destination)
         except (OSError, SvError):
             remove_materialization_path(destination, ignore_errors=True)

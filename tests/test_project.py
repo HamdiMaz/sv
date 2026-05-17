@@ -205,6 +205,20 @@ def test_add_project_skill_reports_project_directory_creation_failures(tmp_path:
         add_project_skill(entry, project_skills)
 
 
+def test_add_project_skill_rejects_symlinked_project_ancestor(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    real_project = tmp_path / "real-project"
+    real_project.mkdir()
+    project_link = tmp_path / "project-link"
+    project_link.symlink_to(real_project, target_is_directory=True)
+    project_skills = project_link / ".pi" / "skills"
+
+    with pytest.raises(SvError, match="symlinked Pi skills path"):
+        add_project_skill(entry, project_skills)
+
+    assert not (real_project / ".pi").exists()
+
+
 def test_add_project_skill_wraps_copy_failures_and_cleans_temp(
     tmp_path: Path, monkeypatch
 ):

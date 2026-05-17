@@ -945,8 +945,7 @@ def _contains_unicode_format_character(value: str) -> bool:
 def _ensure_safe_project_skills_dir(
     project_skills_dir: Path, target_style: _TargetStyle = _PI_TARGET
 ) -> None:
-    parent_dir = project_skills_dir.parent
-    for path in (parent_dir, project_skills_dir):
+    for path in (*reversed(project_skills_dir.parents), project_skills_dir):
         try:
             if path.is_symlink():
                 raise SvError(

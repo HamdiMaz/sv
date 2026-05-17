@@ -150,6 +150,32 @@ def test_atomic_write_text_preserves_existing_file_when_write_fails(
     assert not list(tmp_path.glob(".state.toml.*.tmp"))
 
 
+def test_atomic_write_text_refuses_symlinked_destination(tmp_path: Path):
+    path = tmp_path / "state.toml"
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n")
+    path.symlink_to(outside)
+
+    with pytest.raises(SvError, match="symlinked sv state path"):
+        atomic_write_text(path, "new\n", document_name="sv state")
+
+    assert outside.read_text() == "outside\n"
+    assert path.is_symlink()
+
+
+def test_atomic_write_text_refuses_symlinked_destination_ancestor(tmp_path: Path):
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    symlinked_dir = tmp_path / "state-link"
+    symlinked_dir.symlink_to(outside_dir, target_is_directory=True)
+    path = symlinked_dir / "state.toml"
+
+    with pytest.raises(SvError, match="symlinked sv state path"):
+        atomic_write_text(path, "new\n", document_name="sv state")
+
+    assert not (outside_dir / "state.toml").exists()
+
+
 def test_atomic_write_text_refuses_symlinked_temp_file(tmp_path: Path):
     path = tmp_path / "state.toml"
     outside = tmp_path / "outside.txt"

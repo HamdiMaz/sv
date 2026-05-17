@@ -143,7 +143,9 @@ def atomic_write_text(
     """Atomically write UTF-8 text through a same-directory temp file."""
     temp_path = path.with_name(temp_name or f".{path.name}.{os.getpid()}.tmp")
     try:
+        _reject_symlinked_toml_path_or_ancestors(path, document_name)
         path.parent.mkdir(parents=True, exist_ok=True)
+        _reject_symlinked_toml_path_or_ancestors(path, document_name)
         if temp_path.is_symlink():
             temp_description = temp_path_description or document_name
             raise SvError(
@@ -160,6 +162,19 @@ def atomic_write_text(
             if not temp_path.is_symlink():
                 temp_path.unlink(missing_ok=True)
         raise SvError(f"Failed to write {document_name} at {path}: {exc}") from exc
+
+
+def _reject_symlinked_toml_path_or_ancestors(path: Path, document_name: str) -> None:
+    for candidate in (*reversed(path.parents), path):
+        try:
+            if candidate.is_symlink():
+                raise SvError(
+                    f"Refusing to write symlinked {document_name} path at {candidate}."
+                )
+        except OSError as exc:
+            raise SvError(
+                f"Failed to inspect {document_name} path {candidate}: {exc}"
+            ) from exc
 
 
 def _write_new_file_no_follow(path: Path, text: str) -> None:

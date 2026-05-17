@@ -245,7 +245,7 @@ def test_local_git_source_backend_rejects_symlink_created_during_materialization
     outside.write_text("outside\n")
     destination = tmp_path / "materialized"
 
-    def copy_with_symlink(source_path, destination_path):
+    def copy_with_symlink(source_path, destination_path, **kwargs):
         destination_path.mkdir(parents=True)
         (destination_path / "SKILL.md").write_text(
             (source_path / "SKILL.md").read_text()
@@ -257,6 +257,41 @@ def test_local_git_source_backend_rejects_symlink_created_during_materialization
     with pytest.raises(SvError, match="contains a symlink"):
         LocalGitSourceBackend(repo_path).materialize_folder("skills/alpha", destination)
 
+    assert not destination.exists()
+    assert outside.read_text() == "outside\n"
+
+
+def test_local_git_source_backend_rejects_source_symlink_added_after_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path = tmp_path / "repo"
+    skill_dir = repo_path / "skills" / "alpha"
+    skill_dir.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha.\n---\n")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n")
+    destination = tmp_path / "materialized"
+    real_validate = source_module.validate_materialization_source_tree
+    validation_calls = 0
+
+    def add_source_symlink_after_first_validation(path: Path) -> None:
+        nonlocal validation_calls
+        validation_calls += 1
+        real_validate(path)
+        if validation_calls == 1:
+            (skill_dir / "outside-link.txt").symlink_to(outside)
+
+    monkeypatch.setattr(
+        source_module,
+        "validate_materialization_source_tree",
+        add_source_symlink_after_first_validation,
+    )
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        LocalGitSourceBackend(repo_path).materialize_folder("skills/alpha", destination)
+
+    assert validation_calls == 2
     assert not destination.exists()
     assert outside.read_text() == "outside\n"
 

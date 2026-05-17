@@ -37,6 +37,24 @@ def test_copy_skill_folder_to_temp_copies_source_without_touching_target(tmp_pat
     assert (target / "SKILL.md").read_text() == "local\n"
 
 
+def test_copy_skill_folder_to_temp_rejects_symlinked_source_ancestor(tmp_path: Path):
+    real_source_root = tmp_path / "real-source"
+    source = real_source_root / "alpha"
+    _write_skill(source, "remote\n")
+    symlinked_root = tmp_path / "source-link"
+    symlinked_root.symlink_to(real_source_root, target_is_directory=True)
+    target = tmp_path / "project" / "alpha"
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        copy_skill_folder_to_temp(
+            symlinked_root / "alpha",
+            target.with_name(".alpha.sv-tmp"),
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    assert not target.exists()
+
+
 def test_copy_skill_folder_to_temp_rejects_symlink_in_source_tree(tmp_path: Path):
     source = tmp_path / "source" / "alpha"
     target = tmp_path / "project" / "alpha"
@@ -64,7 +82,7 @@ def test_copy_skill_folder_to_temp_rejects_symlink_created_during_copy(
     outside = tmp_path / "outside.txt"
     outside.write_text("outside\n")
 
-    def copy_with_symlink(source_path, destination_path):
+    def copy_with_symlink(source_path, destination_path, **kwargs):
         destination_path.mkdir(parents=True)
         (destination_path / "SKILL.md").write_text(
             (source_path / "SKILL.md").read_text()
@@ -82,6 +100,67 @@ def test_copy_skill_folder_to_temp_rejects_symlink_created_during_copy(
 
     assert not temp_target.exists()
     assert outside.read_text() == "outside\n"
+
+
+def test_copy_skill_folder_to_temp_rejects_source_symlink_added_after_validation(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "source" / "alpha"
+    temp_target = tmp_path / "project" / ".alpha.sv-tmp"
+    _write_skill(source, "remote\n")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n")
+    real_validate = materialization_module.validate_materialization_source_tree
+    validation_calls = 0
+
+    def add_source_symlink_after_first_validation(path: Path) -> None:
+        nonlocal validation_calls
+        validation_calls += 1
+        real_validate(path)
+        if validation_calls == 1:
+            (source / "outside-link.txt").symlink_to(outside)
+
+    monkeypatch.setattr(
+        materialization_module,
+        "validate_materialization_source_tree",
+        add_source_symlink_after_first_validation,
+    )
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        copy_skill_folder_to_temp(
+            source,
+            temp_target,
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    assert validation_calls == 2
+    assert not temp_target.exists()
+    assert outside.read_text() == "outside\n"
+
+
+@pytest.mark.parametrize(
+    ("unsafe_name", "escaped_name"),
+    [("bad\x1b.txt", "bad\\x1b.txt"), ("safe\u202e.txt", "safe\\u202e.txt")],
+)
+def test_copy_skill_folder_to_temp_rejects_unsafe_source_path_names(
+    tmp_path: Path, unsafe_name: str, escaped_name: str
+):
+    source = tmp_path / "source" / "alpha"
+    temp_target = tmp_path / "project" / ".alpha.sv-tmp"
+    _write_skill(source, "remote\n")
+    (source / unsafe_name).write_text("unsafe\n")
+
+    with pytest.raises(SvError, match="unsafe path name") as exc_info:
+        copy_skill_folder_to_temp(
+            source,
+            temp_target,
+            error_message="Failed to materialize skill 'alpha'",
+        )
+
+    message = str(exc_info.value)
+    assert unsafe_name not in message
+    assert escaped_name in message
+    assert not temp_target.exists()
 
 
 def test_copy_skill_folder_to_temp_rejects_source_trees_over_file_limit(
@@ -172,7 +251,7 @@ def test_copy_skill_folder_to_temp_cleans_partial_copy_and_preserves_target(
     _write_skill(source, "remote\n")
     _write_skill(target, "local\n")
 
-    def fail_copytree(source_path, destination_path):
+    def fail_copytree(source_path, destination_path, **kwargs):
         destination_path.mkdir(parents=True)
         (destination_path / "partial.txt").write_text("partial\n")
         raise OSError("copy failed")
