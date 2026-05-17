@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import tomllib
 
 import pytest
@@ -185,6 +186,32 @@ def test_load_manifest_rejects_missing_schema_version_in_canonical_manifest(tmp_
     manifest_module.manifest_path(project_skills).write_text("skills = []\n")
 
     with pytest.raises(SvError, match="missing 'schema_version'"):
+        load_manifest(project_skills)
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_load_manifest_rejects_symlinked_canonical_manifest(tmp_path: Path):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    outside = tmp_path / "outside-manifest.toml"
+    outside.write_text("schema_version = 1\nskills = []\n", encoding="utf-8")
+    path = manifest_module.manifest_path(project_skills)
+    path.parent.mkdir(parents=True)
+    path.symlink_to(outside)
+
+    with pytest.raises(SvError, match="Refusing to read symlinked sv project manifest"):
+        load_manifest(project_skills)
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_load_manifest_rejects_symlinked_legacy_manifest(tmp_path: Path):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    outside = tmp_path / "outside-legacy-manifest.toml"
+    outside.write_text("[[skills]]\n", encoding="utf-8")
+    path = manifest_module.legacy_manifest_path(project_skills)
+    path.parent.mkdir(parents=True)
+    path.symlink_to(outside)
+
+    with pytest.raises(SvError, match="Refusing to read symlinked legacy sv manifest"):
         load_manifest(project_skills)
 
 

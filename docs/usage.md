@@ -14,8 +14,9 @@ sv list
 # Add one skill to the current project
 sv add find-docs
 
-# Add a specific source when multiple repos provide the same skill name
+# Add a specific source when multiple repos or paths provide the same skill name
 sv add HamdiMaz/Skills:find-docs
+sv add Team/Skills:packages/agents/pi/skills/find-docs
 
 # Safely update unchanged project skills from their recorded sources
 sv update
@@ -46,18 +47,18 @@ When two repos contain the same skill name, `sv list` groups the name into one `
 ## Adding skills without surprises
 
 - `sv add <skill>` installs the skill when exactly one configured repo provides that name. When multiple repos match in an interactive terminal, it shows a compact source-choice table with repo, description, and `Add as` columns before asking you to pick one.
-- `sv add <repo>:<skill>` installs from one exact source.
+- `sv add <repo>:<skill>` installs from one exact source in the normal `skills/<name>` layout. Path-aware `Add as` values such as `sv add <repo>:<path/to/skill>` install indexed or non-default source paths.
 - `sv add -l` opens an interactive picker. The picker labels each row with its source repo ID so duplicate names are easy to distinguish without repeating the skill name twice. A help line keeps the controls visible while you move through the list. Long labels and the help line are shortened to your terminal width, and control characters in source metadata are printed as escaped text so the inline picker does not jump or clear the screen.
 - `sv add --all` installs every valid skill only when there are no duplicate skill names across configured repos.
 
-`sv` never overwrites an existing project skill during add. If the skill folder already exists, it reports that the skill is already present and leaves local files unchanged. When origin metadata is available, the message also tells you whether the existing skill came from the same repo or a different repo than the one you requested.
+`sv` never overwrites an existing project skill during add. If the skill folder already exists, it reports that the skill is already present and leaves local files unchanged. When origin metadata is available, the message also tells you whether the existing skill came from the same repo or a different repo than the one you requested. In a skill-vault repository, `sv add --replace <skill>` can intentionally replace an existing vault skill; non-interactive vault replacement requires `--replace`.
 
 ## Duplicate skill names
 
 Duplicate skill names are allowed in source repos, but a Pi project can only have one folder for a given skill name. To avoid accidental overwrites:
 
 1. Use `sv list` to find the `Add as` value in the `Duplicate skill names` section.
-2. Install one source explicitly with `sv add <repo>:<skill>`.
+2. Install one source explicitly with `sv add <repo>:<skill>` or the path-aware `Add as` value from the table.
 3. Avoid selecting two sources for the same skill name in `sv add -l`; `sv` rejects that selection before copying anything.
 
 ## Updating project skills
@@ -69,4 +70,4 @@ Force-synced skill folders are replaced with the source version, so local edits 
 
 ## Output and table behavior
 
-Tables are plain text so they work in terminals, logs, and CI. Long descriptions, URLs, and cache paths wrap within the current terminal width instead of pushing important columns off screen. Repo-like values prefer clean wrap points at `/` and `:` before hard wrapping, which keeps `owner/repo` IDs and `repo:skill` references easier to scan. Very narrow terminals use tighter column spacing and last-resort hard wrapping when necessary. Duplicate-name guidance wraps as well, so narrow terminals and CI logs stay readable. Terminal control characters from source metadata are escaped before display. Interactive picker rows are single-line and terminal-width aware so arrow-key navigation remains stable.
+Tables are plain text so they work in terminals, logs, and CI. Long descriptions, URLs, and cache paths wrap within the current terminal width instead of pushing important columns off screen. Repo-like values prefer clean wrap points at `/` and `:` before hard wrapping, which keeps `owner/repo` IDs and `repo:skill` or `repo:path/to/skill` references easier to scan. Very narrow terminals use tighter column spacing and last-resort hard wrapping when necessary. Duplicate-name guidance wraps as well, so narrow terminals and CI logs stay readable. Terminal control characters from source metadata are escaped before display. Interactive picker rows are single-line and terminal-width aware so arrow-key navigation remains stable.

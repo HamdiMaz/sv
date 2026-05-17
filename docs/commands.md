@@ -8,20 +8,21 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | --- | --- | --- |
 | `sv init [folder]` | You want to create a skill-vault repository scaffold. | Initializes the current directory or the optional target folder and makes nested vaults detectable as Git repos. |
 | `sv status` | You want local managed-skill state. | Reports modified, update-available, orphan, missing/invalid target, index, and README status for projects, skill-vaults, or global source context. Global source index/catalog hashes are abbreviated to the first 12 digest characters for readable tables; full hashes stay in `~/.sv/manifest.toml`. |
-| `sv list` | You want to see available source skills. | Refreshes configured source caches before listing. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values, showing each duplicate skill name once per group. |
+| `sv list` | You want to see available source skills. | Refreshes configured sources before listing, using GitHub API backends before lightweight Git fallback for GitHub repos. If no repos are configured, prints the `sv repo add` next step. The main table stays compact with one row per skill name; duplicate names get a separate section with descriptions and `Add as` values, showing each duplicate skill name once per group. |
 | `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser so Enter can show details. |
 | `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
-| `sv add <repo>:<skill>` | Multiple repos provide the same skill name. | Copy the exact value from the `Duplicate skill names` section in `sv list`. |
+| `sv add <repo>:<skill>` or `sv add <repo>:<path/to/skill>` | Multiple repos or source paths provide the same skill name. | Copy the exact `Add as` value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Use Space to select and Enter to confirm. |
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |
 | `sv add --all --repo <repo>` | You want every non-conflicting skill from one source. | Restricts bulk add to the configured repo ID, useful when other repos contain duplicate skill names. |
+| `sv add --replace <skill>` | You are adding inside a skill-vault and intentionally want to replace an existing vault skill. | Project `.pi/skills` adds still never overwrite; non-TTY vault replacement requires `--replace`. |
 | `sv remove <skill>` | You want to remove one project skill. | Updates the canonical `.sv/manifest.toml` project manifest. |
 | `sv remove -l` | You want to remove several sv-managed entries interactively. | Lists managed local skills, not source skills, and may include stale missing/invalid manifest entries so they can be pruned. |
 | `sv remove --all` | You want to remove every sv-managed local skill. | Removes managed skills only; manual/unmanaged skill folders are kept. Confirmed bulk removal also prunes stale manifest entries whose managed skill folder is missing or no longer a directory. |
 | `sv remove --all --yes` | You want non-interactive bulk removal. | Confirms bulk removal without prompting, which is required for non-TTY `--all` use. |
 | `sv update` | You want a safe refresh of sources and unchanged local skills. | Refreshes configured sources, updates only managed skill folders without local modifications, and preserves local edits by marking modified skills with update-available state. Uses the same trusted-index optimization as sync. |
 | `sv sync` | You want installed skills force-refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |
-| `sv run -- <pi args>` | You want Pi to use only project-local skills. | Runs `pi --no-skills --skill .pi/skills ...`. |
+| `sv run -- <pi args>` | You want Pi to use only project-local skills. | Validates `.pi/skills` for symlinks and bounded skill trees, then runs `pi --no-skills --skill .pi/skills ...`. |
 
 ## Source repo commands
 
@@ -64,13 +65,21 @@ A project can only contain one `.pi/skills/<name>` folder. When multiple source 
 
 1. Run `sv list`.
 2. Copy the `Add as` value from the `Duplicate skill names` section for the source you want.
-3. Install it with `sv add <repo>:<skill>`.
+3. Install it with `sv add <repo>:<skill>` or, for path-aware entries, `sv add <repo>:<path/to/skill>`.
 
 Example:
 
 ```bash
 sv list
 sv add HamdiMaz/Skills:find-docs
+# path-aware Add as values are also valid:
+sv add Team/Skills:packages/agents/pi/skills/find-docs
 ```
 
 `sv add -l` also shows repo-aware labels and rejects a selection that contains two sources for the same skill before copying anything. If duplicate repo entries point to the same or equivalent GitHub URL, `sv` coalesces them so the same source is not listed twice.
+
+## Source discovery and refresh
+
+GitHub source repos are refreshed through `gh api` first, then the GitHub HTTPS API, then lightweight treeless/blobless sparse Git fallback. Use `gh auth login`, `GH_TOKEN`, or `GITHUB_TOKEN` when you need private GitHub repos or higher API rate limits. Local path sources read the local Git worktree directly, and non-GitHub remotes use lightweight Git.
+
+Sources can publish skills under `skills/<name>`, one-level `*/skills/<name>` folders, roots configured with repeatable `sv repo add --skills-path <path>`, or arbitrary paths listed in `.sv/index.toml` generated by `sv index`.

@@ -18,10 +18,11 @@ sv repo add SomeOrg/TeamSkills
 
 A Pi project can only contain one `.pi/skills/<name>` directory. If two source repos provide the same skill name, `sv list` keeps the main skill table compact with one `N sources` row and adds a separate `Duplicate skill names` section with each repo, description, and qualified `Add as` value. The duplicate section shows each skill name once and leaves continuation rows blank in that column, which is expected. Copy the `Add as` value for the source you want.
 
-Install the exact source you want:
+Install the exact source you want. Most `Add as` values use `repo-id:skill`; path-aware entries can use `repo-id:path/to/skill`:
 
 ```bash
 sv add <repo-id>:<skill>
+sv add <repo-id>:<path/to/skill>
 ```
 
 If the skill already exists from a different source, `sv add` leaves it unchanged and tells you the current source and the requested source. Remove it first if you intentionally want to switch:
@@ -43,13 +44,13 @@ Wide Unicode characters are counted by display width so rows should stay within 
 
 ## Metadata validation errors
 
-`sv` rejects oversized metadata before parsing it: TOML config/index/manifest files and `SKILL.md` files are limited to 1 MiB. Source indexes and manifests also must store hashes as `sha256:<64 lowercase hex characters>`. If you see a size-limit or hash-format error, regenerate the source index or manifest with a current `sv` instead of editing placeholder values by hand.
+`sv` rejects oversized metadata before parsing it: TOML config and manifest files plus `SKILL.md` files are limited to 1 MiB, while source `.sv/index.toml` files fetched from configured repos have a separate 4 MiB limit. Source indexes and manifests also must store hashes as `sha256:<64 lowercase hex characters>`. If you see a size-limit or hash-format error, regenerate the source index or manifest with a current `sv` instead of editing placeholder values by hand.
 
 Skill names must be safe folder names. Rename source skill folders and frontmatter names that start with `-`, contain path separators or `:`, or include invisible Unicode format controls such as zero-width spaces or bidi override characters.
 
 ## The same source appears twice
 
-If `~/.sv/config.toml` repeats the exact same repo, lists the same normalized URL under more than one repo ID, or mixes equivalent GitHub URL forms (HTTPS, SSH, optional `.git`), `sv` keeps the first entry and treats later IDs as aliases while loading skills. Existing sync metadata or qualified commands that point at a duplicate repo ID are still matched to the kept source. Use `sv repo list` to inspect the active sources; config rewrites preserve duplicate-source aliases so legacy `repo:skill` references keep working without listing the same skill twice.
+If `~/.sv/config.toml` repeats the exact same repo, lists the same normalized URL under more than one repo ID, or mixes equivalent GitHub URL forms (HTTPS, SSH, optional `.git`), `sv` keeps the first entry and treats later IDs as aliases while loading skills. Existing sync metadata or qualified commands that point at a duplicate repo ID are still matched to the kept source. Use `sv repo list` to inspect the active sources; config rewrites preserve duplicate-source aliases so legacy `repo:skill` or path-aware `repo:path/to/skill` references keep working without listing the same skill twice.
 
 ## Interactive commands fail in scripts
 
@@ -63,4 +64,4 @@ sv remove find-docs
 
 ## Source caches are stale
 
-`sv list`, `sv add <skill>`, `sv add --all`, `sv sync`, and `sv update` refresh source repos before reading them. `sv add -l` opens quickly by using the current cache when it already exists. Run `sv list` first when you want to refresh before opening the picker.
+`sv list`, `sv add <skill>`, `sv add --all`, `sv sync`, and `sv update` refresh source repos before reading them. For GitHub repos, `sv` tries `gh api`, then the GitHub HTTPS API, then lightweight Git fallback; use `gh auth login`, `GH_TOKEN`, or `GITHUB_TOKEN` for private repos or higher rate limits. `sv add -l` opens quickly by using the current cache when it already exists. Run `sv list` first when you want to refresh before opening the picker.

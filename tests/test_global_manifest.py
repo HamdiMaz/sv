@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import os
 import shutil
 
 import pytest
@@ -29,6 +30,18 @@ def test_load_global_manifest_returns_empty_when_missing(tmp_path: Path) -> None
     paths = SvPaths.from_home(tmp_path)
 
     assert load_global_manifest(paths) == {}
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
+def test_load_global_manifest_rejects_symlinked_manifest(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    outside = tmp_path / "outside-global-manifest.toml"
+    outside.write_text("schema_version = 1\nsources = []\n", encoding="utf-8")
+    paths.global_manifest_file.parent.mkdir(parents=True)
+    paths.global_manifest_file.symlink_to(outside)
+
+    with pytest.raises(SvError, match="Refusing to read symlinked sv global manifest"):
+        load_global_manifest(paths)
 
 
 def test_save_and_load_global_source_state_deterministically(tmp_path: Path) -> None:

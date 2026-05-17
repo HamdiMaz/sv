@@ -66,7 +66,6 @@ from sv.project import (
     add_all_project_skills,
     add_project_skill,
     add_vault_skill,
-    list_project_skills,
     normalize_skill_name,
     refresh_project_skill_local_states,
     refresh_project_skill_states,
@@ -78,6 +77,7 @@ from sv.project import (
     sync_vault_skills,
     update_project_skills,
     update_vault_skills,
+    validate_project_skills_for_run,
 )
 from sv.source import (
     default_runner,
@@ -1297,6 +1297,12 @@ def _validate_skill_reference(reference: str) -> None:
                 f"Invalid skill reference '{safe_reference}'. "
                 "Repo id cannot contain control characters."
             )
+        if _contains_unicode_format_character(repo_id):
+            safe_reference = _escape_control_characters(reference)
+            raise SvError(
+                f"Invalid skill reference '{safe_reference}'. "
+                "Repo id cannot contain Unicode format controls."
+            )
         if "/" in skill:
             normalize_source_relative_path(skill)
         else:
@@ -1307,6 +1313,10 @@ def _validate_skill_reference(reference: str) -> None:
 
 def _contains_control_characters(value: str) -> bool:
     return any(ord(char) < 0x20 or 0x7F <= ord(char) < 0xA0 for char in value)
+
+
+def _contains_unicode_format_character(value: str) -> bool:
+    return any(unicodedata.category(char) == "Cf" for char in value)
 
 
 def _table_width() -> int:
@@ -1804,7 +1814,7 @@ def _handle_run(
 ) -> int:
     """Run Pi and turn launch failures into user-facing errors."""
     project_skills_dir = adapter.project_skill_dir(context.repo_root)
-    list_project_skills(project_skills_dir)
+    validate_project_skills_for_run(project_skills_dir)
     skills_path = (
         ".pi/skills"
         if cwd.resolve() == context.repo_root.resolve()
@@ -2018,8 +2028,9 @@ def _handle_add(
         return 0
 
     if ":" in skill_reference:
+        safe_reference = _escape_control_characters(skill_reference)
         raise SvError(
-            f"Skill '{skill_reference}' was not found in configured source repos."
+            f"Skill '{safe_reference}' was not found in configured source repos."
         )
 
     matches = find_catalog_matches(catalog, skill_reference)

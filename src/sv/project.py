@@ -20,6 +20,7 @@ from sv.materialization import (
     install_materialized_skill_folder,
     remove_materialization_path,
     replace_with_materialized_skill_folder,
+    validate_materialization_source_tree,
 )
 
 
@@ -275,6 +276,20 @@ def add_all_vault_skills(
 def list_project_skills(project_skills_dir: Path) -> list[str]:
     """Return project-local Pi skill directory names in display order."""
     return _list_skills(project_skills_dir, _PI_TARGET)
+
+
+def validate_project_skills_for_run(project_skills_dir: Path) -> list[str]:
+    """Validate project skill trees before exposing them to Pi."""
+    skill_names = list_project_skills(project_skills_dir)
+    for skill_name in skill_names:
+        target = project_skills_dir / skill_name
+        try:
+            validate_materialization_source_tree(target)
+        except SvError as exc:
+            raise SvError(
+                f"Refusing to run Pi with unsafe project skill '{skill_name}': {exc}"
+            ) from exc
+    return skill_names
 
 
 def list_vault_skills(vault_skills_dir: Path) -> list[str]:

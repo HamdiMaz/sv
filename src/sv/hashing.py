@@ -9,6 +9,9 @@ from sv.hashformat import SHA256_PREFIX
 from sv.project import normalize_skill_name
 
 _CHUNK_SIZE = 1024 * 1024
+_MAX_SKILL_HASH_FILES = 1000
+_MAX_SKILL_HASH_BYTES = 10 * 1024 * 1024
+_MAX_SKILL_HASH_DEPTH = 25
 
 
 def sha256_file(path: Path) -> str:
@@ -72,23 +75,41 @@ def _ensure_safe_skill_directory(skill_dir: Path, *, expected_name: str | None =
 
 
 def _iter_skill_files(skill_dir: Path) -> list[Path]:
+    files: list[Path] = []
+    total_bytes = 0
     try:
-        paths = list(skill_dir.rglob("*"))
+        for path in skill_dir.rglob("*"):
+            if _is_symlink(path, "skill tree path"):
+                raise SvError(
+                    f"Skill directory '{skill_dir.name}' contains a symlink at {path}."
+                )
+            relative_path = _safe_relative_path(path, skill_dir)
+            depth = len(Path(relative_path).parts)
+            if depth > _MAX_SKILL_HASH_DEPTH:
+                raise SvError(
+                    f"Skill directory '{skill_dir.name}' exceeds depth limit at {path}."
+                )
+            if path.is_dir():
+                continue
+            if path.is_file():
+                if len(files) >= _MAX_SKILL_HASH_FILES:
+                    raise SvError(
+                        f"Skill directory '{skill_dir.name}' exceeds file limit at {skill_dir}."
+                    )
+                total_bytes += _stat_path(path, "inspect skill file").st_size
+                if total_bytes > _MAX_SKILL_HASH_BYTES:
+                    raise SvError(
+                        f"Skill directory '{skill_dir.name}' exceeds byte limit at {skill_dir}."
+                    )
+                files.append(path)
+                continue
+            raise SvError(
+                f"Skill directory '{skill_dir.name}' contains unsupported path {path}."
+            )
+    except SvError:
+        raise
     except OSError as exc:
         raise SvError(f"Failed to list skill directory {skill_dir}: {exc}") from exc
-
-    files: list[Path] = []
-    for path in paths:
-        if _is_symlink(path, "skill tree path"):
-            raise SvError(f"Skill directory '{skill_dir.name}' contains a symlink at {path}.")
-        if path.is_dir():
-            _safe_relative_path(path, skill_dir)
-            continue
-        if path.is_file():
-            _safe_relative_path(path, skill_dir)
-            files.append(path)
-            continue
-        raise SvError(f"Skill directory '{skill_dir.name}' contains unsupported path {path}.")
     return sorted(files, key=lambda path: _safe_relative_path(path, skill_dir))
 
 

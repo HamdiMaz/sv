@@ -10,6 +10,8 @@ from sv.config import SvPaths, derive_repo_id, load_config
 import sv.source as source_module
 from sv.source import default_runner
 from tests.helpers import (
+    assert_no_raw_control_characters,
+    assert_no_traceback,
     configure_source,
     display_width,
     make_source_repo,
@@ -249,9 +251,13 @@ def test_list_fails_clearly_on_unreadable_skill_metadata(tmp_path: Path, run_sv)
 
     result = run_sv(["list"], cwd=project, home=home, git_runner=default_runner)
 
-    assert result.exit_code == 0
-    assert "broken" not in result.stdout
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "reading candidate SKILL.md file" in result.stderr
     assert "Failed to read SKILL.md for skill 'broken'" in result.stderr
+    assert "not valid UTF-8" in result.stderr
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stderr)
 
 
 @pytest.mark.parametrize("columns", [80, 40, 20, 5])

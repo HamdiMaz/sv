@@ -25,9 +25,10 @@ Use the plain skill name when only one configured source provides it.
 ```bash
 sv list
 sv add HamdiMaz/Skills:find-docs
+sv add Team/Skills:packages/agents/pi/skills/find-docs
 ```
 
-Copy the `Add as` value from the duplicate section. The qualified form is the safest choice in scripts and CI.
+Copy the `Add as` value from the duplicate section. The qualified form is the safest choice in scripts and CI; it can be `repo:skill` or path-aware `repo:path/to/skill`.
 
 ## Pick several skills interactively
 
@@ -53,4 +54,4 @@ sv sync
 sv run -- <pi args>
 ```
 
-This launches `pi --no-skills --skill .pi/skills ...` from the current project.
+This validates `.pi/skills` for symlinks and bounded skill trees, then launches `pi --no-skills --skill .pi/skills ...` from the current project.

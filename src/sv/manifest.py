@@ -74,6 +74,7 @@ def global_manifest_path(paths: SvPaths) -> Path:
 
 def load_global_manifest(paths: SvPaths) -> dict[str, GlobalSourceState]:
     path = global_manifest_path(paths)
+    _reject_symlinked_manifest_read_path(path, GLOBAL_MANIFEST_DOCUMENT)
     if not path.is_file():
         return {}
 
@@ -297,11 +298,13 @@ def legacy_manifest_path(project_skills_dir: Path) -> Path:
 def load_manifest(project_skills_dir: Path) -> dict[str, ManifestEntry]:
     path = manifest_path(project_skills_dir)
     document_name = CANONICAL_MANIFEST_DOCUMENT
+    _reject_symlinked_manifest_read_path(path, document_name)
     if not path.is_file():
         if not _should_check_legacy_manifest(project_skills_dir):
             return {}
         path = legacy_manifest_path(project_skills_dir)
         document_name = LEGACY_MANIFEST_DOCUMENT
+        _reject_symlinked_manifest_read_path(path, "legacy sv manifest")
         if not path.is_file():
             return {}
 
@@ -314,6 +317,14 @@ def load_manifest(project_skills_dir: Path) -> dict[str, ManifestEntry]:
     )
 
     return _parse_manifest_entries(data.get("skills", []), path, document_name)
+
+
+def _reject_symlinked_manifest_read_path(path: Path, label: str) -> None:
+    try:
+        if path.is_symlink():
+            raise SvError(f"Refusing to read symlinked {label} at {path}.")
+    except OSError as exc:
+        raise SvError(f"Failed to inspect {label} path {path}: {exc}") from exc
 
 
 def _parse_manifest_entries(

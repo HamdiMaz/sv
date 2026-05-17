@@ -27,17 +27,18 @@ find-docs  HamdiMaz/Skills  Retrieves docs.       HamdiMaz/Skills:find-docs
            Team/Skills      Team-specific docs.   Team/Skills:find-docs
 ```
 
-The duplicate section shows the skill name once, then leaves that cell blank for the remaining sources in the same group. Copy the `Add as` value for the source you want:
+The duplicate section shows the skill name once, then leaves that cell blank for the remaining sources in the same group. Copy the `Add as` value for the source you want. Most values use `repo:skill`; indexed or non-default source paths can use `repo:path/to/skill`:
 
 ```bash
 sv add HamdiMaz/Skills:find-docs
+sv add Team/Skills:packages/agents/pi/skills/find-docs
 ```
 
 If your config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under two IDs, `sv` coalesces the duplicate while reading the config so the same source skill is not listed twice.
 
 ## Tables and narrow terminals
 
-Tables wrap long values to fit the current terminal width. This keeps important columns visible when repo IDs, cache paths, or descriptions are long. Wrapped cell lines are indented under their original column. Repo-like values such as `owner/repo` and `repo:skill` prefer clean wrap points at `/` and `:` so duplicate-source references stay easier to read and copy. In very narrow terminals, sv tightens column spacing and hard-wraps only as a last resort so table lines stay within the available width. Wide Unicode characters are measured by display width, so CJK characters and emoji do not unexpectedly overflow the table.
+Tables wrap long values to fit the current terminal width. This keeps important columns visible when repo IDs, cache paths, or descriptions are long. Wrapped cell lines are indented under their original column. Repo-like values such as `owner/repo`, `repo:skill`, and `repo:path/to/skill` prefer clean wrap points at `/` and `:` so duplicate-source references stay easier to read and copy. In very narrow terminals, sv tightens column spacing and hard-wraps only as a last resort so table lines stay within the available width. Wide Unicode characters are measured by display width, so CJK characters and emoji do not unexpectedly overflow the table.
 
 Example shape:
 
@@ -60,6 +61,6 @@ Terminal control characters from repo metadata or skill descriptions are escaped
 
 When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the duplicate section. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` shows a source-choice table with repo, description, and `Add as` columns, then asks you to choose one.
 
-`sv add --all` is intentionally strict: it stops before copying anything if duplicate skill names exist. Add those skills explicitly with `repo:skill` so one source cannot overwrite another by accident.
+`sv add --all` is intentionally strict: it stops before copying anything if duplicate skill names exist. Add those skills explicitly with the exact `Add as` value so one source cannot overwrite another by accident.
 
-If a project already has that skill from a different source, `sv add <repo>:<skill>` does not replace it. The command reports the current origin, the requested origin, and tells you to run `sv remove <skill>` first if you really want to switch sources.
+If a project already has that skill from a different source, `sv add <repo>:<skill>` or `sv add <repo>:<path/to/skill>` does not replace it. The command reports the current origin, the requested origin, and tells you to run `sv remove <skill>` first if you really want to switch sources. Skill-vault replacement is separate and requires `sv add --replace` when non-interactive.

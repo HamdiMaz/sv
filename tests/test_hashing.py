@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from sv.errors import SvError
+import sv.hashing as hashing_module
 from sv.hashing import (
     _safe_relative_path,
     _stat_path,
@@ -148,6 +149,45 @@ def test_sha256_skill_directory_allows_valid_expected_name_for_different_folder(
     digest = sha256_skill_directory(skill_dir, expected_name="alpha")
 
     assert digest.startswith("sha256:")
+
+
+def test_sha256_skill_directory_enforces_file_count_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    _write_skill_file(skill_dir, "one.txt", "one\n")
+
+    monkeypatch.setattr(hashing_module, "_MAX_SKILL_HASH_FILES", 0)
+
+    with pytest.raises(SvError, match="exceeds file limit"):
+        sha256_skill_directory(skill_dir)
+
+
+def test_sha256_skill_directory_enforces_byte_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    _write_skill_file(skill_dir, "one.txt", "12345")
+
+    monkeypatch.setattr(hashing_module, "_MAX_SKILL_HASH_BYTES", 4)
+
+    with pytest.raises(SvError, match="exceeds byte limit"):
+        sha256_skill_directory(skill_dir)
+
+
+def test_sha256_skill_directory_enforces_depth_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    _write_skill_file(skill_dir, "nested/file.txt", "nested\n")
+
+    monkeypatch.setattr(hashing_module, "_MAX_SKILL_HASH_DEPTH", 1)
+
+    with pytest.raises(SvError, match="exceeds depth limit"):
+        sha256_skill_directory(skill_dir)
 
 
 def test_safe_relative_path_rejects_root_and_outside_paths(tmp_path: Path) -> None:

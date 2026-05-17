@@ -400,6 +400,13 @@ class GitHubGhApiBackend:
             operation=operation,
         )
         encoded = "".join(output.split())
+        if encoded == "null":
+            raise SourceBackendError(
+                operation,
+                f"GitHub API response for {normalized_path} did not contain file content",
+            )
+        if not encoded:
+            self._validate_file_content_encoding(normalized_path, operation)
         if (
             max_decoded_bytes is not None
             and _max_base64_decoded_size(encoded) > max_decoded_bytes
@@ -421,6 +428,17 @@ class GitHubGhApiBackend:
                 f"{normalized_path} exceeds {size_limit_label}",
             )
         return content
+
+    def _validate_file_content_encoding(self, normalized_path: str, operation: str) -> None:
+        encoding = self._run_api(
+            [_github_contents_endpoint(self.repo, normalized_path), "--jq", ".encoding"],
+            operation=operation,
+        ).strip()
+        if encoding != "base64":
+            raise SourceBackendError(
+                operation,
+                f"GitHub API response for {normalized_path} used unsupported file content encoding",
+            )
 
     def _list_directory(
         self, path: str, *, operation: str, missing_ok: bool
@@ -502,6 +520,9 @@ class GitHubHttpsApiBackend(GitHubGhApiBackend):
         self.repo = repo
         self._http_get = _default_github_http_get if http_get is None else http_get
         self._env = os.environ if env is None else env
+
+    def _validate_file_content_encoding(self, normalized_path: str, operation: str) -> None:
+        """HTTPS content extraction already validated encoding before returning content."""
 
     def _run_api(self, args: Sequence[str], *, operation: str) -> str:
         if not args:
@@ -1083,6 +1104,8 @@ def default_runner(
             command,
             cwd=cwd,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
             env=_noninteractive_subprocess_env(),

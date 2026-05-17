@@ -412,16 +412,12 @@ def _catalog_entries_from_backend(
         try:
             skill_text = backend.read_file(normalized_skill_file_path).decode("utf-8")
             metadata = parse_skill_text(skill_text, expected_folder=expected_folder)
-        except UnicodeDecodeError:
-            _warn_invalid_skill(
-                warn,
-                PurePosixPath(source_relative_path),
-                InvalidSkillError(
-                    f"Failed to read SKILL.md for skill '{expected_folder}': "
-                    f"{normalized_skill_file_path} is not valid UTF-8"
-                ),
-            )
-            continue
+        except UnicodeDecodeError as exc:
+            raise SourceBackendError(
+                "reading candidate SKILL.md file",
+                f"Failed to read SKILL.md for skill '{expected_folder}': "
+                f"{normalized_skill_file_path} is not valid UTF-8",
+            ) from exc
         except InvalidSkillError as exc:
             _warn_invalid_skill(warn, PurePosixPath(source_relative_path), exc)
             continue

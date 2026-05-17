@@ -138,6 +138,54 @@ def test_github_gh_api_read_index_returns_none_only_when_root_is_accessible():
     ]
 
 
+def test_github_gh_api_backend_rejects_unsupported_file_content_encoding():
+    calls: list[list[str]] = []
+    responses = iter([
+        _completed(["gh", "api"], stdout=""),
+        _completed(["gh", "api"], stdout="none\n"),
+    ])
+
+    def runner(args, cwd):
+        calls.append(list(args))
+        return next(responses)
+
+    backend = GitHubGhApiBackend(GitHubRepoRef("Org", "Repo"), runner=runner)
+
+    with pytest.raises(SourceBackendError, match="unsupported file content encoding"):
+        backend.read_file("skills/alpha/SKILL.md")
+
+    assert calls == [
+        ["gh", "api", "/repos/Org/Repo/contents/skills/alpha/SKILL.md", "--jq", ".content"],
+        ["gh", "api", "/repos/Org/Repo/contents/skills/alpha/SKILL.md", "--jq", ".encoding"],
+    ]
+
+
+def test_default_runner_decodes_invalid_subprocess_output_with_replacement():
+    result = source_module.default_runner(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(b'\\xff'); sys.stderr.buffer.write(b'\\xfe'); sys.exit(3)",
+        ]
+    )
+
+    assert result.returncode == 3
+    assert result.stdout == "�"
+    assert result.stderr == "�"
+
+
+def test_github_https_backend_allows_empty_base64_file_content():
+    backend = GitHubHttpsApiBackend(
+        GitHubRepoRef("Org", "Repo"),
+        http_get=lambda _url, _headers: GitHubHttpResponse(
+            200, b'{"content":"","encoding":"base64"}'
+        ),
+        env={},
+    )
+
+    assert backend.read_file("skills/empty.txt") == b""
+
+
 def test_github_https_backend_rejects_malformed_success_responses_and_requests():
     backend = GitHubHttpsApiBackend(
         GitHubRepoRef("Org", "Repo"),

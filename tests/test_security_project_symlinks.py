@@ -12,6 +12,7 @@ from sv.project import (
     list_project_skills,
     remove_project_skill,
     sync_project_skills,
+    validate_project_skills_for_run,
 )
 
 
@@ -217,6 +218,53 @@ def test_list_project_skills_rejects_symlinked_project_skills_path(
         list_project_skills(project / ".pi" / "skills")
 
     assert (outside / "sentinel.txt").read_text() == "outside\n"
+
+
+def test_validate_project_skills_for_run_rejects_nested_skill_symlinks(
+    tmp_path: Path,
+) -> None:
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    alpha = project_skills / "alpha"
+    alpha.mkdir(parents=True)
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("secret\n", encoding="utf-8")
+    (alpha / "secret-link.txt").symlink_to(outside)
+
+    with pytest.raises(SvError, match="contains a symlink"):
+        validate_project_skills_for_run(project_skills)
+
+    assert outside.read_text(encoding="utf-8") == "secret\n"
+
+
+def test_run_rejects_nested_project_skill_symlink_before_launching_process(
+    tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "home"
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    alpha = project_skills / "alpha"
+    alpha.mkdir(parents=True)
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("secret\n", encoding="utf-8")
+    (alpha / "secret-link.txt").symlink_to(outside)
+    calls: list[list[str]] = []
+
+    def process_runner(command: list[str]) -> int:
+        calls.append(command)
+        return 0
+
+    exit_code = handle(
+        parse_sv(["run"]),
+        cwd=project_skills.parent.parent,
+        home=home,
+        process_runner=process_runner,
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert calls == []
+    assert "contains a symlink" in captured.err
+    assert_no_traceback(captured.err)
+    assert outside.read_text(encoding="utf-8") == "secret\n"
 
 
 def test_run_rejects_symlinked_pi_dir_before_launching_process(

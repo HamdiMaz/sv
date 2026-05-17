@@ -106,6 +106,21 @@ def test_scan_repo_for_index_deduplicates_overlapping_include_paths(tmp_path: Pa
     ]
 
 
+def test_scan_repo_for_index_enforces_candidate_limit_before_hashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+
+    def fail_hash(*_args: Any, **_kwargs: Any):
+        raise AssertionError("candidate limit should be enforced before hashing")
+
+    monkeypatch.setattr(index_module, "_MAX_INDEX_SCAN_CANDIDATES", 0)
+    monkeypatch.setattr(index_module, "sha256_skill_directory", fail_hash)
+
+    with pytest.raises(SvError, match="exceeds skill candidate limit"):
+        scan_repo_for_index(tmp_path, generated_at="2026-05-15T00:00:00Z")
+
+
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
 def test_scan_repo_for_index_does_not_follow_symlinked_directories(tmp_path: Path):
     outside = tmp_path.with_name(f"{tmp_path.name}-outside")

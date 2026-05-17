@@ -31,6 +31,7 @@ README_SKILLS_END_MARKER = "<!-- sv:skills:end -->"
 IndexKind = Literal["skill-vault", "project-index"]
 _VALID_KINDS: tuple[IndexKind, ...] = ("skill-vault", "project-index")
 _MAX_INDEX_SKILL_ENTRIES = 5000
+_MAX_INDEX_SCAN_CANDIDATES = _MAX_INDEX_SKILL_ENTRIES
 _MAX_INDEX_FIELD_LENGTH = 8192
 
 
@@ -272,6 +273,10 @@ def _append_candidate(
     relative_path = _repo_relative_path(path, root)
     if relative_path in seen:
         return
+    if len(candidates) >= _MAX_INDEX_SCAN_CANDIDATES:
+        raise SvError(
+            f"Repository scan exceeds skill candidate limit ({_MAX_INDEX_SCAN_CANDIDATES})."
+        )
     seen.add(relative_path)
     candidates.append(path)
 

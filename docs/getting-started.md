@@ -24,10 +24,11 @@ sv repo list
 sv list
 ```
 
-The main list shows `Skill`, `Source`, and `Description`. If two repos provide the same skill name, `sv` shows one `N sources` row in the main list and adds a separate `Duplicate skill names` section with each repo, description, and `Add as` value. Duplicate groups show the skill name once, then list each source choice beneath it. Copy the exact `Add as` value when you need a specific source:
+The main list shows `Skill`, `Source`, and `Description`. If two repos or source paths provide the same skill name, `sv` shows one `N sources` row in the main list and adds a separate `Duplicate skill names` section with each repo, description, and `Add as` value. Duplicate groups show the skill name once, then list each source choice beneath it. Copy the exact `Add as` value when you need a specific source:
 
 ```bash
 sv add HamdiMaz/Skills:find-docs
+sv add Team/Skills:packages/agents/pi/skills/find-docs
 ```
 
 ## 3. Add skills to your project
@@ -60,7 +61,7 @@ sv update
 sv run -- <pi args>
 ```
 
-This launches Pi as:
+This validates `.pi/skills` for symlinks and bounded skill trees, then launches Pi as:
 
 ```bash
 pi --no-skills --skill .pi/skills <pi args>

@@ -220,6 +220,25 @@ def test_add_invalid_qualified_repo_id_with_control_characters_fails_without_git
     assert "Repo id cannot contain control characters." in result.stderr
 
 
+def test_add_invalid_qualified_repo_id_with_unicode_format_controls_fails_without_git_or_mutation(
+    tmp_path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(
+        ["add", "bad\u202e:alpha"],
+        cwd=project,
+        home=home,
+        git_runner=_forbid_git_calls,
+    )
+
+    _assert_validation_rejected(result, project)
+    assert "Invalid skill reference 'bad\\u202e:alpha'." in result.stderr
+    assert "Repo id cannot contain Unicode format controls." in result.stderr
+
+
 def test_add_all_and_skill_are_mutually_exclusive(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"

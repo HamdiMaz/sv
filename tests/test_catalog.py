@@ -313,7 +313,6 @@ def test_build_source_catalog_from_backend_warns_and_skips_invalid_candidates(
                 "---\nname: other\ndescription: Wrong name.\n---\n"
             ),
             "skills/not-frontmatter/SKILL.md": "# no frontmatter\n",
-            "skills/not-utf8/SKILL.md": b"\xff\xfe\x00",
         }
     )
     warnings: list[str] = []
@@ -326,7 +325,7 @@ def test_build_source_catalog_from_backend_warns_and_skips_invalid_candidates(
         ("valid", "skills/valid"),
     ]
     assert result.failures == ()
-    assert len(warnings) == 4
+    assert len(warnings) == 3
     assert all(
         warning.startswith("warning: skipping invalid skill at ")
         for warning in warnings
@@ -338,8 +337,27 @@ def test_build_source_catalog_from_backend_warns_and_skips_invalid_candidates(
     assert "does not match folder" in warning_text
     assert "skills/not-frontmatter" in warning_text
     assert "frontmatter" in warning_text
-    assert "skills/not-utf8" in warning_text
-    assert "not valid UTF-8" in warning_text
+
+
+def test_build_source_catalog_from_backend_treats_non_utf8_skill_file_as_backend_failure(
+    tmp_path: Path,
+):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    backend = FakeSourceBackend({"skills/not-utf8/SKILL.md": b"\xff\xfe\x00"})
+    warnings: list[str] = []
+
+    result = build_source_catalog_from_backends(
+        [repo], paths, {repo.id: (backend,)}, warn=warnings.append
+    )
+
+    assert result.entries == ()
+    assert warnings == []
+    assert len(result.failures) == 1
+    failure = result.failures[0]
+    assert failure.backend == "fake"
+    assert failure.operation == "reading candidate SKILL.md file"
+    assert "not valid UTF-8" in failure.detail
 
 
 def test_build_source_catalog_from_backend_collects_failures_and_tries_next(
