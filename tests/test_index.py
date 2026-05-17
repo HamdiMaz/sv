@@ -153,6 +153,49 @@ def test_scan_repo_for_index_enforces_candidate_limit_before_hashing(
         scan_repo_for_index(tmp_path, generated_at="2026-05-15T00:00:00Z")
 
 
+def test_scan_repo_for_index_enforces_directory_traversal_depth_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    deep_path = tmp_path / "one" / "two" / "three"
+    deep_path.mkdir(parents=True)
+    monkeypatch.setattr(index_module, "_MAX_INDEX_SCAN_DEPTH", 2, raising=False)
+
+    with pytest.raises(SvError, match="exceeds repository scan depth limit"):
+        scan_repo_for_index(tmp_path, generated_at="2026-05-15T00:00:00Z")
+
+
+def test_scan_repo_for_index_applies_excludes_before_depth_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    (tmp_path / "ignored" / "one" / "two" / "three").mkdir(parents=True)
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+    monkeypatch.setattr(index_module, "_MAX_INDEX_SCAN_DEPTH", 2)
+
+    document = scan_repo_for_index(
+        tmp_path,
+        exclude_paths=("ignored",),
+        generated_at="2026-05-15T00:00:00Z",
+    )
+
+    assert [(entry.name, entry.source_path) for entry in document.skills] == [
+        ("alpha", "skills/alpha"),
+    ]
+
+
+def test_scan_repo_for_index_escapes_depth_limit_error_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    (tmp_path / "unsafe\x1b[2J" / "nested").mkdir(parents=True)
+    monkeypatch.setattr(index_module, "_MAX_INDEX_SCAN_DEPTH", 1)
+
+    with pytest.raises(SvError) as exc_info:
+        scan_repo_for_index(tmp_path, generated_at="2026-05-15T00:00:00Z")
+
+    message = str(exc_info.value)
+    assert "\x1b" not in message
+    assert "unsafe\\x1b[2J" in message
+
+
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support is required")
 def test_scan_repo_for_index_does_not_follow_symlinked_directories(tmp_path: Path):
     outside = tmp_path.with_name(f"{tmp_path.name}-outside")

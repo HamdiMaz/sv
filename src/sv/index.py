@@ -32,6 +32,7 @@ IndexKind = Literal["skill-vault", "project-index"]
 _VALID_KINDS: tuple[IndexKind, ...] = ("skill-vault", "project-index")
 _MAX_INDEX_SKILL_ENTRIES = 5000
 _MAX_INDEX_SCAN_CANDIDATES = _MAX_INDEX_SKILL_ENTRIES
+_MAX_INDEX_SCAN_DEPTH = 64
 _MAX_INDEX_FIELD_LENGTH = 8192
 _MAX_README_BYTES = 4 * 1024 * 1024
 
@@ -336,6 +337,7 @@ def _collect_candidate_skill_files(
     *,
     warn: Callable[[str], None] | None = None,
 ) -> None:
+    _reject_excessive_scan_depth(path, root)
     try:
         with os.scandir(path) as entries:
             sorted_entries = sorted(entries, key=lambda entry: entry.name)
@@ -359,6 +361,16 @@ def _collect_candidate_skill_files(
                     )
     except OSError as exc:
         raise SvError(f"Failed to scan directory {path}: {exc}") from exc
+
+
+def _reject_excessive_scan_depth(path: Path, root: Path) -> None:
+    relative_depth = len(Path(_raw_repo_relative_path(path, root)).parts)
+    if relative_depth > _MAX_INDEX_SCAN_DEPTH:
+        safe_path = _escape_control_characters(str(path))
+        raise SvError(
+            "Repository scan exceeds repository scan depth limit "
+            f"({_MAX_INDEX_SCAN_DEPTH}) at {safe_path}."
+        )
 
 
 def _reject_unsafe_include_path(path: Path, root: Path) -> None:
