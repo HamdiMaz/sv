@@ -62,6 +62,14 @@ sv add HamdiMaz/Skills:find-docs
 sv remove find-docs
 ```
 
-## Source caches are stale
+## Global cache and offline mode
 
-`sv list`, `sv add <skill>`, `sv add --all`, `sv sync`, and `sv update` refresh source repos before reading them. For GitHub repos, `sv` tries `gh api`, then the GitHub HTTPS API, then lightweight Git fallback; use `gh auth login`, `GH_TOKEN`, or `GITHUB_TOKEN` for private repos or higher rate limits. `sv add -l` opens quickly by using the current cache when it already exists. Run `sv list` first when you want to refresh before opening the picker.
+If you see a warning like `using stale cached metadata`, `sv` tried to refresh source metadata, the refresh failed, and the command used an older cached catalog instead. Only browsing/install commands allow this fallback: `sv list`, `sv search`, `sv add`, and `sv add --all`.
+
+Use `--refresh` to force a new source check. `sv sync`, `sv update`, and source-aware `sv status` already refresh by default and fail closed on refresh errors unless you explicitly pass `--cached`.
+
+Use `--cached` when you need to avoid network and Git source refreshes. This mode requires existing cached metadata. Commands that materialize skills (`sv add --cached`, `sv sync --cached`, and `sv update --cached`) also require matching cached skill bodies. If a cached body is missing, rerun once without `--cached` to populate the body cache, then retry the cached command.
+
+In normal mode, if cached metadata exists but the matching cached skill body is missing, `sv` refreshes that source repo before materializing from source. This prevents stale metadata from being paired with newer source content.
+
+Invalid or tampered cache files are ignored or rejected depending on the command and cache mode. Symlinked cache paths are always refused. Run `sv cache clean` to remove expired and over-budget cached skill bodies.

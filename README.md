@@ -37,6 +37,14 @@ Cached source repositories live under:
 ~/.sv/sources/
 ```
 
+Global cache metadata and skill bodies live under:
+
+```text
+~/.sv/cache/v1/
+```
+
+Source metadata for normal browsing/install commands is cached for 24 hours. `sv sync`, `sv update`, and source-aware `sv status` refresh metadata by default to preserve current-source semantics. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization. If cached metadata points at a skill whose body is not cached, normal mode refreshes that repo before source materialization; `--cached` fails instead of refreshing.
+
 Project Pi skills live under:
 
 ```text
@@ -85,7 +93,7 @@ List valid skills available in configured source repos:
 sv list
 ```
 
-`sv list` refreshes source caches before showing available skills. In an interactive terminal it opens a read-only browser with `Skill`, `Source`, and `Description` columns; use ↑/↓ to move, `/` to filter, Enter for details, and `q` to quit. In non-interactive output, or when the browser is unavailable, it prints the same compact columns as a table. When duplicate skill names exist across repos, the table groups that name into one `N sources` row and prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value to copy; each duplicate group shows the skill name once to keep the choices easy to scan. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. See [reading sv output](docs/output.md) for examples.
+`sv list` uses fresh cached source metadata when available, refreshes lazily when metadata expires, and supports `--refresh` to force a source refresh. In an interactive terminal it opens a read-only browser with `Skill`, `Source`, and `Description` columns; use ↑/↓ to move, `/` to filter, Enter for details, and `q` to quit. In non-interactive output, or when the browser is unavailable, it prints the same compact columns as a table. When duplicate skill names exist across repos, the table groups that name into one `N sources` row and prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value to copy; each duplicate group shows the skill name once to keep the choices easy to scan. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. See [reading sv output](docs/output.md) for examples.
 
 Add a skill to the current project:
 

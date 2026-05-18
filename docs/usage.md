@@ -8,8 +8,18 @@ This guide shows the day-to-day `sv` workflow and explains how to read command o
 # See configured sources and cache locations
 sv repo list
 
-# Refresh source caches and show available skills
+# Show available skills, refreshing lazily from the global cache
 sv list
+
+# Force a metadata refresh when listing source skills
+sv list --refresh
+
+# Search using cached metadata without network or Git refreshes
+sv search docs --cached
+
+# Inspect global cache usage and prune cached skill bodies
+sv cache status
+sv cache clean
 
 # Add one skill to the current project
 sv add find-docs
