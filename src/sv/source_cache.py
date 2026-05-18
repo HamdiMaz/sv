@@ -58,6 +58,7 @@ class CacheRefreshResult:
     entries: tuple[SourceSkill, ...]
     refreshed_backends_by_repo: Mapping[str, str] = field(default_factory=dict)
     index_hashes_by_repo: Mapping[str, str | None] = field(default_factory=dict)
+    refreshed_repo_ids: frozenset[str] | None = None
 
 
 CacheRefreshValue = CacheRefreshResult | Sequence[SourceSkill]
@@ -219,6 +220,7 @@ def get_catalog_with_cache(
     if repos_to_refresh:
         try:
             refresh_result = _coerce_refresh_result(refresh_catalog(repos_to_refresh))
+            _ensure_requested_repos_refreshed(refresh_result, repos_to_refresh)
         except SvError as exc:
             if not policy.allow_stale_on_error:
                 raise
@@ -342,6 +344,16 @@ def _coerce_refresh_result(value: CacheRefreshValue) -> CacheRefreshResult:
     return CacheRefreshResult(entries=tuple(value))
 
 
+def _ensure_requested_repos_refreshed(
+    refresh_result: CacheRefreshResult, repos_to_refresh: Sequence[RepoConfig]
+) -> None:
+    if refresh_result.refreshed_repo_ids is None:
+        return
+    for repo in repos_to_refresh:
+        if repo.id not in refresh_result.refreshed_repo_ids:
+            raise SvError(f"refresh did not return metadata for {repo.id}")
+
+
 def _entries_by_repo(
     entries: Sequence[SourceSkill],
 ) -> dict[str, tuple[SourceSkill, ...]]:
@@ -352,6 +364,8 @@ def _entries_by_repo(
 
 
 def _utc_timestamp(value: datetime) -> str:
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=UTC)
     return (
         value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     )

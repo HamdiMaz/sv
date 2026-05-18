@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import os
 import stat
+import time
 
 import pytest
 
@@ -15,6 +16,7 @@ from sv.errors import SvError
 from sv.source_cache import (
     CacheMode,
     CachePolicy,
+    CacheRefreshResult,
     CachedCatalogEntry,
     CachedCatalogDocument,
     DEFAULT_METADATA_TTL_SECONDS,
@@ -26,6 +28,7 @@ from sv.source_cache import (
     save_cached_catalog,
     get_catalog_with_cache,
     _cached_catalog_hash,
+    _utc_timestamp,
 )
 
 
@@ -79,6 +82,42 @@ def _catalog_document(refreshed_at: str) -> CachedCatalogDocument:
 
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
+
+
+def _source_skill(repo: RepoConfig, paths: SvPaths, name: str) -> SourceSkill:
+    return SourceSkill(
+        name=name,
+        description=f"{name} skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / name,
+        source_relative_path=f"skills/{name}",
+        source_backend="fake",
+        source_content_hash="sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d",
+        source_skill_file_hash="sha256:c651ccb96b0c0e490de4cc12b9b46d643e6dba87840fab27e2c8d4d5cc2037fa",
+    )
+
+
+def test_utc_timestamp_treats_naive_datetime_as_utc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset is unavailable on this platform")
+    original_tz = os.environ.get("TZ")
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+
+    try:
+        timestamp = _utc_timestamp(datetime(2026, 5, 18, 12, 34, 56))
+    finally:
+        if original_tz is None:
+            monkeypatch.delenv("TZ", raising=False)
+        else:
+            monkeypatch.setenv("TZ", original_tz)
+        time.tzset()
+
+    assert timestamp == "2026-05-18T12:34:56Z"
 
 
 def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
@@ -337,17 +376,7 @@ def test_get_catalog_with_cache_refreshes_expired_metadata(tmp_path: Path) -> No
     paths = SvPaths.from_home(tmp_path)
     repo = _repo()
     save_cached_catalog(paths, repo, _catalog_document("2026-05-17T11:00:00Z"))
-    refreshed_entry = SourceSkill(
-        name="new-skill",
-        description="New skill.",
-        repo_id=repo.id,
-        repo_url=repo.url,
-        repo_path=paths.source_repo_for(repo.id),
-        source_path=paths.source_repo_for(repo.id) / "skills" / "new-skill",
-        source_relative_path="skills/new-skill",
-        source_backend="fake",
-        source_content_hash="sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d",
-    )
+    refreshed_entry = _source_skill(repo, paths, "new-skill")
 
     def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
         assert list(repos) == [repo]
@@ -366,6 +395,96 @@ def test_get_catalog_with_cache_refreshes_expired_metadata(tmp_path: Path) -> No
     cached_document = load_cached_catalog(paths, repo)
     assert cached_document is not None
     assert cached_document.entries[0].name == "new-skill"
+
+
+def test_get_catalog_with_cache_saves_explicit_successful_empty_refresh(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+
+    def refresh(repos: Sequence[RepoConfig]) -> CacheRefreshResult:
+        assert list(repos) == [repo]
+        return CacheRefreshResult(
+            entries=(), refreshed_repo_ids=frozenset({repo.id})
+        )
+
+    catalog = get_catalog_with_cache(
+        [repo],
+        paths,
+        policy=CachePolicy.default(),
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        refresh_catalog=refresh,
+        warn=lambda message: None,
+    )
+
+    assert catalog == []
+    cached_document = load_cached_catalog(paths, repo)
+    assert cached_document is not None
+    assert cached_document.entries == ()
+    assert cached_document.refreshed_at == "2026-05-18T12:00:00Z"
+
+
+def test_get_catalog_with_cache_uses_stale_metadata_when_explicit_refresh_omits_repo(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    stale_document = _catalog_document("2026-05-17T11:00:00Z")
+    save_cached_catalog(paths, repo, stale_document)
+    warnings: list[str] = []
+
+    def refresh(repos: Sequence[RepoConfig]) -> CacheRefreshResult:
+        assert list(repos) == [repo]
+        return CacheRefreshResult(entries=(), refreshed_repo_ids=frozenset())
+
+    catalog = get_catalog_with_cache(
+        [repo],
+        paths,
+        policy=CachePolicy.default(),
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        refresh_catalog=refresh,
+        warn=warnings.append,
+    )
+
+    assert [entry.name for entry in catalog] == ["find-docs"]
+    assert load_cached_catalog(paths, repo) == stale_document
+    assert warnings == [
+        "warning: using stale cached metadata for Org/Skills; refresh failed: "
+        "refresh did not return metadata for Org/Skills"
+    ]
+
+
+def test_get_catalog_with_cache_persists_refresh_backend_and_index_hash(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    refreshed_entry = _source_skill(repo, paths, "indexed-skill")
+    index_hash = "sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c"
+
+    def refresh(repos: Sequence[RepoConfig]) -> CacheRefreshResult:
+        assert list(repos) == [repo]
+        return CacheRefreshResult(
+            entries=(refreshed_entry,),
+            refreshed_backends_by_repo={repo.id: "indexed-backend"},
+            index_hashes_by_repo={repo.id: index_hash},
+            refreshed_repo_ids=frozenset({repo.id}),
+        )
+
+    get_catalog_with_cache(
+        [repo],
+        paths,
+        policy=CachePolicy.default(),
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        refresh_catalog=refresh,
+        warn=lambda message: None,
+    )
+
+    cached_document = load_cached_catalog(paths, repo)
+    assert cached_document is not None
+    assert cached_document.backend == "indexed-backend"
+    assert cached_document.index_hash == index_hash
 
 
 def test_get_catalog_with_cache_warns_and_uses_stale_metadata_when_refresh_fails(
