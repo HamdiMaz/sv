@@ -1253,7 +1253,7 @@ def test_attach_source_materializers_restores_source_fallback_for_cached_entries
     assert (destination / "notes.md").read_text(encoding="utf-8") == "remote\n"
 
 
-def test_record_cached_skill_body_hash_updates_non_index_cached_metadata(
+def test_record_cached_skill_body_hash_fills_missing_hashes_with_index_hash(
     tmp_path: Path,
 ) -> None:
     paths = SvPaths.from_home(tmp_path)
@@ -1266,7 +1266,7 @@ def test_record_cached_skill_body_hash_updates_non_index_cached_metadata(
         backend="git-local-source",
         refreshed_at="2026-05-18T12:00:00Z",
         catalog_hash="sha256:" + ("0" * 64),
-        index_hash=None,
+        index_hash="sha256:" + ("8" * 64),
         entries=(
             CachedCatalogEntry(
                 name="find-docs",
@@ -1306,3 +1306,152 @@ def test_record_cached_skill_body_hash_updates_non_index_cached_metadata(
     assert cached is not None
     assert cached.entries[0].content_hash == content_hash
     assert cached.entries[0].skill_file_hash == skill_file_hash
+
+
+def test_cache_aware_materializer_keeps_destination_when_metadata_writeback_fails(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha", "remote\n")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    repo = _repo()
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=tmp_path / "source",
+        source_path=source_skill,
+        source_relative_path="skills/alpha",
+        source_backend="local-cache",
+        source_content_hash=content_hash,
+    )
+    warnings: list[str] = []
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 13, tzinfo=UTC),
+        after_store=lambda entry, content_hash, skill_file_hash: (_ for _ in ()).throw(
+            SvError("cached metadata is corrupt")
+        ),
+        warn=warnings.append,
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    wrapped.materialize_to(destination)
+
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "remote\n"
+    assert warnings
+    assert "failed cached metadata/hash writeback" in warnings[0]
+
+
+def test_record_cached_skill_body_hash_does_not_overwrite_existing_hashes(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    existing_content_hash = "sha256:" + ("1" * 64)
+    existing_skill_file_hash = "sha256:" + ("2" * 64)
+    document = CachedCatalogDocument(
+        repo_id=repo.id,
+        repo_url=repo.url,
+        source_key="github:org/skills",
+        skills_paths=(),
+        backend="github-index",
+        refreshed_at="2026-05-18T12:00:00Z",
+        catalog_hash="sha256:" + ("0" * 64),
+        index_hash="sha256:" + ("3" * 64),
+        entries=(
+            CachedCatalogEntry(
+                name="find-docs",
+                description="Find documentation.",
+                source_path="skills/find-docs",
+                content_hash=existing_content_hash,
+                skill_file_hash=existing_skill_file_hash,
+            ),
+        ),
+    )
+    save_cached_catalog(
+        paths, repo, replace(document, catalog_hash=_cached_catalog_hash(document))
+    )
+    entry = SourceSkill(
+        name="find-docs",
+        description="Find documentation.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "find-docs",
+        source_relative_path="skills/find-docs",
+        source_backend="cache:github-index",
+    )
+
+    record_cached_skill_body_hash(
+        paths,
+        repo,
+        entry,
+        content_hash="sha256:" + ("4" * 64),
+        skill_file_hash="sha256:" + ("5" * 64),
+    )
+
+    cached = load_cached_catalog(paths, repo)
+    assert cached is not None
+    assert cached.entries[0].content_hash == existing_content_hash
+    assert cached.entries[0].skill_file_hash == existing_skill_file_hash
+
+
+@pytest.mark.parametrize(
+    ("content_hash", "skill_file_hash"),
+    [
+        ("not-a-sha256", "sha256:" + ("6" * 64)),
+        ("sha256:" + ("7" * 64), "not-a-sha256"),
+    ],
+)
+def test_record_cached_skill_body_hash_rejects_invalid_observed_hashes_before_writing(
+    tmp_path: Path, content_hash: str, skill_file_hash: str
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = CachedCatalogDocument(
+        repo_id=repo.id,
+        repo_url=repo.url,
+        source_key="github:org/skills",
+        skills_paths=(),
+        backend="git-local-source",
+        refreshed_at="2026-05-18T12:00:00Z",
+        catalog_hash="sha256:" + ("0" * 64),
+        index_hash=None,
+        entries=(
+            CachedCatalogEntry(
+                name="find-docs",
+                description="Find documentation.",
+                source_path="skills/find-docs",
+                content_hash=None,
+                skill_file_hash=None,
+            ),
+        ),
+    )
+    save_cached_catalog(
+        paths, repo, replace(document, catalog_hash=_cached_catalog_hash(document))
+    )
+    before = catalog_cache_path(paths, repo).read_text(encoding="utf-8")
+    entry = SourceSkill(
+        name="find-docs",
+        description="Find documentation.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=tmp_path / "source",
+        source_path=tmp_path / "source" / "find-docs",
+        source_relative_path="skills/find-docs",
+        source_backend="cache:git-local-source",
+    )
+
+    with pytest.raises(SvError, match="sha256 digest"):
+        record_cached_skill_body_hash(
+            paths,
+            repo,
+            entry,
+            content_hash=content_hash,
+            skill_file_hash=skill_file_hash,
+        )
+
+    assert catalog_cache_path(paths, repo).read_text(encoding="utf-8") == before

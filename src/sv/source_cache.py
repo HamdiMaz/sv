@@ -622,6 +622,11 @@ def record_cached_skill_body_hash(
     content_hash: str,
     skill_file_hash: str,
 ) -> None:
+    if not is_sha256_digest(content_hash):
+        raise SvError("content_hash must be a sha256 digest.")
+    if not is_sha256_digest(skill_file_hash):
+        raise SvError("skill_file_hash must be a sha256 digest.")
+
     document = load_cached_catalog(paths, repo)
     if document is None:
         return
@@ -631,11 +636,13 @@ def record_cached_skill_body_hash(
         if (
             cached_entry.name == entry.name
             and cached_entry.source_path == entry.source_relative_path
+            and cached_entry.content_hash in (None, content_hash)
+            and cached_entry.skill_file_hash in (None, skill_file_hash)
         ):
             replacement = replace(
                 cached_entry,
-                content_hash=content_hash,
-                skill_file_hash=skill_file_hash,
+                content_hash=cached_entry.content_hash or content_hash,
+                skill_file_hash=cached_entry.skill_file_hash or skill_file_hash,
             )
             updated_entries.append(replacement)
             changed = changed or replacement != cached_entry
@@ -764,7 +771,16 @@ def _wrap_source_skill(
                     warn(
                         f"warning: failed to write skill body cache for {entry.qualified_reference}: {exc}"
                     )
-            after_store(entry, actual_hash, actual_skill_file_hash)
+            try:
+                after_store(entry, actual_hash, actual_skill_file_hash)
+            except SvError as exc:
+                if _cache_write_error_must_fail(exc):
+                    remove_materialization_path(destination, ignore_errors=True)
+                    raise
+                if warn is not None:
+                    warn(
+                        f"warning: failed cached metadata/hash writeback for {entry.qualified_reference}: {exc}"
+                    )
         except Exception:
             remove_materialization_path(destination, ignore_errors=True)
             raise
