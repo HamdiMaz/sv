@@ -58,6 +58,7 @@ from sv.manifest import (
     save_global_manifest,
     save_manifest,
 )
+from sv.parallel import configured_jobs, map_ordered
 from sv.project import (
     AddAllSkillsResult,
     AddSkillResult,
@@ -421,6 +422,8 @@ def handle(
     record_global_source_state = _should_record_global_source_state(cwd, home)
 
     try:
+        configured_jobs()
+
         if args.command == "cache":
             return _handle_cache(args, paths)
 
@@ -1034,14 +1037,20 @@ def _update_sources_and_catalog_cache_refresh_from_repos(
                 )
                 source_state_recorded = True
         else:
-            _ensure_source_repos_for_refresh(
+            failure = _ensure_source_repos_for_refresh(
                 repos,
                 paths,
                 git_runner,
                 update=update,
-                record_global_source_state=record_global_source_state,
-                started_at=started_at,
             )
+            if failure is not None:
+                failed_repo, error = failure
+                if record_global_source_state:
+                    _record_global_source_refresh_failure(
+                        paths, (failed_repo,), error, started_at
+                    )
+                    source_state_recorded = True
+                raise SvError(error)
             catalog = build_source_catalog(repos, paths)
             refreshed_repo_ids = frozenset(repo.id for repo in repos)
     except SvError as exc:
@@ -1154,10 +1163,8 @@ def _ensure_source_repos_for_refresh(
     git_runner,
     *,
     update: bool,
-    record_global_source_state: bool,
-    started_at: str,
-) -> None:
-    for repo in repos:
+) -> tuple[RepoConfig, str] | None:
+    def worker(repo: RepoConfig) -> tuple[RepoConfig, str | None]:
         repo_path = paths.source_repo_for(repo.id)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         try:
@@ -1169,11 +1176,14 @@ def _ensure_source_repos_for_refresh(
                 configured_skills_paths=repo.skills_paths,
             )
         except SvError as exc:
-            if record_global_source_state:
-                _record_global_source_refresh_failure(
-                    paths, (repo,), str(exc), started_at
-                )
-            raise
+            return repo, str(exc)
+        return repo, None
+
+    results = map_ordered(list(repos), worker)
+    for repo, error in results:
+        if error is not None:
+            return repo, error
+    return None
 
 
 def _record_mixed_source_refresh(

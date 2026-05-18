@@ -610,3 +610,31 @@ def test_list_cached_flag_uses_metadata_without_refreshing_source(
 
     assert result.exit_code == 0
     assert "alpha" in result.stdout
+
+
+def test_source_command_reports_invalid_sv_jobs(tmp_path, run_sv, monkeypatch):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setenv("SV_JOBS", "many")
+
+    result = run_sv(["list", "--refresh"], cwd=project, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 1
+    assert "SV_JOBS must be an integer between 1 and 64" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_invalid_sv_jobs_fails_before_non_parallel_command_work(tmp_path, run_sv, monkeypatch):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("SV_JOBS", "many")
+
+    result = run_sv(["cache", "status"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "SV_JOBS must be an integer between 1 and 64" in result.stderr
+    assert "Traceback" not in result.stderr

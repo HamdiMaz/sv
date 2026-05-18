@@ -21,6 +21,7 @@ from urllib.parse import quote, unquote, urlsplit
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
 from sv.materialization import remove_materialization_path, validate_materialization_source_tree
+from sv.parallel import map_ordered
 from sv.terminal import escape_terminal_controls
 
 Runner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]]
@@ -1217,9 +1218,9 @@ def ensure_source_repos(
     runner: Runner = default_runner,
     *,
     update: bool = True,
+    jobs: int | None = None,
 ) -> list[Path]:
-    repo_paths: list[Path] = []
-    for repo in repos:
+    def worker(repo: RepoConfig) -> Path:
         repo_path = paths.source_repo_for(repo.id)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         ensure_source_repo(
@@ -1229,8 +1230,9 @@ def ensure_source_repos(
             update=update,
             configured_skills_paths=repo.skills_paths,
         )
-        repo_paths.append(repo_path)
-    return repo_paths
+        return repo_path
+
+    return map_ordered(list(repos), worker, jobs=jobs)
 
 
 def _ensure_sparse_git_repo(

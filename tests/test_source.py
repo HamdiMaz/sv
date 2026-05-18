@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 import subprocess
+import threading
 
 import pytest
 
@@ -2407,7 +2408,10 @@ def test_ensure_source_repos_rejects_symlinked_cache_ancestor(tmp_path: Path):
     assert runner.calls == []
 
 
-def test_ensure_source_repos_uses_partial_sparse_for_each_configured_repo(tmp_path: Path):
+def test_ensure_source_repos_uses_partial_sparse_for_each_configured_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("SV_JOBS", "1")
     paths = SvPaths.from_home(tmp_path)
     repos = [
         RepoConfig(id="Org/A", url="https://github.com/Org/A.git"),
@@ -2460,6 +2464,37 @@ def test_ensure_source_repos_uses_partial_sparse_for_each_configured_repo(tmp_pa
         ],
     ]
     assert all("--filter=tree:0" in call for call in clone_calls)
+
+
+def test_ensure_source_repos_prepares_independent_repos_in_parallel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repos = [
+        RepoConfig(id="Org/A", url="https://github.com/Org/A.git"),
+        RepoConfig(id="Org/B", url="https://github.com/Org/B.git"),
+    ]
+    started: dict[str, threading.Event] = {
+        "Org/A": threading.Event(),
+        "Org/B": threading.Event(),
+    }
+
+    def fake_ensure_source_repo(repo_url, repo_path, runner, *, update, configured_skills_paths):
+        repo_id = "Org/A" if repo_url.endswith("/A.git") else "Org/B"
+        peer_id = "Org/B" if repo_id == "Org/A" else "Org/A"
+        started[repo_id].set()
+        assert started[peer_id].wait(2), "independent source repo preparation did not overlap"
+        repo_path.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(source_module, "ensure_source_repo", fake_ensure_source_repo)
+
+    ensured = ensure_source_repos(repos, paths, runner=FakeRunner([]), update=True, jobs=2)
+
+    assert ensured == [
+        paths.source_repo_for("Org/A"),
+        paths.source_repo_for("Org/B"),
+    ]
 
 
 def test_source_utility_helpers_cover_error_details_and_path_matching(tmp_path: Path):
