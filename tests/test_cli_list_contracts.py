@@ -539,3 +539,74 @@ def test_list_shows_duplicate_references_without_widening_main_skill_table(
     assert f"{repo_ids[0]}:beta" not in output
     assert f"{repo_ids[1]}:gamma" not in output
     assert "Tip: use the exact 'Add as' value" in output
+
+
+def test_list_uses_fresh_cached_metadata_without_refresh(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    first = run_sv(["list"], cwd=project, home=home)
+    assert first.exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"fresh cache should avoid Git/source refresh: {args}")
+
+    second = run_sv(["list"], cwd=project, home=home, git_runner=fail_git)
+
+    assert second.exit_code == 0
+    assert "alpha" in second.stdout
+
+
+def test_list_refresh_flag_bypasses_fresh_cache(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert run_sv(["list"], cwd=project, home=home).exit_code == 0
+
+    write_source_skill(source, "gamma", "Gamma skill.", "gamma v1\n")
+    run_git(["add", "skills/gamma"], source)
+    run_git(["commit", "-m", "add gamma"], source)
+
+    result = run_sv(["list", "--refresh"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "gamma" in result.stdout
+
+
+def test_list_cached_flag_fails_without_cache(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    result = run_sv(["list", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "No cached metadata found" in result.stderr
+
+
+def test_list_cached_flag_uses_metadata_without_refreshing_source(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert run_sv(["list"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"fresh cache should avoid Git/source refresh: {args}")
+
+    result = run_sv(["list", "--cached"], cwd=project, home=home, git_runner=fail_git)
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout

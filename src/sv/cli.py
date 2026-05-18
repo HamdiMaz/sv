@@ -85,6 +85,14 @@ from sv.source import (
     reject_symlinked_source_cache_path,
     source_backends_for_repo,
 )
+from sv.source_cache import (
+    CacheMode,
+    CachePolicy,
+    CacheRefreshResult,
+    get_catalog_with_cache,
+    record_cached_skill_body_hash,
+    wrap_catalog_with_skill_body_cache,
+)
 from sv.table import browse_table
 from sv.terminal import escape_terminal_controls
 from sv.tomlutil import load_toml_document
@@ -117,6 +125,33 @@ class LocalContext:
         return self.repo_root / "skills"
 
 
+def _add_cache_policy_args(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Force refresh source metadata before using the cache.",
+    )
+    group.add_argument(
+        "--cached",
+        action="store_true",
+        help="Use cached source metadata only and do not refresh sources.",
+    )
+
+
+def _cache_policy_from_args(
+    args: argparse.Namespace,
+    *,
+    default_mode: CacheMode = CacheMode.NORMAL,
+    allow_stale_on_error: bool = True,
+) -> CachePolicy:
+    if getattr(args, "refresh", False):
+        return CachePolicy.force_refresh(allow_stale_on_error=allow_stale_on_error)
+    if getattr(args, "cached", False):
+        return CachePolicy.cache_only()
+    return CachePolicy(mode=default_mode, allow_stale_on_error=allow_stale_on_error)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sv",
@@ -127,7 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser(
+    list_parser = subparsers.add_parser(
         "list",
         help="List skills available in configured source repos.",
         description=(
@@ -135,12 +170,14 @@ def build_parser() -> argparse.ArgumentParser:
             "an interactive browser; otherwise it prints a plain table."
         ),
     )
+    _add_cache_policy_args(list_parser)
     search_parser = subparsers.add_parser(
         "search",
         help="Search skills available in configured source repos.",
         description="Search source skill names, descriptions, repo ids, and source paths.",
     )
     search_parser.add_argument("query", help="Search query.")
+    _add_cache_policy_args(search_parser)
     init_parser = subparsers.add_parser(
         "init",
         help="Create a skill-vault repository scaffold.",
@@ -176,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Repo-relative path to skip. Can be repeated.",
     )
-    subparsers.add_parser(
+    status_parser = subparsers.add_parser(
         "status",
         help="Show sv-managed skill status.",
         description=(
@@ -185,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    _add_cache_policy_args(status_parser)
 
     add_parser = subparsers.add_parser(
         "add",
@@ -206,6 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    _add_cache_policy_args(add_parser)
     add_parser.add_argument(
         "skill",
         nargs="?",
@@ -262,7 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirm selected or bulk removal without prompting.",
     )
 
-    subparsers.add_parser(
+    sync_parser = subparsers.add_parser(
         "sync",
         help="Force-sync sv-managed skills from source repos.",
         description=(
@@ -270,7 +309,8 @@ def build_parser() -> argparse.ArgumentParser:
             "repos, replacing local edits with the latest source content."
         ),
     )
-    subparsers.add_parser(
+    _add_cache_policy_args(sync_parser)
+    update_parser = subparsers.add_parser(
         "update",
         help="Update sources and unchanged sv-managed skills.",
         description=(
@@ -278,6 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
             "only when local files have not been modified."
         ),
     )
+    _add_cache_policy_args(update_parser)
 
     run_parser = subparsers.add_parser(
         "run", help="Run Pi with only project skills enabled."
@@ -501,14 +542,13 @@ def handle(
             if not config.repos:
                 _print_no_source_repos_configured()
                 return 0
-            catalog = _update_sources_and_catalog_from_repos(
+            catalog = _catalog_for_source_command(
                 config.repos,
                 paths,
                 git_runner,
-                update=True,
+                policy=_cache_policy_from_args(args),
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
-                warn=lambda message: print(message, file=sys.stderr),
             )
             return _handle_list(catalog)
 
@@ -517,14 +557,13 @@ def handle(
             if not config.repos:
                 _print_no_source_repos_configured()
                 return 0
-            catalog = _update_sources_and_catalog_from_repos(
+            catalog = _catalog_for_source_command(
                 config.repos,
                 paths,
                 git_runner,
-                update=True,
+                policy=_cache_policy_from_args(args),
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
-                warn=lambda message: print(message, file=sys.stderr),
             )
             return _handle_search(args.query, catalog)
 
@@ -817,8 +856,36 @@ def _update_sources_and_catalog_from_repos(
     warn: Callable[[str], None] | None = None,
     allow_partial_failures: bool = False,
 ) -> list[SourceSkill]:
+    return list(
+        _update_sources_and_catalog_cache_refresh_from_repos(
+            repos,
+            paths,
+            git_runner,
+            update=update,
+            record_global_source_state=record_global_source_state,
+            lightweight_discovery=lightweight_discovery,
+            warn=warn,
+            allow_partial_failures=allow_partial_failures,
+        ).entries
+    )
+
+
+def _update_sources_and_catalog_cache_refresh_from_repos(
+    repos: Sequence[RepoConfig],
+    paths: SvPaths,
+    git_runner,
+    *,
+    update: bool = True,
+    record_global_source_state: bool = True,
+    lightweight_discovery: bool = False,
+    warn: Callable[[str], None] | None = None,
+    allow_partial_failures: bool = False,
+) -> CacheRefreshResult:
     started_at = _utc_now()
     source_state_recorded = False
+    refreshed_backends_by_repo: Mapping[str, str] = {}
+    index_hashes_by_repo: Mapping[str, str | None] = {}
+    refreshed_repo_ids: frozenset[str] | None = None
     try:
         if lightweight_discovery:
             backends_by_repo = {
@@ -881,6 +948,9 @@ def _update_sources_and_catalog_from_repos(
                     raise SvError(metadata_failure)
                 raise SvError(_failure_report(blocking_failures))
             catalog = list(result.entries)
+            refreshed_backends_by_repo = result.refreshed_backends_by_repo
+            index_hashes_by_repo = result.index_hashes_by_repo
+            refreshed_repo_ids = frozenset(result.refreshed_repo_ids)
             if blocking_failures and record_global_source_state:
                 _record_mixed_source_refresh(
                     paths,
@@ -913,13 +983,109 @@ def _update_sources_and_catalog_from_repos(
                 started_at=started_at,
             )
             catalog = build_source_catalog(repos, paths)
+            refreshed_repo_ids = frozenset(repo.id for repo in repos)
     except SvError as exc:
         if record_global_source_state and not source_state_recorded:
             _record_global_source_refresh_failure(paths, repos, str(exc), started_at)
         raise
     if record_global_source_state and not source_state_recorded:
         _record_global_source_refresh(paths, repos, catalog, started_at)
-    return catalog
+    return CacheRefreshResult(
+        entries=tuple(catalog),
+        refreshed_backends_by_repo=refreshed_backends_by_repo,
+        index_hashes_by_repo=index_hashes_by_repo,
+        refreshed_repo_ids=refreshed_repo_ids,
+    )
+
+
+def _catalog_for_source_command(
+    repos: Sequence[RepoConfig],
+    paths: SvPaths,
+    git_runner,
+    *,
+    policy: CachePolicy,
+    record_global_source_state: bool,
+    lightweight_discovery: bool = True,
+    allow_partial_failures: bool = False,
+    update: bool = True,
+) -> list[SourceSkill]:
+    def refresh(selected_repos: Sequence[RepoConfig]) -> CacheRefreshResult:
+        return _update_sources_and_catalog_cache_refresh_from_repos(
+            selected_repos,
+            paths,
+            git_runner,
+            update=update,
+            record_global_source_state=record_global_source_state,
+            lightweight_discovery=lightweight_discovery,
+            allow_partial_failures=allow_partial_failures,
+            warn=lambda message: print(message, file=sys.stderr),
+        )
+
+    catalog = get_catalog_with_cache(
+        repos,
+        paths,
+        policy=policy,
+        now=datetime.now(UTC),
+        refresh_catalog=refresh,
+        warn=lambda message: print(message, file=sys.stderr),
+    )
+    allow_source_fallback = policy.mode is not CacheMode.CACHE_ONLY
+    repos_by_id = {repo.id: repo for repo in repos}
+
+    def refresh_entry_on_body_miss(entry: SourceSkill) -> SourceSkill | None:
+        repo = repos_by_id.get(entry.repo_id)
+        if repo is None:
+            return None
+        refreshed_catalog = get_catalog_with_cache(
+            [repo],
+            paths,
+            policy=CachePolicy.force_refresh(allow_stale_on_error=False),
+            now=datetime.now(UTC),
+            refresh_catalog=refresh,
+            warn=lambda message: print(message, file=sys.stderr),
+        )
+        for candidate in refreshed_catalog:
+            if (
+                candidate.name == entry.name
+                and candidate.source_relative_path == entry.source_relative_path
+            ):
+                return candidate
+        return None
+
+    def after_store(
+        entry: SourceSkill, content_hash: str, skill_file_hash: str
+    ) -> None:
+        repo = repos_by_id.get(entry.repo_id)
+        if repo is None:
+            return
+        try:
+            record_cached_skill_body_hash(
+                paths,
+                repo,
+                entry,
+                content_hash=content_hash,
+                skill_file_hash=skill_file_hash,
+            )
+        except SvError as exc:
+            if "symlink" in str(exc).casefold():
+                raise
+            print(
+                "warning: failed to update cached metadata for "
+                f"{entry.qualified_reference}: {exc}",
+                file=sys.stderr,
+            )
+
+    return wrap_catalog_with_skill_body_cache(
+        catalog,
+        paths,
+        now=lambda: datetime.now(UTC),
+        after_store=after_store,
+        allow_source_fallback=allow_source_fallback,
+        refresh_entry_on_body_miss=(
+            refresh_entry_on_body_miss if allow_source_fallback else None
+        ),
+        warn=lambda message: print(message, file=sys.stderr),
+    )
 
 
 def _ensure_source_repos_for_refresh(

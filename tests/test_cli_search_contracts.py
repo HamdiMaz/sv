@@ -1,8 +1,10 @@
 from pathlib import Path
 import base64
+import shutil
 import subprocess
 
 from sv.config import SvPaths
+from tests.helpers import configure_source, make_source_repo
 
 
 def test_search_with_no_configured_repos_prints_next_step_and_skips_git(
@@ -256,3 +258,43 @@ def test_search_matches_description_repo_id_and_source_path_with_ranked_output(
     assert path_result.exit_code == 0
     assert "deep-skill" in path_result.stdout
     assert "packages/pi/skills/deep-skill" in path_result.stdout
+
+
+def test_search_uses_cached_metadata_after_list(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert run_sv(["list"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"fresh cache should avoid Git/source refresh: {args}")
+
+    result = run_sv(["search", "alpha"], cwd=project, home=home, git_runner=fail_git)
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout
+
+
+def test_search_cached_flag_uses_metadata_without_refreshing_source(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert run_sv(["list"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"fresh cache should avoid Git/source refresh: {args}")
+
+    result = run_sv(
+        ["search", "alpha", "--cached"], cwd=project, home=home, git_runner=fail_git
+    )
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout
