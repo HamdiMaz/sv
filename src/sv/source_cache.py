@@ -112,6 +112,12 @@ class SkillBodyMetadata:
     use_count: int
 
 
+@dataclass(frozen=True)
+class _SkillBodyCacheEntry:
+    path: Path
+    metadata: SkillBodyMetadata
+
+
 def skill_body_cache_path(paths: SvPaths, content_hash: str) -> Path:
     if not is_sha256_digest(content_hash):
         raise SvError("Skill body cache content hash must be a sha256 digest.")
@@ -171,6 +177,7 @@ def store_skill_body_cache(
     if cache_root.exists():
         if _cached_skill_body_is_valid(paths, content_hash, skill_name):
             _touch_skill_body_cache(paths, content_hash, now)
+            _prune_after_body_cache_write(paths, now=now)
             return
         remove_materialization_path(cache_root, ignore_errors=True)
 
@@ -200,6 +207,7 @@ def store_skill_body_cache(
             raise SvError("Skill body cache staged content hash mismatch.")
         _reject_symlinked_cache_dir(cache_root)
         temp_root.replace(cache_root)
+        _prune_after_body_cache_write(paths, now=now)
     except Exception:
         remove_materialization_path(temp_root, ignore_errors=True)
         if cache_root.exists() and not cache_root.is_symlink():
@@ -253,6 +261,160 @@ def try_materialize_from_skill_body_cache(
         remove_materialization_path(destination, ignore_errors=True)
         raise
     return True
+
+
+def prune_skill_body_cache(
+    paths: SvPaths,
+    *,
+    now: datetime,
+    max_unused_seconds: int = DEFAULT_SKILL_BODY_MAX_UNUSED_SECONDS,
+    max_bytes: int = DEFAULT_SKILL_BODY_MAX_BYTES,
+    force: bool = False,
+) -> None:
+    entries = _skill_body_cache_entries(paths, now=now)
+    if not force and not _should_prune(
+        paths, now=now, entries=entries, max_bytes=max_bytes
+    ):
+        return
+
+    cutoff = now.astimezone(UTC) - timedelta(seconds=max_unused_seconds)
+    kept: list[_SkillBodyCacheEntry] = []
+    for entry in entries:
+        last_used_at = _parse_utc(
+            entry.metadata.last_used_at, entry.path / "metadata.toml", "last_used_at"
+        )
+        if last_used_at < cutoff:
+            remove_materialization_path(entry.path, ignore_errors=True)
+        else:
+            kept.append(entry)
+
+    total = sum(entry.metadata.size_bytes for entry in kept)
+    if total > max_bytes:
+        for entry in sorted(
+            kept,
+            key=lambda item: (
+                _parse_utc(
+                    item.metadata.last_used_at,
+                    item.path / "metadata.toml",
+                    "last_used_at",
+                ),
+                item.metadata.use_count,
+                -item.metadata.size_bytes,
+            ),
+        ):
+            if total <= max_bytes:
+                break
+            remove_materialization_path(entry.path, ignore_errors=True)
+            total -= entry.metadata.size_bytes
+
+    _write_prune_marker(paths, now=now)
+
+
+def _skill_body_cache_entries(
+    paths: SvPaths, *, now: datetime
+) -> list[_SkillBodyCacheEntry]:
+    root = paths.skill_body_cache_dir / "sha256"
+    _reject_symlinked_cache_dir(root.parent)
+    if root.is_symlink():
+        raise SvError(
+            f"Refusing to use symlinked skill body cache directory at {root}."
+        )
+    if not root.exists():
+        return []
+    _reject_symlinked_cache_dir(root)
+
+    entries: list[_SkillBodyCacheEntry] = []
+    for child in sorted(root.iterdir()):
+        if child.is_symlink():
+            raise SvError(
+                f"Refusing to use symlinked skill body cache entry at {child}."
+            )
+        if not child.is_dir():
+            continue
+        content_hash = f"{SHA256_PREFIX}{child.name}"
+        try:
+            metadata = load_skill_body_metadata(paths, content_hash)
+            created_at = _parse_utc(
+                metadata.created_at, child / "metadata.toml", "created_at"
+            )
+            last_used_at = _parse_utc(
+                metadata.last_used_at, child / "metadata.toml", "last_used_at"
+            )
+            if created_at > now.astimezone(UTC) or last_used_at > now.astimezone(UTC):
+                raise SvError(
+                    f"Invalid skill body cache metadata at {child}: timestamp is in the future."
+                )
+            skill_folder = child / "skill"
+            if skill_folder.is_symlink():
+                raise SvError(
+                    f"Refusing to use symlinked skill body cache folder at {skill_folder}."
+                )
+            if (
+                sha256_skill_directory(skill_folder, expected_name=metadata.skill_name)
+                != content_hash
+            ):
+                raise SvError(
+                    f"Invalid skill body cache at {child}: hash did not match."
+                )
+            actual_size = _directory_size(skill_folder)
+        except SvError as exc:
+            if _cache_error_is_symlink_violation(exc):
+                raise
+            remove_materialization_path(child, ignore_errors=True)
+            continue
+        entries.append(
+            _SkillBodyCacheEntry(
+                path=child, metadata=replace(metadata, size_bytes=actual_size)
+            )
+        )
+    return entries
+
+
+def _should_prune(
+    paths: SvPaths,
+    *,
+    now: datetime,
+    entries: Sequence[_SkillBodyCacheEntry],
+    max_bytes: int,
+) -> bool:
+    if sum(entry.metadata.size_bytes for entry in entries) > max_bytes:
+        return True
+    marker = paths.cache_prune_marker
+    _reject_symlinked_cache_dir(marker.parent)
+    if marker.is_symlink():
+        raise SvError(f"Refusing to read symlinked cache prune marker at {marker}.")
+    if not marker.exists():
+        return True
+    try:
+        data = load_toml_document(marker, "sv cache prune marker")
+        last_pruned_at = data.get("last_pruned_at")
+        if not isinstance(last_pruned_at, str):
+            return True
+        last_pruned = _parse_utc(last_pruned_at, marker, "last_pruned_at")
+    except SvError:
+        return True
+    age = now.astimezone(UTC) - last_pruned
+    return age < timedelta(0) or age >= timedelta(days=1)
+
+
+def _write_prune_marker(paths: SvPaths, *, now: datetime) -> None:
+    path = paths.cache_prune_marker
+    _ensure_private_cache_dir(path.parent)
+    text = (
+        f"schema_version = {CACHE_SCHEMA_VERSION}\n"
+        f'last_pruned_at = "{toml_escape(_utc_timestamp(now))}"\n'
+    )
+    atomic_write_text(
+        path,
+        text,
+        document_name="sv cache prune marker",
+        temp_path_description="sv cache prune marker temp file",
+        create_parent=False,
+    )
+
+
+def _prune_after_body_cache_write(paths: SvPaths, *, now: datetime) -> None:
+    prune_skill_body_cache(paths, now=now)
 
 
 def _parse_skill_body_metadata(data: dict[str, Any], path: Path) -> SkillBodyMetadata:

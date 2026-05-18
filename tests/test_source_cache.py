@@ -31,6 +31,7 @@ from sv.source_cache import (
     save_cached_catalog,
     get_catalog_with_cache,
     load_skill_body_metadata,
+    prune_skill_body_cache,
     skill_body_cache_path,
     store_skill_body_cache,
     try_materialize_from_skill_body_cache,
@@ -1001,6 +1002,300 @@ def test_store_skill_body_cache_replaces_corrupt_existing_metadata(
     metadata = load_skill_body_metadata(paths, content_hash)
     assert metadata.last_used_at == "2026-05-18T13:00:00Z"
     assert metadata.use_count == 1
+
+
+def test_prune_skill_body_cache_removes_entries_unused_for_more_than_30_days(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    old_skill = _write_skill_tree(tmp_path / "old-source", "old", "x" * 100)
+    fresh_skill = _write_skill_tree(tmp_path / "fresh-source", "fresh", "y" * 100)
+    old_hash = sha256_skill_directory(old_skill, expected_name="old")
+    fresh_hash = sha256_skill_directory(fresh_skill, expected_name="fresh")
+    store_skill_body_cache(
+        paths,
+        old_skill,
+        skill_name="old",
+        content_hash=old_hash,
+        source_reference="Org/Skills:skills/old",
+        now=datetime(2026, 4, 1, tzinfo=UTC),
+    )
+    store_skill_body_cache(
+        paths,
+        fresh_skill,
+        skill_name="fresh",
+        content_hash=fresh_hash,
+        source_reference="Org/Skills:skills/fresh",
+        now=datetime(2026, 5, 17, tzinfo=UTC),
+    )
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, tzinfo=UTC),
+        max_unused_seconds=DEFAULT_SKILL_BODY_MAX_UNUSED_SECONDS,
+        force=True,
+    )
+
+    assert not skill_body_cache_path(paths, old_hash).exists()
+    assert skill_body_cache_path(paths, fresh_hash).exists()
+
+
+def test_prune_skill_body_cache_enforces_size_cap_by_lru_then_use_count(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    first = _write_skill_tree(tmp_path / "first-source", "first", "a" * 100)
+    second = _write_skill_tree(tmp_path / "second-source", "second", "b" * 100)
+    first_hash = sha256_skill_directory(first, expected_name="first")
+    second_hash = sha256_skill_directory(second, expected_name="second")
+    store_skill_body_cache(
+        paths,
+        first,
+        skill_name="first",
+        content_hash=first_hash,
+        source_reference="Org/Skills:skills/first",
+        now=datetime(2026, 5, 10, tzinfo=UTC),
+    )
+    store_skill_body_cache(
+        paths,
+        second,
+        skill_name="second",
+        content_hash=second_hash,
+        source_reference="Org/Skills:skills/second",
+        now=datetime(2026, 5, 18, tzinfo=UTC),
+    )
+    second_size = load_skill_body_metadata(paths, second_hash).size_bytes
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        max_bytes=second_size,
+        force=True,
+    )
+
+    assert not skill_body_cache_path(paths, first_hash).exists()
+    assert skill_body_cache_path(paths, second_hash).exists()
+
+
+def test_prune_skill_body_cache_uses_actual_size_when_metadata_underreports(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    first = _write_skill_tree(tmp_path / "first-source", "first", "a" * 100)
+    second = _write_skill_tree(tmp_path / "second-source", "second", "b" * 100)
+    first_hash = sha256_skill_directory(first, expected_name="first")
+    second_hash = sha256_skill_directory(second, expected_name="second")
+    store_skill_body_cache(
+        paths,
+        first,
+        skill_name="first",
+        content_hash=first_hash,
+        source_reference="Org/Skills:skills/first",
+        now=datetime(2026, 5, 10, tzinfo=UTC),
+    )
+    store_skill_body_cache(
+        paths,
+        second,
+        skill_name="second",
+        content_hash=second_hash,
+        source_reference="Org/Skills:skills/second",
+        now=datetime(2026, 5, 18, tzinfo=UTC),
+    )
+    first_size = load_skill_body_metadata(paths, first_hash).size_bytes
+    metadata_path = skill_body_cache_path(paths, first_hash) / "metadata.toml"
+    metadata_path.write_text(
+        metadata_path.read_text(encoding="utf-8").replace(
+            f"size_bytes = {first_size}", "size_bytes = 1"
+        ),
+        encoding="utf-8",
+    )
+    second_size = load_skill_body_metadata(paths, second_hash).size_bytes
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        max_bytes=second_size + 1,
+        force=True,
+    )
+
+    assert not skill_body_cache_path(paths, first_hash).exists()
+    assert skill_body_cache_path(paths, second_hash).exists()
+
+
+def test_prune_skill_body_cache_enforces_size_cap_even_with_fresh_marker(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    first = _write_skill_tree(tmp_path / "first-source", "first", "a" * 100)
+    second = _write_skill_tree(tmp_path / "second-source", "second", "b" * 100)
+    first_hash = sha256_skill_directory(first, expected_name="first")
+    second_hash = sha256_skill_directory(second, expected_name="second")
+    store_skill_body_cache(
+        paths,
+        first,
+        skill_name="first",
+        content_hash=first_hash,
+        source_reference="Org/Skills:skills/first",
+        now=datetime(2026, 5, 10, tzinfo=UTC),
+    )
+    store_skill_body_cache(
+        paths,
+        second,
+        skill_name="second",
+        content_hash=second_hash,
+        source_reference="Org/Skills:skills/second",
+        now=datetime(2026, 5, 18, tzinfo=UTC),
+    )
+    paths.cache_dir.mkdir(parents=True, exist_ok=True)
+    paths.cache_prune_marker.write_text(
+        'schema_version = 1\nlast_pruned_at = "2026-05-18T12:30:00Z"\n',
+        encoding="utf-8",
+    )
+    second_size = load_skill_body_metadata(paths, second_hash).size_bytes
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        max_bytes=second_size,
+        force=False,
+    )
+
+    assert not skill_body_cache_path(paths, first_hash).exists()
+    assert skill_body_cache_path(paths, second_hash).exists()
+
+
+def test_prune_skill_body_cache_treats_future_marker_as_due(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    old_skill = _write_skill_tree(tmp_path / "old-source", "old", "x" * 100)
+    old_hash = sha256_skill_directory(old_skill, expected_name="old")
+    store_skill_body_cache(
+        paths,
+        old_skill,
+        skill_name="old",
+        content_hash=old_hash,
+        source_reference="Org/Skills:skills/old",
+        now=datetime(2026, 4, 1, tzinfo=UTC),
+    )
+    paths.cache_prune_marker.write_text(
+        'schema_version = 1\nlast_pruned_at = "2026-05-19T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        force=False,
+    )
+
+    assert not skill_body_cache_path(paths, old_hash).exists()
+    assert (
+        'last_pruned_at = "2026-05-18T13:00:00Z"'
+        in paths.cache_prune_marker.read_text(encoding="utf-8")
+    )
+
+
+def test_prune_skill_body_cache_removes_future_dated_body_metadata(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    future_skill = _write_skill_tree(tmp_path / "future-source", "future", "x" * 100)
+    future_hash = sha256_skill_directory(future_skill, expected_name="future")
+    store_skill_body_cache(
+        paths,
+        future_skill,
+        skill_name="future",
+        content_hash=future_hash,
+        source_reference="Org/Skills:skills/future",
+        now=datetime(2026, 5, 18, tzinfo=UTC),
+    )
+    metadata_path = skill_body_cache_path(paths, future_hash) / "metadata.toml"
+    metadata_path.write_text(
+        metadata_path.read_text(encoding="utf-8")
+        .replace(
+            'created_at = "2026-05-18T00:00:00Z"', 'created_at = "2026-05-19T00:00:00Z"'
+        )
+        .replace(
+            'last_used_at = "2026-05-18T00:00:00Z"',
+            'last_used_at = "2026-05-19T00:00:00Z"',
+        ),
+        encoding="utf-8",
+    )
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        force=True,
+    )
+
+    assert not skill_body_cache_path(paths, future_hash).exists()
+
+
+def test_prune_skill_body_cache_refuses_symlinked_marker_temp_file(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    paths.cache_dir.mkdir(parents=True)
+    temp_path = paths.cache_prune_marker.with_name(
+        f".{paths.cache_prune_marker.name}.{os.getpid()}.tmp"
+    )
+    attacker_target = tmp_path / "attacker-marker.toml"
+    temp_path.symlink_to(attacker_target)
+
+    with pytest.raises(SvError, match="symlinked"):
+        prune_skill_body_cache(
+            paths,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+            force=True,
+        )
+
+    assert not attacker_target.exists()
+
+
+def test_prune_skill_body_cache_ignores_corrupt_prune_marker(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    paths.cache_dir.mkdir(parents=True)
+    paths.cache_prune_marker.write_text("not = [valid", encoding="utf-8")
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        force=False,
+    )
+
+    assert (
+        'last_pruned_at = "2026-05-18T13:00:00Z"'
+        in paths.cache_prune_marker.read_text(encoding="utf-8")
+    )
+
+
+def test_prune_skill_body_cache_refuses_symlinked_body_entry(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    root = paths.skill_body_cache_dir / "sha256"
+    root.mkdir(parents=True)
+    attacker_dir = tmp_path / "attacker-entry"
+    attacker_dir.mkdir()
+    (root / ("1" * 64)).symlink_to(attacker_dir, target_is_directory=True)
+
+    with pytest.raises(SvError, match="symlinked"):
+        prune_skill_body_cache(
+            paths,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+            force=True,
+        )
+
+
+def test_prune_skill_body_cache_refuses_symlinked_marker_file(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    paths.cache_dir.mkdir(parents=True)
+    attacker_file = tmp_path / "attacker-marker.toml"
+    paths.cache_prune_marker.symlink_to(attacker_file)
+
+    with pytest.raises(SvError, match="symlinked"):
+        prune_skill_body_cache(
+            paths,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+            force=False,
+        )
 
 
 def test_cache_aware_materializer_uses_body_cache_before_source(tmp_path: Path) -> None:
