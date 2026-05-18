@@ -6,6 +6,7 @@ import pytest
 
 from sv.errors import SvError
 from sv.parallel import configured_jobs, map_ordered
+from sv.parallel import ConcurrencyConfig, OrderedExecutor
 
 
 def test_configured_jobs_defaults_to_bounded_io_count(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,3 +90,14 @@ def test_map_ordered_reraises_worker_base_exception() -> None:
 
     with pytest.raises(SystemExit, match="stop now"):
         map_ordered(["ok", "stop"], worker, jobs=2)
+
+
+def test_concurrency_config_uses_injected_env_and_cpu_count():
+    assert ConcurrencyConfig(env={}, cpu_count=lambda: 64).jobs() == 8
+    assert ConcurrencyConfig(env={"SV_JOBS": "3"}, cpu_count=lambda: 64).jobs() == 3
+
+
+def test_ordered_executor_uses_configured_jobs():
+    executor = OrderedExecutor(ConcurrencyConfig(env={"SV_JOBS": "1"}))
+
+    assert executor.map([1, 2, 3], lambda value: value * 10) == [10, 20, 30]
