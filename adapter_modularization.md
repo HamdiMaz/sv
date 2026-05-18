@@ -16,6 +16,7 @@ For reviewers, any changes to the plan should be logged here with a brief descri
 - 2026-05-18: Clarified process and source-backend split order, compatibility exports, and private-test retargeting to avoid import cycles and façade monkeypatch regressions.
 - 2026-05-18: Corrected materialization adapter signatures and refactor approach so required `error_message` behavior and existing public-function monkeypatch tests remain intact.
 - 2026-05-18: Tightened persistence-store and CLI-boundary tasks with exact signatures, runtime stderr/env assertions, preserved first-run config loading semantics, and broader manifest-store routing notes.
+- 2026-05-18: Reviewed the plan against current source/tests and tightened process/source split compatibility audits, private-helper retargeting, source import-smoke verification, and runtime CLI error-handling guidance.
 
 ---
 
@@ -635,21 +636,36 @@ Do **not** move `_run_gh_api_with_limited_output()` or `_read_limited_process_ou
 
 - [ ] **Step 4: Add compatibility imports**
 
-In `src/sv/source.py`, import and re-export the moved process names that existing tests or downstream imports may reach through `sv.source`:
+In `src/sv/source.py`, import and re-export all moved process names that existing tests or downstream imports may reach through `sv.source`:
 
 ```python
 from sv.process import (
     DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
     Runner,
     default_runner,
+    _ALLOWED_GIT_PROTOCOLS,
     _COMMAND_TIMEOUT_EXIT_CODE,
+    _missing_git_guidance,
     _noninteractive_subprocess_env,
+    _ssh_batch_mode_command,
     _timeout_error_message,
     _timeout_stream_text,
 )
 ```
 
-Keep `_run_gh_api_with_limited_output()` and `_read_limited_process_output_file()` defined in `src/sv/source.py` in this task. Before committing, run `rg "source_module\._|from sv\.source import" tests/test_source.py tests -n` and ensure every moved process helper or constant still has a compatibility alias or the test has been intentionally retargeted.
+Keep `_run_gh_api_with_limited_output()` and `_read_limited_process_output_file()` defined in `src/sv/source.py` in this task. Before committing, run:
+
+```bash
+rg "source_module\.subprocess|source_module\._|from sv\.source import|import sv\.source" tests -n
+```
+
+Audit the output as follows:
+
+- Direct `from sv.source import ...` compatibility imports must keep working through `src/sv/source.py` re-exports.
+- Existing `default_runner` tests that monkeypatch `source_module.subprocess.run` must be retargeted to `sv.process.subprocess.run`; import `sv.process as process_module` and use `process_module.DEFAULT_SUBPROCESS_TIMEOUT_SECONDS` for timeout assertions. Do not keep a fake `source_module.subprocess` bridge just for monkeypatches, because façade globals will not affect moved `sv.process` implementation globals.
+- GitHub API bounded-runner tests for `_run_gh_api_with_limited_output()` may keep monkeypatching `source_module.subprocess.run` in Task 4 because that helper remains in `sv.source` until Task 5. Retarget those monkeypatches in Task 5 when the helper moves to `sv.source_backends.github`.
+- Leave unrelated `source_module._...` references unchanged in Task 4; they are handled by the Task 5 source-backend split audit.
+- Add or update `__all__` in `src/sv/source.py` for compatibility names imported solely for re-export so `ruff` does not flag unused imports.
 
 In `src/sv/cli.py`, import `default_process_runner` from `sv.process` and remove the local definition.
 
@@ -687,6 +703,7 @@ git commit -m "refactor: extract process runner adapter"
 - Test: `tests/test_source.py`
 - Test: `tests/test_catalog.py`
 - Test: `tests/test_source_cache.py`
+- Test: source-dependent compatibility files from the Step 6 audit, currently including `tests/test_second_coverage_batch.py`, `tests/test_security_control_characters.py`, `tests/test_security_source_symlinks.py`, `tests/test_global_manifest.py`, `tests/test_cli.py`, `tests/test_cli_error_contracts.py`, `tests/test_cli_list_contracts.py`, `tests/test_cli_add_contracts.py`, `tests/test_cli_sync_contracts.py`, `tests/test_cli_update_contracts.py`, `tests/test_cli_status_contracts.py`, `tests/test_cli_index_refresh.py`, `tests/test_vault_mode_targets.py`, `tests/test_end_to_end.py`, and `tests/test_regressions_duplicates.py`.
 
 - [ ] **Step 1: Write failing source backend package tests**
 
@@ -804,30 +821,81 @@ from sv.source_backends.git import (
 )
 ```
 
-`src/sv/source.py` should become a compatibility façade that re-exports all public/source-test imported names from `sv.source`, including `FakeSourceBackend`, `ensure_source_repo`, `ensure_source_repos`, `list_source_skills`, `reject_symlinked_source_cache_path`, `GitHubRepoRef`, `GitHubHttpResponse`, all backend classes, `SourceBackend`, `SourceBackendError`, `SourceBackendFailure`, `Runner`, and `default_runner`. If any legacy helper is intentionally left implemented in `sv.source` for this migration, call that out in a comment and keep its dependencies acyclic; do not leave its destination ambiguous.
+`src/sv/source.py` should become a compatibility façade that re-exports all public/source-test imported names from `sv.source`, including `FakeSourceBackend`, `ensure_source_repo`, `ensure_source_repos`, `list_source_skills`, `reject_symlinked_source_cache_path`, `GitHubRepoRef`, `GitHubHttpResponse`, all backend classes, `SourceBackend`, `SourceBackendError`, `SourceBackendFailure`, `Runner`, and `default_runner`. Prefer an explicit import list and `__all__` so compatibility exports are auditable. If any legacy helper is intentionally left implemented in `sv.source` for this migration, call that out in a comment and keep its dependencies acyclic; do not leave its destination ambiguous.
 
 Compatibility audit before Step 7:
 
 ```bash
-rg "from sv\.source import|source_module\." tests/test_source.py tests/test_source_cache.py tests/test_cli_* tests/test_global_manifest.py tests/test_vault_mode_targets.py
+rg "source_module\.subprocess|source_module\._|from sv\.source import|import sv\.source" tests -n
 ```
 
-For direct imports, keep `sv.source` re-exports. For tests that monkeypatch private implementation details such as `_MAX_GITHUB_API_RESPONSE_BYTES`, `_MAX_GITHUB_MATERIALIZATION_BYTES`, `base64.b64decode`, `subprocess.run`, `validate_materialization_source_tree`, `shutil.copytree`, or private helper functions, retarget the monkeypatch to the new implementation module (`sv.source_backends.github`, `sv.source_backends.git`, or `sv.process`) so the monkeypatch affects the code path under test.
+Audit the output as follows:
+
+- Direct public imports from `sv.source` must keep working through façade re-exports.
+- Private `source_module._...` tests must be retargeted to the module that owns the implementation after the split; do not rely on `sv.source` private aliases unless the alias is deliberately kept, commented with its destination, and covered by a compatibility assertion.
+- Retarget process/default-runner helpers and monkeypatches to `sv.process`, including `_noninteractive_subprocess_env`, `_ssh_batch_mode_command`, `_timeout_error_message`, `_timeout_stream_text`, `_missing_git_guidance`, `DEFAULT_SUBPROCESS_TIMEOUT_SECONDS`, and `subprocess.run` monkeypatches for `default_runner`.
+- Retarget GitHub helpers, constants, and monkeypatches to `sv.source_backends.github`, including `GitHubRepoRef`, `GitHubHttpResponse`, `GitHubGhApiBackend`, `GitHubHttpsApiBackend`, `parse_github_repo_ref`, `_run_gh_api_with_limited_output`, `_read_limited_process_output_file`, `_read_limited_response_body`, `_github_contents_endpoint`, `_github_https_*`, `_github_item_*`, `_gh_failure_hint`, `_header_value`, `_http_status_phrase`, `_max_base64_decoded_size`, GitHub size constants, `base64.b64decode`, and GitHub-specific `subprocess.run` uses.
+- Retarget shared backend path/metadata helpers to `sv.source_backends.base` when that is where the task moved them, including `SourceBackend`, `SourceBackendError`, `SourceBackendFailure`, `FakeSourceBackend`, `_normalize_backend_relative_path`, source metadata size helpers, and direct-child/path-inside helpers.
+- Retarget Git/local/sparse helpers and monkeypatches to `sv.source_backends.git`, including `GitLocalSourceBackend`, `LocalGitSourceBackend`, sparse backend classes, `ensure_source_repo`, `ensure_source_repos`, `list_source_skills`, `reject_symlinked_source_cache_path`, `_source_repo_lock_key`, `_ensure_sparse_git_repo*`, `_remove_failed_lightweight_checkout`, `_remove_backend_cache_folder`, sparse pattern helpers, `_local_source_repo_path`, `_validate_repo_url`, `_run_git`, `_same_source_repo`, source candidate helpers, `shutil` monkeypatches, and `validate_materialization_source_tree` monkeypatches.
 
 - [ ] **Step 7: Run focused verification**
 
 Run:
 
 ```bash
-uv run pytest tests/test_source_backends.py tests/test_source.py tests/test_catalog.py tests/test_source_cache.py -q --no-cov
+uv run python -c "import sv.source, sv.source_backends, sv.catalog, sv.source_cache"
+uv run pytest \
+  tests/test_source_backends.py \
+  tests/test_source.py \
+  tests/test_catalog.py \
+  tests/test_source_cache.py \
+  tests/test_second_coverage_batch.py \
+  tests/test_security_control_characters.py \
+  tests/test_security_source_symlinks.py \
+  tests/test_global_manifest.py \
+  tests/test_cli.py \
+  tests/test_cli_error_contracts.py \
+  tests/test_cli_list_contracts.py \
+  tests/test_cli_add_contracts.py \
+  tests/test_cli_sync_contracts.py \
+  tests/test_cli_update_contracts.py \
+  tests/test_cli_status_contracts.py \
+  tests/test_cli_index_refresh.py \
+  tests/test_vault_mode_targets.py \
+  tests/test_end_to_end.py \
+  tests/test_regressions_duplicates.py \
+  -q --no-cov
 ```
 
-Expected: all tests pass.
+Expected: import smoke exits `0` and all listed tests pass.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/sv/source_backends src/sv/source.py src/sv/catalog.py src/sv/source_cache.py tests/test_source_backends.py tests/test_source.py tests/test_catalog.py tests/test_source_cache.py
+git add \
+  src/sv/source_backends \
+  src/sv/source.py \
+  src/sv/catalog.py \
+  src/sv/source_cache.py \
+  tests/test_source_backends.py \
+  tests/test_source.py \
+  tests/test_catalog.py \
+  tests/test_source_cache.py \
+  tests/test_second_coverage_batch.py \
+  tests/test_security_control_characters.py \
+  tests/test_security_source_symlinks.py \
+  tests/test_global_manifest.py \
+  tests/test_cli.py \
+  tests/test_cli_error_contracts.py \
+  tests/test_cli_list_contracts.py \
+  tests/test_cli_add_contracts.py \
+  tests/test_cli_sync_contracts.py \
+  tests/test_cli_update_contracts.py \
+  tests/test_cli_status_contracts.py \
+  tests/test_cli_index_refresh.py \
+  tests/test_vault_mode_targets.py \
+  tests/test_end_to_end.py \
+  tests/test_regressions_duplicates.py
 git commit -m "refactor: split source backend adapters"
 ```
 
@@ -1377,7 +1445,7 @@ Expected: CLI test fails because `handle()` has no `runtime` parameter; UI test 
 In `src/sv/cli.py`:
 
 - Update `handle()` signature to include a keyword-only `runtime: Runtime | None = None` after injected chooser arguments, preserving existing positional compatibility for `git_runner`, `process_runner`, `skill_selector`, and `skill_chooser`.
-- At the top of `handle()`, before the `try` block:
+- At the top of `handle()`, before the `try` block, construct or normalize the runtime and then derive `cwd`, `home`, and `paths` from it:
 
 ```python
 runtime = (
@@ -1394,25 +1462,38 @@ runtime = (
 )
 cwd = runtime.cwd
 home = runtime.home
-paths = SvPaths.from_home(runtime.home)
+paths = SvPaths.from_home(home)
 ```
 
 Import `os`, and import `Runtime` from `sv.runtime`. If `cli.py` already uses `sys`, keep the existing `sys` import.
 
 - Use `runtime.cwd` and `runtime.home` for local variables where `cwd`/`home` are currently used at handle entry, including the `record_global_source_state = _should_record_global_source_state(cwd, home)` calculation.
-- Replace the early `configured_jobs()` call with `configured_jobs(runtime.env)`.
+- Keep the early worker-count validation inside the existing `try` block and replace `configured_jobs()` with `configured_jobs(runtime.env)`. This is required so invalid injected `SV_JOBS` still returns exit code `1` instead of escaping as an exception.
 - In the top-level `except SvError as exc` block, print to `runtime.stderr` instead of `sys.stderr`.
+- In `main()` and `svx_main()`, keep `Runtime.from_process()` from Task 2 and pass `runtime=runtime` to `handle(...)` while still passing `cwd=runtime.cwd` and `home=runtime.home` for compatibility.
 - Keep downstream helper signatures unchanged unless a helper needs runtime immediately. When later migrating prompt or terminal-width helpers, use `runtime.can_prompt()`, `runtime.prompt()`, and `runtime.width()` rather than adding new direct `sys.stdin`/`sys.stdout`/`input()`/`shutil.get_terminal_size()` reads.
 
 - [ ] **Step 4: Use stores and adapters at service boundaries**
 
-In `src/sv/cli.py`:
+In `src/sv/cli.py`, update or audit these exact boundaries. If an earlier task already changed one, verify it still follows the adapter route:
 
-- Use `ConfigStore(paths)` for repo add/remove and raw config reads inside existing config-loading helpers. Do not replace calls to `_load_config_for_source_command(paths)` with bare `ConfigStore(paths).load()`.
-- Use `GlobalManifestStore(paths)` for global source-state functions.
-- Use `browse_tty_table` and `select_tty_items` only through `sv.ui` imports.
-- Use `default_process_runner` from `sv.process`.
-- Use `source_backends_for_repo` from `sv.source_backends.factory` for new internal imports, while preserving `sv.source.source_backends_for_repo` compatibility.
+- `_load_config_for_source_command(paths)`: use `ConfigStore(paths).load()` for the raw config read, but keep this helper as the only source-command config-loading entry point so first-run prompt/guidance behavior stays unchanged.
+- `_prompt_for_initial_sources(paths)`: use `ConfigStore(paths).add_repo(...)` and `ConfigStore(paths).load()` after a successful add.
+- `_handle_repo(...)`: use `ConfigStore(paths).add_repo(...)` and `.remove_repo(...)` for repo add/remove subcommands.
+- `_handle_repo_remove_interactive(...)`: use `ConfigStore(paths).load()` for the repo list and `.remove_repo(...)` for each selected removal.
+- `_handle_global_status(...)` and `_status_catalog_if_configured(...)`: use `ConfigStore(paths).load()` when the config file exists while preserving the current empty-config behavior when it does not.
+- `_record_global_source_refresh(...)`, `_record_global_source_refresh_failure(...)`, `_remove_global_source_state(...)`, and `_load_global_manifest_for_source_state(...)`: use `GlobalManifestStore(paths).load()` / `.save(...)`.
+- `_catalog_for_source_command(...)` or whichever helper builds backend instances after Task 5: import `source_backends_for_repo` from `sv.source_backends.factory` for internal use, while preserving `sv.source.source_backends_for_repo` compatibility.
+- `_browse_tty_table(...)`: keep CLI monkeypatch compatibility but delegate to `browse_tty_table` imported from `sv.ui`.
+- Process launching: use `default_process_runner` imported from `sv.process`; no local `default_process_runner()` should remain in `cli.py` after Task 4.
+
+Before Step 5, run this audit and resolve or document every remaining direct boundary import/call:
+
+```bash
+rg "\b(add_repo|remove_repo|load_config|load_global_manifest|save_global_manifest|source_backends_for_repo|from sv\.table import browse_table|def default_process_runner)\b" src/sv/cli.py -n
+```
+
+Allowed remaining matches are compatibility imports/functions with a comment explaining why they cannot route through the adapter in this task, or helper names that now call the adapter internally.
 
 In `src/sv/project.py`:
 
@@ -1619,4 +1700,6 @@ If no fixes were needed, do not create an empty commit.
 - Each task has exact paths, commands, expected results, and commit messages.
 - Final release gate matches `docs/testing.md` and `.github/workflows/tests.yml`.
 - Existing monkeypatch-heavy tests for `sv.source` and `sv.materialization` are either preserved through public compatibility behavior or intentionally retargeted to the new implementation modules in the task that moves those internals.
+- Task 4 retargets `default_runner` subprocess monkeypatches to `sv.process`, and Task 5 audits every current test file that imports or monkeypatches `sv.source` before making `sv.source` a façade.
+- Source split verification includes an import smoke test and the current source-dependent CLI/security/coverage test files, not only `tests/test_source.py`.
 - Runtime wiring preserves existing positional `handle()` compatibility while using injected env/stderr for top-level validation and errors.
