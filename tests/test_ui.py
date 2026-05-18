@@ -65,3 +65,39 @@ def test_select_tty_items_uses_the_chosen_selector(monkeypatch):
     monkeypatch.setattr("sv.selector.select_skills", selector)
 
     assert select_tty_items(["alpha", "beta"]) == ["alpha"]
+
+
+def test_tty_ui_delegates_table_browsing_to_configured_browser():
+    calls = []
+
+    def browser(headers, rows, **kwargs):
+        calls.append((headers, rows, kwargs))
+        return ["alpha"]
+
+    selected = TtyUi(table_browser=browser).browse_table(
+        ["Skill"],
+        [["alpha"]],
+        key_help="a action",
+    )
+
+    assert selected == ["alpha"]
+    assert calls == [
+        (["Skill"], [["alpha"]], {"key_help": "a action"})
+    ]
+
+
+def test_browse_tty_table_uses_the_chosen_browser(monkeypatch):
+    from sv import ui as ui_module
+
+    calls = []
+
+    def browser(headers, rows, **kwargs):
+        calls.append((headers, rows, kwargs))
+        return None
+
+    monkeypatch.setattr(ui_module, "TtyUi", lambda: TtyUi(table_browser=browser))
+
+    assert ui_module.browse_tty_table(["Skill"], [["alpha"]], clear_on_exit=True) is None
+    assert calls == [
+        (["Skill"], [["alpha"]], {"clear_on_exit": True})
+    ]

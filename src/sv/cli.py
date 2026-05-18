@@ -96,11 +96,11 @@ from sv.source_cache import (
     record_cached_skill_body_hash,
     wrap_catalog_with_skill_body_cache,
 )
-from sv.table import browse_table
 from sv.terminal import escape_terminal_controls
 from sv.tomlutil import load_toml_document
 from sv.ui import (
     CellWidths,
+    browse_tty_table,
     format_plain_table as format_table,
     select_tty_items as select_skills,
 )
@@ -2282,7 +2282,7 @@ def _print_source_skill_detail(entry: SourceSkill) -> None:
 
 
 def _browse_tty_table(headers: Sequence[str], rows: Sequence[Sequence[str]], **kwargs):
-    return browse_table(headers, rows, **kwargs)
+    return browse_tty_table(headers, rows, **kwargs)
 
 
 def _is_tty_browser_unavailable_error(exc: SvError) -> bool:

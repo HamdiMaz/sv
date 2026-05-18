@@ -61,6 +61,7 @@ class TtyUi:
     """TTY-only interactive primitives."""
 
     selector: Callable[..., list[Any]] | None = None
+    table_browser: Callable[..., Sequence[str] | None] | None = None
 
     def select_many(
         self,
@@ -76,6 +77,20 @@ class TtyUi:
         else:
             selector = self.selector
         return cast("list[T]", selector(items, item_label=item_label, **kwargs))
+
+    def browse_table(
+        self,
+        headers: Sequence[str],
+        rows: Sequence[Sequence[str]],
+        **kwargs: Any,
+    ) -> Sequence[str] | None:
+        if self.table_browser is None:
+            from sv.table import browse_table
+
+            browser = browse_table
+        else:
+            browser = self.table_browser
+        return browser(headers, rows, **kwargs)
 
 
 def format_plain_table(
@@ -104,3 +119,12 @@ def select_tty_items(
 ) -> list[T]:
     """Run the chosen interactive selector for TTY-only flows."""
     return TtyUi().select_many(items, item_label=item_label, **kwargs)
+
+
+def browse_tty_table(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    **kwargs: Any,
+) -> Sequence[str] | None:
+    """Run the chosen interactive table browser for TTY-only flows."""
+    return TtyUi().browse_table(headers, rows, **kwargs)
