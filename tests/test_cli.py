@@ -1222,8 +1222,11 @@ def test_main_parses_arguments_and_uses_current_project_paths(monkeypatch, tmp_p
     home = tmp_path / "home"
     parsed_calls = []
 
-    monkeypatch.setattr(cli_module.Path, "cwd", lambda: project)
-    monkeypatch.setattr(cli_module.Path, "home", lambda: home)
+    monkeypatch.setattr(
+        cli_module.Runtime,
+        "from_process",
+        classmethod(lambda cls: Namespace(cwd=project, home=home)),
+    )
 
     def fake_handle(args, cwd, home):
         parsed_calls.append((args.command, args.repo_command, cwd, home))
@@ -1240,8 +1243,11 @@ def test_svx_main_dispatches_to_repo_add_flow(monkeypatch, tmp_path: Path):
     home = tmp_path / "home"
     parsed_calls = []
 
-    monkeypatch.setattr(cli_module.Path, "cwd", lambda: project)
-    monkeypatch.setattr(cli_module.Path, "home", lambda: home)
+    monkeypatch.setattr(
+        cli_module.Runtime,
+        "from_process",
+        classmethod(lambda cls: Namespace(cwd=project, home=home)),
+    )
 
     def fake_handle(args, cwd, home):
         parsed_calls.append(

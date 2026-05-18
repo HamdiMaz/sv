@@ -96,6 +96,7 @@ from sv.source_cache import (
     record_cached_skill_body_hash,
     wrap_catalog_with_skill_body_cache,
 )
+from sv.runtime import Runtime
 from sv.terminal import escape_terminal_controls
 from sv.tomlutil import load_toml_document
 from sv.ui import (
@@ -661,7 +662,8 @@ def handle(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return handle(args, cwd=Path.cwd(), home=Path.home())
+    runtime = Runtime.from_process()
+    return handle(args, cwd=runtime.cwd, home=runtime.home)
 
 
 def svx_main(argv: Sequence[str] | None = None) -> int:
@@ -670,7 +672,8 @@ def svx_main(argv: Sequence[str] | None = None) -> int:
     for skills_path in svx_args.skills_paths:
         forwarded.extend(["--skills-path", skills_path])
     args = build_parser().parse_args(forwarded)
-    return handle(args, cwd=Path.cwd(), home=Path.home())
+    runtime = Runtime.from_process()
+    return handle(args, cwd=runtime.cwd, home=runtime.home)
 
 
 def _build_svx_parser() -> argparse.ArgumentParser:
