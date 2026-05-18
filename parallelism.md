@@ -18,7 +18,7 @@
 - `SV_JOBS=N` accepts decimal integers from `1` through `64`. Invalid values raise `SvError("SV_JOBS must be an integer between 1 and 64.")`.
 - Results, warnings, user output, and manifest/index/cache writes are deterministic. Completion order never affects visible order.
 - Ordinary worker exceptions are collected and re-raised by original input order. If repo 1 and repo 3 both fail, the command reports repo 1 first, even if repo 3 finished first.
-- `map_ordered` must not catch `BaseException`; `KeyboardInterrupt`, `SystemExit`, and similar process-control exceptions are allowed to propagate instead of being converted into delayed deterministic worker failures.
+- `map_ordered` must not convert or suppress `BaseException`; `KeyboardInterrupt`, `SystemExit`, and similar process-control exceptions may be caught only to cancel pending futures and must then be re-raised immediately instead of being converted into delayed deterministic worker failures.
 - Source backend fallback order remains unchanged **within one repo**:
   1. `github-gh-api`
   2. `github-https-api`
@@ -69,6 +69,7 @@
   - Replay invalid-skill warnings in candidate order.
 - Modify `src/sv/cli.py`
   - No new CLI flag is required.
+  - Validate `SV_JOBS` once at CLI handle entry so invalid values fail before command work starts.
   - Source refresh gains parallelism through `catalog.py`/`source.py`.
   - Bulk add/sync/update gains parallelism through `project.py`.
   - Invalid `SV_JOBS` surfaces as the existing `error: ...` CLI failure.
@@ -133,6 +134,13 @@ def test_configured_jobs_rejects_invalid_values(monkeypatch: pytest.MonkeyPatch)
         monkeypatch.setenv("SV_JOBS", value)
         with pytest.raises(SvError, match="SV_JOBS must be an integer between 1 and 64"):
             configured_jobs()
+
+
+def test_map_ordered_validates_sv_jobs_even_with_no_items(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SV_JOBS", "many")
+
+    with pytest.raises(SvError, match="SV_JOBS must be an integer between 1 and 64"):
+        map_ordered([], lambda value: value)
 ```
 
 - [ ] **Step 2: Write tests for ordered parallel execution**
@@ -185,6 +193,16 @@ def test_map_ordered_reraises_first_failure_by_input_order() -> None:
 
     with pytest.raises(SvError, match="first failure"):
         map_ordered(["ok", "first", "second"], worker, jobs=3)
+
+
+def test_map_ordered_reraises_worker_base_exception() -> None:
+    def worker(value: str) -> str:
+        if value == "stop":
+            raise SystemExit("stop now")
+        return value
+
+    with pytest.raises(SystemExit, match="stop now"):
+        map_ordered(["ok", "stop"], worker, jobs=2)
 ```
 
 - [ ] **Step 3: Run tests and verify they fail**
@@ -205,7 +223,7 @@ Create `src/sv/parallel.py` with this exact implementation:
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 import os
 from typing import TypeVar, cast
 
@@ -252,19 +270,20 @@ def map_ordered(
     """
 
     item_list = list(items)
-    if not item_list:
-        return []
-
     worker_count = configured_jobs() if jobs is None else jobs
     if worker_count < 1 or worker_count > _MAX_JOBS:
         raise SvError("SV_JOBS must be an integer between 1 and 64.")
+    if not item_list:
+        return []
     if worker_count == 1 or len(item_list) == 1:
         return [worker(item) for item in item_list]
 
     results: list[R | object] = [_MISSING] * len(item_list)
     failures: list[Exception | None] = [None] * len(item_list)
     max_workers = min(worker_count, len(item_list))
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="sv") as executor:
+    executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="sv")
+    futures: dict[Future[R], int] = {}
+    try:
         futures = {
             executor.submit(worker, item): index
             for index, item in enumerate(item_list)
@@ -275,6 +294,13 @@ def map_ordered(
                 results[index] = future.result()
             except Exception as exc:
                 failures[index] = exc
+    except BaseException:
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
 
     for failure in failures:
         if failure is not None:
@@ -666,7 +692,7 @@ import threading
 
 - [ ] **Step 2: Add a CLI test for invalid `SV_JOBS`**
 
-Append this test to `tests/test_cli_list_contracts.py`:
+Append these tests to `tests/test_cli_list_contracts.py`:
 
 ```python
 def test_source_command_reports_invalid_sv_jobs(tmp_path, run_sv, monkeypatch):
@@ -678,6 +704,19 @@ def test_source_command_reports_invalid_sv_jobs(tmp_path, run_sv, monkeypatch):
     monkeypatch.setenv("SV_JOBS", "many")
 
     result = run_sv(["list", "--refresh"], cwd=project, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 1
+    assert "SV_JOBS must be an integer between 1 and 64" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_invalid_sv_jobs_fails_before_non_parallel_command_work(tmp_path, run_sv, monkeypatch):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("SV_JOBS", "many")
+
+    result = run_sv(["cache", "status"], cwd=project, home=home)
 
     assert result.exit_code == 1
     assert "SV_JOBS must be an integer between 1 and 64" in result.stderr
@@ -698,10 +737,11 @@ Run:
 uv run pytest \
   tests/test_source.py::test_ensure_source_repos_prepares_independent_repos_in_parallel \
   tests/test_cli_list_contracts.py::test_source_command_reports_invalid_sv_jobs \
+  tests/test_cli_list_contracts.py::test_invalid_sv_jobs_fails_before_non_parallel_command_work \
   -q --no-cov
 ```
 
-Expected: `ensure_source_repos` does not accept `jobs`. The CLI invalid-`SV_JOBS` test may already pass after Task 2 because lightweight source discovery uses `map_ordered`; keep it as a regression test for the CLI error contract.
+Expected: `ensure_source_repos` does not accept `jobs`. The `cache status` invalid-`SV_JOBS` test fails until `handle()` validates `configured_jobs()` before command work; the source-command invalid-`SV_JOBS` test may already pass after Task 2 because lightweight source discovery uses `map_ordered`, but keep it as a regression test for the CLI error contract.
 
 - [ ] **Step 4: Parallelize `ensure_source_repos`**
 
@@ -744,13 +784,21 @@ Replace the loop body with ordered parallel work:
 
 - [ ] **Step 5: Parallelize CLI non-lightweight refresh path**
 
-In `src/sv/cli.py`, the helper `_ensure_source_repos_for_refresh` currently loops over repos. Replace that loop with `map_ordered`, but keep global source-state manifest writes in the caller after workers join. Workers must not call `_record_global_source_refresh_failure`, and the helper must not record failures itself; otherwise the outer `except SvError` path can overwrite a per-repo failure with an all-repos failure.
+In `src/sv/cli.py`, validate `SV_JOBS` at command entry and replace the `_ensure_source_repos_for_refresh` repo loop with `map_ordered`, but keep global source-state manifest writes in the caller after workers join. Workers must not call `_record_global_source_refresh_failure`, and the helper must not record failures itself; otherwise the outer `except SvError` path can overwrite a per-repo failure with an all-repos failure.
 
 Add import:
 
 ```python
-from sv.parallel import map_ordered
+from sv.parallel import configured_jobs, map_ordered
 ```
+
+Immediately inside `handle()`'s `try:` block, before the first `if args.command == "cache":`, validate the process-wide worker setting:
+
+```python
+        configured_jobs()
+```
+
+This keeps invalid `SV_JOBS` errors inside the existing `except SvError` CLI error path and ensures they fail before any command mutates state.
 
 Change `_ensure_source_repos_for_refresh` to return the first deterministic repo failure instead of raising source-refresh failures directly:
 
@@ -816,6 +864,7 @@ uv run pytest \
   tests/test_source.py::test_ensure_source_repos_prepares_independent_repos_in_parallel \
   tests/test_source.py::test_ensure_source_repos_uses_partial_sparse_for_each_configured_repo \
   tests/test_cli_list_contracts.py::test_source_command_reports_invalid_sv_jobs \
+  tests/test_cli_list_contracts.py::test_invalid_sv_jobs_fails_before_non_parallel_command_work \
   -q --no-cov
 ```
 
@@ -1791,7 +1840,7 @@ uv run pytest \
   -q --no-cov
 ```
 
-Expected: first test fails because add-all is serial; second may fail because sequential add can commit `alpha` before `beta` fails; third fails until bulk replacement prepares into the sync temp and reports `replaced`; fourth protects per-catalog result ordering for duplicate names; fifth fails until replacement decisions can target a specific catalog item.
+Expected: first test fails because add-all is serial; second fails in the current serial implementation because `alpha` waits for `beta` to start and the command reports the wrong prepare failure before any all-prepare safety behavior exists; fifth fails until replacement decisions can target a specific catalog item. The replacement-status and duplicate-name result-row tests may already pass against the current sequential implementation; keep them as regression guards while refactoring the bulk path.
 
 - [ ] **Step 4: Add add-all plan dataclasses**
 
@@ -2077,7 +2126,7 @@ def add_all_vault_skills(
 
 In `src/sv/cli.py`, import `add_all_vault_skills` from `sv.project`.
 
-Replace the skill-vault branch of `_add_all_skills_to_context` with serial replacement resolution followed by one bulk call. Keep the full catalog so "no" prompt decisions still report `exists`, and pass affirmative prompt decisions as catalog indexes so duplicate skill names remain distinct:
+Replace the skill-vault branch of `_add_all_skills_to_context` with serial replacement resolution followed by one bulk call. Keep the full catalog passed to this helper so "no" prompt decisions still report `exists`, and pass affirmative prompt decisions as catalog indexes so duplicate entries that remain after any earlier source-disambiguation stay distinct:
 
 ```python
     if context.is_skill_vault:
@@ -2282,6 +2331,13 @@ class _PreparedReplacement:
 class _ReplacementWork:
     plan: _ReplacementPlan
     prepared: _PreparedReplacement | None = None
+
+
+@dataclass(frozen=True)
+class _ManifestUpdatePlan:
+    project_skills_dir: Path
+    entry: ManifestEntry
+    target_style: _TargetStyle
 ```
 
 - [ ] **Step 5: Add replacement prepare/commit helpers**
@@ -2343,6 +2399,15 @@ def _commit_prepared_replacement(prepared: _PreparedReplacement) -> None:
     )
 
 
+def _cleanup_prepared_replacements(
+    prepared_replacements: Sequence[_PreparedReplacement],
+) -> None:
+    for prepared in prepared_replacements:
+        remove_materialization_path(
+            _sync_temp_target(prepared.plan.target), ignore_errors=True
+        )
+
+
 def _commit_prepared_replacements(
     prepared_replacements: Sequence[_PreparedReplacement],
 ) -> None:
@@ -2350,21 +2415,52 @@ def _commit_prepared_replacements(
         for prepared in prepared_replacements:
             _commit_prepared_replacement(prepared)
     except Exception:
-        for prepared in prepared_replacements:
-            remove_materialization_path(
-                _sync_temp_target(prepared.plan.target), ignore_errors=True
-            )
+        _cleanup_prepared_replacements(prepared_replacements)
+        raise
+
+
+def _commit_manifest_updates(updates: Sequence[_ManifestUpdatePlan]) -> None:
+    for update in updates:
+        _upsert_manifest_entry_for_target(
+            update.project_skills_dir,
+            update.entry,
+            update.target_style,
+        )
+
+
+def _commit_manifest_updates_and_replacements(
+    updates: Sequence[_ManifestUpdatePlan],
+    prepared_replacements: Sequence[_PreparedReplacement],
+) -> None:
+    try:
+        _commit_manifest_updates(updates)
+        _commit_prepared_replacements(prepared_replacements)
+    except Exception:
+        _cleanup_prepared_replacements(prepared_replacements)
         raise
 ```
 
 - [ ] **Step 6: Update `_sync_skills` to collect replacement plans**
 
-In `_sync_skills`, keep all existing skip/source-missing logic. Change only the branch that currently calls `_replace_tree_and_update_manifest(...)`.
+In `_sync_skills`, keep the existing skip/source-missing decisions, but do not write the manifest during the planning loop. Queue source-missing manifest refreshes and replacement work, then apply both only after all replacement preparation has succeeded.
 
 Before the local skills loop, add:
 
 ```python
     replacement_work: list[_ReplacementWork] = []
+    manifest_updates: list[_ManifestUpdatePlan] = []
+```
+
+In the `entry is None` / source-missing branch, replace the immediate `_upsert_manifest_entry_for_target(...)` call with:
+
+```python
+                manifest_updates.append(
+                    _ManifestUpdatePlan(
+                        project_skills_dir=project_skills_dir,
+                        entry=refreshed,
+                        target_style=target_style,
+                    )
+                )
 ```
 
 Replace:
@@ -2398,10 +2494,10 @@ After the local skills loop and before returning `SyncResult`, add:
 
 ```python
     prepared_replacements = _prepare_replacement_work_ordered(replacement_work)
-    _commit_prepared_replacements(prepared_replacements)
+    _commit_manifest_updates_and_replacements(manifest_updates, prepared_replacements)
 ```
 
-This preserves the `updated` list order because it is still appended during deterministic local skill iteration.
+This preserves the `updated` and `skipped` list order because they are still appended during deterministic local skill iteration, while avoiding manifest writes before the prepare phase has succeeded. If a manifest-only serial commit fails, any prepared replacement temps are removed before the error is reported.
 
 - [ ] **Step 7: Update `_update_skills` changed-source branches**
 
@@ -2409,7 +2505,22 @@ In `_update_skills`, add before the manifest loop:
 
 ```python
     replacement_work: list[_ReplacementWork] = []
+    manifest_updates: list[_ManifestUpdatePlan] = []
 ```
+
+For every branch in the manifest loop that currently calls `_upsert_manifest_entry_for_target(project_skills_dir, refreshed, target_style)` without replacing the skill folder (`source-missing`, `unchanged`, and `modified` skip branches), replace the immediate write with:
+
+```python
+            manifest_updates.append(
+                _ManifestUpdatePlan(
+                    project_skills_dir=project_skills_dir,
+                    entry=refreshed,
+                    target_style=target_style,
+                )
+            )
+```
+
+Do not write project/vault manifests inside the planning loop; these queued updates are serial commits after replacement preparation succeeds.
 
 For the branch:
 
@@ -2472,10 +2583,10 @@ After the manifest loop and before returning `SyncResult`, add:
 
 ```python
     prepared_replacements = _prepare_replacement_work_ordered(replacement_work)
-    _commit_prepared_replacements(prepared_replacements)
+    _commit_manifest_updates_and_replacements(manifest_updates, prepared_replacements)
 ```
 
-This commits every prepared replacement through the same manifest path, preserves manifest-order commits, preserves unchanged-source behavior when source hashes are unavailable, and avoids stale metadata variables from the old inline branch.
+This commits every manifest-only update and prepared replacement through serial paths after all replacement preparations succeed, removes prepared replacement temps if a manifest-only serial commit fails, preserves unchanged-source behavior when source hashes are unavailable, and avoids stale metadata variables from the old inline branch.
 
 - [ ] **Step 8: Keep compare-only materialization behavior correct**
 
