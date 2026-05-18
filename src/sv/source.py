@@ -1268,8 +1268,12 @@ def ensure_source_repos(
     update: bool = True,
     jobs: int | None = None,
 ) -> list[Path]:
-    def worker(repo: RepoConfig) -> Path:
-        repo_path = paths.source_repo_for(repo.id)
+    repo_jobs = [(repo, paths.source_repo_for(repo.id)) for repo in repos]
+    for _, repo_path in repo_jobs:
+        reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
+
+    def worker(repo_job: tuple[RepoConfig, Path]) -> Path:
+        repo, repo_path = repo_job
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         ensure_source_repo(
             repo.url,
@@ -1280,7 +1284,7 @@ def ensure_source_repos(
         )
         return repo_path
 
-    return map_ordered(list(repos), worker, jobs=jobs)
+    return map_ordered(repo_jobs, worker, jobs=jobs)
 
 
 def _ensure_sparse_git_repo(
