@@ -685,6 +685,69 @@ def test_skill_body_cache_stores_and_materializes_valid_skill(tmp_path: Path) ->
     assert metadata.last_used_at == "2026-05-18T13:00:00Z"
 
 
+def test_skill_body_cache_touch_repairs_permissive_entry_directory(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    entry_dir = skill_body_cache_path(paths, content_hash)
+    entry_dir.chmod(0o777)
+
+    materialized = try_materialize_from_skill_body_cache(
+        paths,
+        content_hash=content_hash,
+        skill_name="alpha",
+        destination=tmp_path / "dest" / "alpha",
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+    )
+
+    assert materialized is True
+    assert _mode(entry_dir) == 0o700
+    metadata = load_skill_body_metadata(paths, content_hash)
+    assert metadata.use_count == 2
+    assert metadata.last_used_at == "2026-05-18T13:00:00Z"
+
+
+def test_skill_body_cache_touch_refuses_symlinked_metadata_temp_file(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    metadata_path = skill_body_cache_path(paths, content_hash) / "metadata.toml"
+    temp_path = metadata_path.with_name(f".{metadata_path.name}.{os.getpid()}.tmp")
+    attacker_target = tmp_path / "attacker-target.toml"
+    temp_path.symlink_to(attacker_target)
+
+    with pytest.raises(SvError, match="symlinked"):
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=tmp_path / "dest" / "alpha",
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        )
+
+    assert not attacker_target.exists()
+
+
 def test_skill_body_cache_miss_returns_false(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     destination = tmp_path / "dest" / "alpha"

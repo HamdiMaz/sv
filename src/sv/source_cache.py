@@ -286,6 +286,7 @@ def _required_int(data: Mapping[str, Any], field: str, path: Path) -> int:
 
 
 def _save_skill_body_metadata_at(path: Path, metadata: SkillBodyMetadata) -> None:
+    _ensure_private_cache_dir(path.parent)
     text = (
         "\n".join(
             [
