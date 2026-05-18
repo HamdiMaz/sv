@@ -93,3 +93,9 @@ Sources can publish skills under `skills/<name>`, one-level `*/skills/<name>` fo
 Materialized skill folders are cached by content hash. Indexed sources provide the content hash in source metadata; non-index sources learn and record the hash after the first successful add/sync/update materialization. Reinstalling or syncing a skill can reuse a cached skill body when the cached hash matches the source metadata. If normal mode has cached metadata but no matching cached body, `sv` refreshes that repo's metadata before materializing from source, so stale metadata is not paired with a newer source body. Cached skill bodies are pruned lazily after cache writes: entries unused for more than 30 days are removed, and the cache is reduced to 256 MiB when it grows beyond that size.
 
 Use `--refresh` on source-reading commands to force metadata refresh. Use `--cached` to avoid network and Git refreshes. Commands that need to materialize a skill with `--cached` require a cached skill body; if the body is missing, rerun once without `--cached` to populate it. Use `sv cache status` to inspect cache usage and `sv cache clean` to prune cached skill bodies immediately.
+
+## Parallelism
+
+Source-reading commands can refresh independent configured repos in parallel. Bulk `add --all`, `sync`, and `update` prepare independent skill trees in parallel, then commit final filesystem and manifest changes in stable order. `status` and `index` can hash independent skill folders in parallel.
+
+Use `SV_JOBS=1` when you want fully sequential execution for debugging or reproducing a race. Use `SV_JOBS=N` with `N` from 1 through 64 to choose a specific worker count. Invalid values fail before command work starts with a clear error.

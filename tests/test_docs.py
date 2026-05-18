@@ -328,6 +328,15 @@ def test_docs_do_not_describe_removed_add_all_positional_alias():
     )
 
 
+def test_docs_describe_sv_jobs_parallelism_control() -> None:
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in _documented_paths())
+
+    assert "SV_JOBS" in combined
+    assert "SV_JOBS=1" in combined
+    assert "parallel" in combined.lower()
+    assert "64" in combined
+
+
 def test_docs_distinguish_update_from_force_sync():
     stale_phrases = [
         "`sv update` does the same work",

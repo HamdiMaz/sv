@@ -73,3 +73,14 @@ Use `--cached` when you need to avoid network and Git source refreshes. This mod
 In normal mode, if cached metadata exists but the matching cached skill body is missing, `sv` refreshes that source repo before materializing from source. This prevents stale metadata from being paired with newer source content.
 
 Invalid or tampered cache files are ignored or rejected depending on the command and cache mode. Symlinked cache paths are always refused. Run `sv cache clean` to remove expired and over-budget cached skill bodies.
+
+## I want to disable parallel execution
+
+Set `SV_JOBS=1` before the command:
+
+```bash
+SV_JOBS=1 sv list --refresh
+SV_JOBS=1 sv update
+```
+
+`SV_JOBS` accepts integers from 1 through 64. Values outside that range, empty values, or non-integers fail with `SV_JOBS must be an integer between 1 and 64.`

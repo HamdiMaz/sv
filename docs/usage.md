@@ -46,6 +46,8 @@ Run commands from the project root where `.pi/skills` should be managed.
 
 Use `--cached` to avoid network and Git refreshes. Cached mode requires existing metadata, and commands that copy or update skills also require a matching cached skill body before materializing a folder. Normal mode refreshes the source first when metadata exists but the matching skill body is missing, so stale metadata is not paired with newer source content. Cached skill bodies are pruned lazily after cache writes when unused for more than 30 days or when the body cache exceeds 256 MiB. See [global cache](commands.md#global-cache) for details.
 
+`sv` parallelizes independent work by default, so multiple configured source repos and bulk skill operations should complete faster than a purely sequential run. The command output is still printed in stable order. For debugging, run `SV_JOBS=1 sv <command>` to force sequential execution.
+
 ## Reading `sv list`
 
 If no source repos are configured, `sv list` tells you to add one with `sv repo add <owner/repo>` instead of showing an empty skill table.

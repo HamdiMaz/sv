@@ -39,6 +39,12 @@ uv run pytest tests/test_docs.py -q --no-cov
 uv run pytest tests/test_docs.py::test_top_level_docs_files_have_headings -q --no-cov
 ```
 
+When investigating ordering-sensitive failures, rerun the focused test with `SV_JOBS=1` to disable sv's internal worker pools:
+
+```bash
+SV_JOBS=1 uv run pytest tests/test_project.py -q --no-cov
+```
+
 Run the full coverage command before treating the change as ready.
 
 ## Integration tests
