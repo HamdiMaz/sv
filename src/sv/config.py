@@ -76,6 +76,26 @@ class SvPaths:
         )
 
     @property
+    def cache_dir(self) -> Path:
+        return self.sv_home / "cache" / "v1"
+
+    @property
+    def catalog_cache_dir(self) -> Path:
+        return self.cache_dir / "catalog"
+
+    @property
+    def skill_body_cache_dir(self) -> Path:
+        return self.cache_dir / "skills"
+
+    @property
+    def cache_tmp_dir(self) -> Path:
+        return self.cache_dir / "tmp"
+
+    @property
+    def cache_prune_marker(self) -> Path:
+        return self.cache_dir / "last-prune.toml"
+
+    @property
     def source_repo(self) -> Path:
         return self.source_repo_for(derive_repo_id(DEFAULT_REPO))
 
