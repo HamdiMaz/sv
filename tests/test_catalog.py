@@ -91,6 +91,26 @@ class IndexedBackend:
         raise AssertionError("catalog should not materialize folders during discovery")
 
 
+class BackendCallSentinel:
+    name = "backend-call-sentinel"
+
+    def __init__(self, called: threading.Event):
+        self.called = called
+
+    def read_index(self) -> bytes | None:
+        self.called.set()
+        raise AssertionError("safe backend should not start when another repo cache path is unsafe")
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        raise AssertionError("safe backend should not list files")
+
+    def read_file(self, path: str) -> bytes:
+        raise AssertionError("safe backend should not read files")
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("safe backend should not materialize folders")
+
+
 class PeerWaitingBackend:
     name = "peer-waiting"
 
@@ -121,6 +141,31 @@ class PeerWaitingBackend:
 
     def materialize_folder(self, source_path: str, destination: Path) -> None:
         raise AssertionError("catalog discovery must not materialize folders")
+
+
+def test_build_source_catalog_from_backends_rejects_unsafe_cache_paths_before_parallel_backend_work(
+    tmp_path: Path,
+) -> None:
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    unsafe_repo = RepoConfig(id="Unsafe/Repo", url="https://github.com/Unsafe/Repo.git")
+    safe_repo = RepoConfig(id="Safe/Repo", url="https://github.com/Safe/Repo.git")
+    outside_unsafe = tmp_path / "outside-unsafe"
+    outside_unsafe.mkdir()
+    paths.sources_dir.mkdir(parents=True)
+    os.symlink(outside_unsafe, paths.sources_dir / "Unsafe")
+    safe_backend_called = threading.Event()
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        build_source_catalog_from_backends(
+            [unsafe_repo, safe_repo],
+            paths,
+            {safe_repo.id: (BackendCallSentinel(safe_backend_called),)},
+            jobs=2,
+        )
+
+    assert not safe_backend_called.is_set()
 
 
 def test_build_source_catalog_from_backends_refreshes_independent_repos_in_parallel(

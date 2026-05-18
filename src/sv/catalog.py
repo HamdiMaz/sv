@@ -371,6 +371,9 @@ def build_source_catalog_from_backends(
     """
 
     unique_repos, aliases_by_source = _unique_catalog_repos(repos)
+    for repo in unique_repos:
+        repo_path = paths.source_repo_for(repo.id)
+        reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
 
     def worker(repo: RepoConfig) -> _RepoBackendCatalogResult:
         source_key = repo_source_key(repo.url)

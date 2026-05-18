@@ -1164,8 +1164,17 @@ def _ensure_source_repos_for_refresh(
     *,
     update: bool,
 ) -> tuple[RepoConfig, str] | None:
-    def worker(repo: RepoConfig) -> tuple[RepoConfig, str | None]:
+    repo_paths: dict[str, Path] = {}
+    for repo in repos:
         repo_path = paths.source_repo_for(repo.id)
+        try:
+            reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
+        except SvError as exc:
+            return repo, str(exc)
+        repo_paths[repo.id] = repo_path
+
+    def worker(repo: RepoConfig) -> tuple[RepoConfig, str | None]:
+        repo_path = repo_paths[repo.id]
         try:
             reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
             ensure_source_repo(
