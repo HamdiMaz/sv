@@ -329,12 +329,44 @@ def test_docs_do_not_describe_removed_add_all_positional_alias():
 
 
 def test_docs_describe_sv_jobs_parallelism_control() -> None:
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in _documented_paths())
+    readme = README_PATH.read_text(encoding="utf-8")
+    command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")
+    troubleshooting = (DOCS_DIR / "troubleshooting.md").read_text(encoding="utf-8")
+    testing_guide = (DOCS_DIR / "testing.md").read_text(encoding="utf-8")
+    usage_guide = (DOCS_DIR / "usage.md").read_text(encoding="utf-8")
 
-    assert "SV_JOBS" in combined
-    assert "SV_JOBS=1" in combined
-    assert "parallel" in combined.lower()
-    assert "64" in combined
+    assert readme.index("Project Pi skills live under") < readme.index("## Parallel work")
+    assert "## Parallel work" in readme
+    assert "SV_JOBS=1" in readme
+    assert "1 through 64" in readme
+    assert "at most 8 workers" in readme
+    assert "deterministic and serialized" in readme
+
+    for snippet in [
+        "## Parallelism",
+        "add --all",
+        "sync",
+        "update",
+        "status",
+        "index",
+        "SV_JOBS=1",
+        "1 through 64",
+        "Invalid values fail before command work starts",
+    ]:
+        assert snippet in command_reference
+
+    for snippet in [
+        "## I want to disable parallel execution",
+        "SV_JOBS=1 sv list --refresh",
+        "SV_JOBS=1 sv update",
+        "SV_JOBS must be an integer between 1 and 64.",
+    ]:
+        assert snippet in troubleshooting
+
+    assert "SV_JOBS=1 uv run pytest" in testing_guide
+    assert "SV_JOBS=1 sv <command>" in usage_guide
+    assert "stable order" in usage_guide
+    assert "parallelizes independent work" in usage_guide
 
 
 def test_docs_distinguish_update_from_force_sync():

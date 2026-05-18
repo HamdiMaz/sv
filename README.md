@@ -45,15 +45,15 @@ Global cache metadata and skill bodies live under:
 
 Source metadata for normal browsing/install commands is cached for 24 hours. `sv sync`, `sv update`, and source-aware `sv status` refresh metadata by default to preserve current-source semantics. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization. If cached metadata points at a skill whose body is not cached, normal mode refreshes that repo before source materialization; `--cached` fails instead of refreshing.
 
-## Parallel work
-
-`sv` runs independent source refreshes, bulk skill materialization preparation, and read-only skill hashing in parallel by default. Visible output, manifest writes, final skill-folder replacement, and cache metadata writes remain deterministic and serialized. Set `SV_JOBS=1` to disable worker threads for debugging, or set `SV_JOBS=N` to choose a worker count from 1 through 64. The default is bounded to at most 8 workers.
-
 Project Pi skills live under:
 
 ```text
 .pi/skills/
 ```
+
+## Parallel work
+
+`sv` runs independent source refreshes, bulk skill materialization preparation, and read-only skill hashing in parallel by default. Visible output, manifest writes, final skill-folder replacement, and cache metadata writes remain deterministic and serialized. Set `SV_JOBS=1` to disable worker threads for debugging, or set `SV_JOBS=N` to choose a worker count from 1 through 64. The default is bounded to at most 8 workers.
 
 ## Source repo configuration
 
