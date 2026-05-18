@@ -294,13 +294,15 @@ def test_failed_refresh_records_global_source_health(
     configure_source(source, project, home)
     first_result = run_sv(["list"], cwd=project, home=home, git_runner=default_runner)
     assert first_result.exit_code == 0
+    paths = SvPaths.from_home(home)
+    shutil.rmtree(paths.catalog_cache_dir)
 
     shutil.rmtree(source / ".git")
 
-    result = run_sv(["list"], cwd=project, home=home, git_runner=default_runner)
+    result = run_sv(["list", "--refresh"], cwd=project, home=home, git_runner=default_runner)
 
     assert result.exit_code == 1
-    state = next(iter(load_global_manifest(SvPaths.from_home(home)).values()))
+    state = next(iter(load_global_manifest(paths).values()))
     assert state.last_refresh_started_at is not None
     assert state.last_refresh_finished_at is not None
     assert state.last_refresh_status == "error"
