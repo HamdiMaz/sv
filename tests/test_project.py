@@ -91,6 +91,38 @@ def test_add_project_skill_from_catalog_writes_manifest(tmp_path: Path):
     assert manifest["alpha"].source_path == "skills/alpha"
 
 
+def test_add_project_skill_validates_materialized_folder_through_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    delegate = project_module.DEFAULT_MATERIALIZATION_ADAPTER
+
+    class SpyMaterializationAdapter:
+        def __init__(self) -> None:
+            self.validated: list[Path] = []
+
+        def validate_materialization_source_tree(self, source: Path) -> None:
+            self.validated.append(source)
+            delegate.validate_materialization_source_tree(source)
+
+        def remove_materialization_path(
+            self, path: Path, *, ignore_errors: bool = False
+        ) -> None:
+            delegate.remove_materialization_path(path, ignore_errors=ignore_errors)
+
+        def install_materialized_skill_folder(self, *args, **kwargs) -> None:
+            delegate.install_materialized_skill_folder(*args, **kwargs)
+
+    spy = SpyMaterializationAdapter()
+    monkeypatch.setattr(project_module, "_MATERIALIZATION", spy)
+
+    result = add_project_skill(entry, project_skills)
+
+    assert result.status == "added"
+    assert spy.validated == [project_skills / ".alpha.sv-add-tmp"]
+
+
 def test_add_project_skill_existing_skill_does_not_write_manifest(tmp_path: Path):
     entry = make_source_skill(tmp_path / "source", "alpha")
     project_skills = tmp_path / "project" / ".pi" / "skills"

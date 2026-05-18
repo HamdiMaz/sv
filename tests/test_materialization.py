@@ -6,6 +6,7 @@ import pytest
 from sv.errors import SvError
 from sv import materialization as materialization_module
 from sv.materialization import (
+    MaterializationAdapter,
     copy_skill_folder_to_temp,
     install_materialized_skill_folder,
     remove_materialization_path,
@@ -19,7 +20,9 @@ def _write_skill(path: Path, content: str) -> None:
     (path / "SKILL.md").write_text(content)
 
 
-def test_copy_skill_folder_to_temp_copies_source_without_touching_target(tmp_path: Path):
+def test_copy_skill_folder_to_temp_copies_source_without_touching_target(
+    tmp_path: Path,
+):
     source = tmp_path / "source" / "alpha"
     target = tmp_path / "project" / "alpha"
     temp_target = target.with_name(".alpha.sv-tmp")
@@ -287,7 +290,9 @@ def test_install_materialized_skill_folder_success_runs_callback(tmp_path: Path)
     assert not materialized.exists()
 
 
-@pytest.mark.parametrize("exception", [SvError("manifest write failed"), ValueError("callback failed")])
+@pytest.mark.parametrize(
+    "exception", [SvError("manifest write failed"), ValueError("callback failed")]
+)
 def test_install_materialized_skill_folder_rolls_back_new_target_when_callback_fails(
     tmp_path: Path, exception: Exception
 ):
@@ -334,7 +339,9 @@ def test_replace_with_materialized_skill_folder_success_replaces_target_and_remo
     assert not backup.exists()
 
 
-@pytest.mark.parametrize("exception", [SvError("manifest write failed"), ValueError("callback failed")])
+@pytest.mark.parametrize(
+    "exception", [SvError("manifest write failed"), ValueError("callback failed")]
+)
 def test_replace_with_materialized_skill_folder_rolls_back_replacement_when_callback_fails(
     tmp_path: Path, exception: Exception
 ):
@@ -373,7 +380,9 @@ def test_restore_materialization_backup_replaces_existing_target(tmp_path: Path)
     assert not backup.exists()
 
 
-def test_remove_materialization_path_removes_files_directories_and_symlinks(tmp_path: Path):
+def test_remove_materialization_path_removes_files_directories_and_symlinks(
+    tmp_path: Path,
+):
     file_path = tmp_path / "file.tmp"
     file_path.write_text("file\n")
     dir_path = tmp_path / "dir.tmp"
@@ -393,3 +402,48 @@ def test_remove_materialization_path_removes_files_directories_and_symlinks(tmp_
     assert not dir_path.exists()
     assert not link_path.exists()
     assert outside.read_text() == "outside\n"
+
+
+def test_materialization_adapter_installs_temp_folder(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha.\n---\n")
+    temp = tmp_path / ".alpha.tmp"
+    target = tmp_path / "alpha"
+
+    adapter = MaterializationAdapter()
+    adapter.copy_skill_folder_to_temp(source, temp, error_message="copy failed")
+    adapter.install_materialized_skill_folder(temp, target)
+
+    assert not temp.exists()
+    assert (target / "SKILL.md").is_file()
+
+
+def test_materialization_adapter_restores_backup_on_replace_callback_failure(tmp_path):
+    target = tmp_path / "alpha"
+    target.mkdir()
+    (target / "old.txt").write_text("old")
+    materialized = tmp_path / ".alpha.new"
+    materialized.mkdir()
+    (materialized / "new.txt").write_text("new")
+    backup = tmp_path / ".alpha.backup"
+
+    adapter = MaterializationAdapter()
+
+    def fail_after_replace():
+        raise RuntimeError("manifest write failed")
+
+    try:
+        adapter.replace_with_materialized_skill_folder(
+            materialized,
+            target,
+            backup,
+            after_replace=fail_after_replace,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "manifest write failed"
+    else:
+        raise AssertionError("expected callback failure")
+
+    assert (target / "old.txt").read_text() == "old"
+    assert not backup.exists()

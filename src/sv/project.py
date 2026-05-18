@@ -16,12 +16,7 @@ from sv.manifest import (
     save_manifest,
     upsert_manifest_entry,
 )
-from sv.materialization import (
-    install_materialized_skill_folder,
-    remove_materialization_path,
-    replace_with_materialized_skill_folder,
-    validate_materialization_source_tree,
-)
+from sv.materialization import DEFAULT_MATERIALIZATION_ADAPTER
 from sv.parallel import map_ordered
 
 
@@ -66,6 +61,9 @@ _VAULT_TARGET = _TargetStyle(
     skills_dir_label="vault skills directory",
     path_label="vault skills path",
 )
+
+
+_MATERIALIZATION = DEFAULT_MATERIALIZATION_ADAPTER
 
 
 @dataclass(frozen=True)
@@ -284,7 +282,7 @@ def _add_skill(
             target_style,
         )
 
-    install_materialized_skill_folder(
+    _MATERIALIZATION.install_materialized_skill_folder(
         _add_temp_target(target),
         target,
         error_message=f"Failed to add {target_style.skill_label} '{target.name}'",
@@ -437,7 +435,9 @@ def _prepare_add_plan(plan: _AddPlan, target_style: _TargetStyle) -> _PreparedAd
 
 def _cleanup_prepared_adds(prepared: Sequence[_PreparedAdd]) -> None:
     for item in prepared:
-        remove_materialization_path(_add_plan_temp_target(item.plan), ignore_errors=True)
+        _MATERIALIZATION.remove_materialization_path(
+            _add_plan_temp_target(item.plan), ignore_errors=True
+        )
 
 
 def _add_all_skills_parallel(
@@ -473,7 +473,9 @@ def _add_all_skills_parallel(
     except Exception:
         _cleanup_prepared_adds(prepared)
         for plan in to_prepare:
-            remove_materialization_path(_add_plan_temp_target(plan), ignore_errors=True)
+            _MATERIALIZATION.remove_materialization_path(
+                _add_plan_temp_target(plan), ignore_errors=True
+            )
         raise
 
     ordered_results: list[AddSkillResult | None] = [None] * len(catalog)
@@ -488,7 +490,9 @@ def _add_all_skills_parallel(
             )
 
             def update_manifest(entry: ManifestEntry = manifest_entry) -> None:
-                _upsert_manifest_entry_for_target(project_skills_dir, entry, target_style)
+                _upsert_manifest_entry_for_target(
+                    project_skills_dir, entry, target_style
+                )
 
             if plan.replace_existing_target:
                 _replace_with_materialized_entry(
@@ -498,7 +502,7 @@ def _add_all_skills_parallel(
                 )
                 status = "replaced"
             else:
-                install_materialized_skill_folder(
+                _MATERIALIZATION.install_materialized_skill_folder(
                     _add_temp_target(plan.target),
                     plan.target,
                     error_message=(
@@ -535,7 +539,7 @@ def validate_project_skills_for_run(project_skills_dir: Path) -> list[str]:
     for skill_name in skill_names:
         target = project_skills_dir / skill_name
         try:
-            validate_materialization_source_tree(target)
+            _MATERIALIZATION.validate_materialization_source_tree(target)
         except SvError as exc:
             raise SvError(
                 f"Refusing to run Pi with unsafe project skill '{skill_name}': {exc}"
@@ -780,7 +784,9 @@ def _sync_skills(
                 continue
             replacement_work.append(
                 _ReplacementWork(
-                    _ReplacementPlan(entry, local_skill, project_skills_dir, target_style)
+                    _ReplacementPlan(
+                        entry, local_skill, project_skills_dir, target_style
+                    )
                 )
             )
             updated.append(local_skill.name)
@@ -792,7 +798,9 @@ def _sync_skills(
         elif len(matches) > 1:
             source_references: tuple[str, ...] = ()
             if _needs_path_aware_source_references(matches):
-                source_references = tuple(_source_reference_for(entry) for entry in matches)
+                source_references = tuple(
+                    _source_reference_for(entry) for entry in matches
+                )
             skipped.append(
                 SyncSkip(
                     skill=local_skill.name,
@@ -881,7 +889,7 @@ def _update_skills(
                     metadata = _materialize_entry_for_replace(
                         source_entry, target, target_style
                     )
-                    remove_materialization_path(
+                    _MATERIALIZATION.remove_materialization_path(
                         _sync_temp_target(target), ignore_errors=True
                     )
                     source_hash = metadata.content_hash
@@ -920,7 +928,7 @@ def _update_skills(
                     metadata = _materialize_entry_for_replace(
                         source_entry, target, target_style
                     )
-                    remove_materialization_path(
+                    _MATERIALIZATION.remove_materialization_path(
                         _sync_temp_target(target), ignore_errors=True
                     )
                     source_hash = metadata.content_hash
@@ -957,9 +965,13 @@ def _update_skills(
                 updated.append(skill_name)
                 continue
 
-            metadata = _materialize_entry_for_replace(source_entry, target, target_style)
+            metadata = _materialize_entry_for_replace(
+                source_entry, target, target_style
+            )
             if metadata.content_hash == baseline_hash:
-                remove_materialization_path(_sync_temp_target(target), ignore_errors=True)
+                _MATERIALIZATION.remove_materialization_path(
+                    _sync_temp_target(target), ignore_errors=True
+                )
                 refreshed = replace(
                     refreshed,
                     source_content_hash=metadata.content_hash,
@@ -1015,7 +1027,11 @@ def _refresh_skill_states(
         _validate_project_skill_dir_name(target, target_style)
         if target.is_dir():
             refresh_items.append(
-                (key, manifest_entry, _catalog_entry_for_manifest(catalog, manifest_entry))
+                (
+                    key,
+                    manifest_entry,
+                    _catalog_entry_for_manifest(catalog, manifest_entry),
+                )
             )
 
     def worker(
@@ -1325,12 +1341,12 @@ def _materialize_entry_to_temp(
     error_message: str,
 ) -> _MaterializedSkillMetadata:
     """Materialize and validate one selected source skill before local mutation."""
-    remove_materialization_path(temp_target, ignore_errors=True)
+    _MATERIALIZATION.remove_materialization_path(temp_target, ignore_errors=True)
     try:
         entry.materialize_to(temp_target)
         return _validate_materialized_skill_folder(temp_target, skill_name)
     except Exception as exc:
-        remove_materialization_path(temp_target, ignore_errors=True)
+        _MATERIALIZATION.remove_materialization_path(temp_target, ignore_errors=True)
         if isinstance(exc, SvError) and str(exc).startswith(error_message):
             raise
         raise SvError(f"{error_message}: {exc}") from exc
@@ -1342,7 +1358,12 @@ def _validate_materialized_skill_folder(
     from sv.hashing import sha256_file, sha256_skill_directory
     from sv.skills import parse_skill_file
 
-    _ensure_safe_source_skill_tree(materialized_target, skill_name)
+    try:
+        _MATERIALIZATION.validate_materialization_source_tree(materialized_target)
+    except SvError as exc:
+        if "symlink" in str(exc) or "Failed to inspect" in str(exc):
+            _ensure_safe_source_skill_tree(materialized_target, skill_name)
+        raise
     parse_skill_file(materialized_target / "SKILL.md", expected_folder=skill_name)
     return _MaterializedSkillMetadata(
         content_hash=sha256_skill_directory(
@@ -1372,13 +1393,17 @@ def _replace_tree_and_update_manifest(
 
 
 def _prepare_replacement_plan(plan: _ReplacementPlan) -> _PreparedReplacement:
-    metadata = _materialize_entry_for_replace(plan.entry, plan.target, plan.target_style)
+    metadata = _materialize_entry_for_replace(
+        plan.entry, plan.target, plan.target_style
+    )
     return _PreparedReplacement(plan=plan, metadata=metadata)
 
 
 def _cleanup_replacement_work(work: Sequence[_ReplacementWork]) -> None:
     for item in work:
-        remove_materialization_path(_sync_temp_target(item.plan.target), ignore_errors=True)
+        _MATERIALIZATION.remove_materialization_path(
+            _sync_temp_target(item.plan.target), ignore_errors=True
+        )
 
 
 def _prepare_replacement_work_ordered(
@@ -1419,7 +1444,7 @@ def _cleanup_prepared_replacements(
     prepared_replacements: Sequence[_PreparedReplacement],
 ) -> None:
     for prepared in prepared_replacements:
-        remove_materialization_path(
+        _MATERIALIZATION.remove_materialization_path(
             _sync_temp_target(prepared.plan.target), ignore_errors=True
         )
 
@@ -1483,8 +1508,8 @@ def _replace_with_materialized_entry(
         error_message = f"Failed to sync skill '{target.name}'"
     else:
         error_message = f"Failed to sync {target_style.skill_label} '{target.name}'"
-    remove_materialization_path(backup_target, ignore_errors=True)
-    replace_with_materialized_skill_folder(
+    _MATERIALIZATION.remove_materialization_path(backup_target, ignore_errors=True)
+    _MATERIALIZATION.replace_with_materialized_skill_folder(
         temp_target,
         target,
         backup_target,

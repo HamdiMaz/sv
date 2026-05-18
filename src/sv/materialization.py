@@ -22,6 +22,59 @@ class _MaterializationStats:
     bytes: int = 0
 
 
+@dataclass(frozen=True)
+class MaterializationAdapter:
+    def copy_skill_folder_to_temp(
+        self, source: Path, temp_target: Path, *, error_message: str
+    ) -> Path:
+        return copy_skill_folder_to_temp(
+            source, temp_target, error_message=error_message
+        )
+
+    def install_materialized_skill_folder(
+        self,
+        materialized_target: Path,
+        target: Path,
+        *,
+        error_message: str = "Failed to install materialized skill folder",
+        after_install: Callable[[], None] | None = None,
+    ) -> None:
+        install_materialized_skill_folder(
+            materialized_target,
+            target,
+            error_message=error_message,
+            after_install=after_install,
+        )
+
+    def replace_with_materialized_skill_folder(
+        self,
+        materialized_target: Path,
+        target: Path,
+        backup_target: Path,
+        *,
+        error_message: str = "Failed to replace materialized skill folder",
+        after_replace: Callable[[], None] | None = None,
+    ) -> None:
+        replace_with_materialized_skill_folder(
+            materialized_target,
+            target,
+            backup_target,
+            error_message=error_message,
+            after_replace=after_replace,
+        )
+
+    def validate_materialization_source_tree(self, source: Path) -> None:
+        validate_materialization_source_tree(source)
+
+    def remove_materialization_path(
+        self, path: Path, *, ignore_errors: bool = False
+    ) -> None:
+        remove_materialization_path(path, ignore_errors=ignore_errors)
+
+
+DEFAULT_MATERIALIZATION_ADAPTER = MaterializationAdapter()
+
+
 def copy_skill_folder_to_temp(
     source: Path, temp_target: Path, *, error_message: str
 ) -> Path:
@@ -152,7 +205,9 @@ def validate_materialization_source_tree(source: Path) -> None:
                 )
             _record_materialization_entry(source, path, stats)
     except OSError as exc:
-        raise SvError(f"Failed to inspect source materialization path {source}: {exc}") from exc
+        raise SvError(
+            f"Failed to inspect source materialization path {source}: {exc}"
+        ) from exc
 
 
 def _reject_symlinked_materialization_path_or_ancestors(source: Path) -> None:
