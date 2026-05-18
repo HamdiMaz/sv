@@ -8,6 +8,7 @@ import pytest
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 from sv import materialization as materialization_module
+import sv.process as process_module
 import sv.source as source_module
 from sv.source import (
     GitBloblessSparseBackend,
@@ -65,6 +66,16 @@ def assert_hint_contains(error: SourceBackendError, *expected_parts: str) -> Non
     assert error.hint is not None
     for expected in expected_parts:
         assert expected in error.hint
+
+
+def test_source_star_import_preserves_source_and_process_compat_exports():
+    namespace: dict[str, object] = {}
+
+    exec("from sv.source import *", namespace)
+
+    assert namespace["FakeSourceBackend"] is FakeSourceBackend
+    assert namespace["ensure_source_repo"] is ensure_source_repo
+    assert namespace["default_runner"] is default_runner
 
 
 def test_parse_github_repo_ref_accepts_supported_github_repo_urls():
@@ -1929,7 +1940,7 @@ def test_default_runner_reports_missing_git_as_sv_error(monkeypatch):
     def missing_binary(*args, **kwargs):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(source_module.subprocess, "run", missing_binary)
+    monkeypatch.setattr(process_module.subprocess, "run", missing_binary)
 
     with pytest.raises(SvError, match="Git is required"):
         default_runner(["git", "status"])
@@ -1943,7 +1954,7 @@ def test_default_runner_uses_timeout_and_noninteractive_environment(monkeypatch)
         return completed(args[0], stdout="ok\n")
 
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(process_module.subprocess, "run", fake_run)
 
     result = default_runner(["git", "status"], cwd=Path("/tmp/project"))
 
@@ -1954,7 +1965,7 @@ def test_default_runner_uses_timeout_and_noninteractive_environment(monkeypatch)
     assert kwargs["cwd"] == Path("/tmp/project")
     assert kwargs["text"] is True
     assert kwargs["capture_output"] is True
-    assert kwargs["timeout"] == source_module.DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
+    assert kwargs["timeout"] == process_module.DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
     assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert kwargs["env"]["GIT_SSH_COMMAND"] == "ssh -o BatchMode=yes"
     assert kwargs["env"]["GH_PROMPT_DISABLED"] == "1"
@@ -1965,7 +1976,7 @@ def test_default_runner_reports_timeouts_as_command_failures(monkeypatch):
     def fake_run(*args, **kwargs):
         raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
 
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(process_module.subprocess, "run", fake_run)
 
     result = default_runner(["git", "fetch"])
 
@@ -1979,7 +1990,7 @@ def test_default_runner_timeout_result_preserves_captured_streams(monkeypatch):
             args[0], kwargs["timeout"], output=b"partial \xff output", stderr="ssh prompt"
         )
 
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(process_module.subprocess, "run", fake_run)
 
     result = default_runner(["gh", "api", "/repos/Org/Skills"])
 
@@ -1996,7 +2007,7 @@ def test_default_runner_preserves_existing_batchmode_ssh_command(monkeypatch):
         return completed(args[0])
 
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i /tmp/key -o BatchMode=yes")
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(process_module.subprocess, "run", fake_run)
 
     default_runner(["git", "fetch"])
 
@@ -2012,7 +2023,7 @@ def test_default_runner_adds_batchmode_to_existing_ssh_command(monkeypatch):
         return completed(args[0])
 
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i /tmp/key")
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(process_module.subprocess, "run", fake_run)
 
     default_runner(["git", "fetch"])
 
@@ -2023,7 +2034,7 @@ def test_default_runner_reraises_missing_non_git_binary(monkeypatch):
     def missing_binary(*args, **kwargs):
         raise FileNotFoundError("custom")
 
-    monkeypatch.setattr(source_module.subprocess, "run", missing_binary)
+    monkeypatch.setattr(process_module.subprocess, "run", missing_binary)
 
     with pytest.raises(FileNotFoundError):
         default_runner(["custom-tool"])

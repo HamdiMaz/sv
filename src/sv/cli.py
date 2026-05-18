@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 import hashlib
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 from typing import Any
 import unicodedata
@@ -59,6 +58,7 @@ from sv.manifest import (
     save_manifest,
 )
 from sv.parallel import configured_jobs, map_ordered
+from sv.process import default_process_runner
 from sv.project import (
     AddSkillResult,
     RemoveSkillResult,
@@ -402,10 +402,6 @@ def build_parser() -> argparse.ArgumentParser:
     repo_subparsers.add_parser("list", help="List configured skill source repos.")
 
     return parser
-
-
-def default_process_runner(command: Sequence[str]) -> int:
-    return subprocess.call(list(command))
 
 
 def handle(

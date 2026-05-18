@@ -6,6 +6,7 @@ import subprocess
 import pytest
 
 import sv.cli as cli_module
+import sv.process as process_module
 from sv.catalog import SourceSkill
 from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, handle
 from sv.errors import SvError
@@ -1211,7 +1212,7 @@ def test_default_process_runner_delegates_to_subprocess_call(monkeypatch):
         calls.append(command)
         return 17
 
-    monkeypatch.setattr(cli_module.subprocess, "call", fake_call)
+    monkeypatch.setattr(process_module.subprocess, "call", fake_call)
 
     assert cli_module.default_process_runner(("pi", "--help")) == 17
     assert calls == [["pi", "--help"]]
