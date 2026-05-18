@@ -17,7 +17,8 @@
 - `SV_JOBS=1` disables thread pools and runs the same code path sequentially. This gives users and tests a simple debugging escape hatch.
 - `SV_JOBS=N` accepts decimal integers from `1` through `64`. Invalid values raise `SvError("SV_JOBS must be an integer between 1 and 64.")`.
 - Results, warnings, user output, and manifest/index/cache writes are deterministic. Completion order never affects visible order.
-- Worker exceptions are collected and re-raised by original input order. If repo 1 and repo 3 both fail, the command reports repo 1 first, even if repo 3 finished first.
+- Ordinary worker exceptions are collected and re-raised by original input order. If repo 1 and repo 3 both fail, the command reports repo 1 first, even if repo 3 finished first.
+- `map_ordered` must not catch `BaseException`; `KeyboardInterrupt`, `SystemExit`, and similar process-control exceptions are allowed to propagate instead of being converted into delayed deterministic worker failures.
 - Source backend fallback order remains unchanged **within one repo**:
   1. `github-gh-api`
   2. `github-https-api`
@@ -261,7 +262,7 @@ def map_ordered(
         return [worker(item) for item in item_list]
 
     results: list[R | object] = [_MISSING] * len(item_list)
-    failures: list[BaseException | None] = [None] * len(item_list)
+    failures: list[Exception | None] = [None] * len(item_list)
     max_workers = min(worker_count, len(item_list))
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="sv") as executor:
         futures = {
@@ -272,7 +273,7 @@ def map_ordered(
             index = futures[future]
             try:
                 results[index] = future.result()
-            except BaseException as exc:  # noqa: BLE001 - preserve original exception type
+            except Exception as exc:
                 failures[index] = exc
 
     for failure in failures:
@@ -1397,7 +1398,7 @@ def _ensure_sparse_git_repo_after_git_check(
         )
 ```
 
-Create `_ensure_source_repo_locked(...)`, `_ensure_sparse_git_repo_locked(...)`, and `_ensure_sparse_git_repo_after_git_check_locked(...)` by moving the existing bodies unchanged. Nested calls may reacquire the same `RLock`. This central lock covers `ensure_source_repo()`, `ensure_source_repos()`, CLI non-lightweight refresh, sparse backend metadata checkout, sparse materialization cleanup, and failed-checkout cleanup.
+Create private helpers with the same parameters and return annotations as the current functions: `_ensure_source_repo_locked`, `_ensure_sparse_git_repo_locked`, and `_ensure_sparse_git_repo_after_git_check_locked`. Move the existing bodies unchanged into those helpers, then update nested calls inside locked helpers to call the locked helper variants instead of reacquiring through the public wrapper. Specifically, `_ensure_source_repo_locked` must call `_ensure_sparse_git_repo_after_git_check_locked` for both treeless and blobless attempts, and `_ensure_sparse_git_repo_locked` must call `_ensure_sparse_git_repo_after_git_check_locked` after the Git availability check. Nested calls may reacquire the same `RLock` only through existing public entry points that remain outside those locked helper bodies. This central lock covers `ensure_source_repo()`, `ensure_source_repos()`, CLI non-lightweight refresh, sparse backend metadata checkout, sparse materialization cleanup, and failed-checkout cleanup.
 
 - [ ] **Step 6: Add cache write lock**
 
@@ -1413,39 +1414,102 @@ _CACHE_WRITE_LOCK = threading.RLock()
 Serialize every skill-body cache metadata write, body-cache install/delete, prune, catalog cache write, and cached catalog hash writeback with `with _CACHE_WRITE_LOCK:`:
 
 ```python
-def save_cached_catalog(...):
+def save_cached_catalog(
+    paths: SvPaths, repo: RepoConfig, document: CachedCatalogDocument
+) -> None:
     with _CACHE_WRITE_LOCK:
-        return _save_cached_catalog_locked(...)
+        return _save_cached_catalog_locked(paths, repo, document)
 
 
-def store_skill_body_cache(...):
+def store_skill_body_cache(
+    paths: SvPaths,
+    source_skill_dir: Path,
+    *,
+    skill_name: str,
+    content_hash: str,
+    source_reference: str,
+    now: datetime,
+) -> None:
     with _CACHE_WRITE_LOCK:
-        return _store_skill_body_cache_locked(...)
+        return _store_skill_body_cache_locked(
+            paths,
+            source_skill_dir,
+            skill_name=skill_name,
+            content_hash=content_hash,
+            source_reference=source_reference,
+            now=now,
+        )
 
 
-def try_materialize_from_skill_body_cache(...):
+def try_materialize_from_skill_body_cache(
+    paths: SvPaths,
+    *,
+    content_hash: str,
+    skill_name: str,
+    destination: Path,
+    now: datetime,
+    warn: Warn | None = None,
+) -> bool:
     with _CACHE_WRITE_LOCK:
-        return _try_materialize_from_skill_body_cache_locked(...)
+        return _try_materialize_from_skill_body_cache_locked(
+            paths,
+            content_hash=content_hash,
+            skill_name=skill_name,
+            destination=destination,
+            now=now,
+            warn=warn,
+        )
 
 
-def record_cached_skill_body_hash(...):
+def record_cached_skill_body_hash(
+    paths: SvPaths,
+    repo: RepoConfig,
+    entry: SourceSkill,
+    *,
+    content_hash: str,
+    skill_file_hash: str,
+) -> None:
     with _CACHE_WRITE_LOCK:
-        return _record_cached_skill_body_hash_locked(...)
+        return _record_cached_skill_body_hash_locked(
+            paths,
+            repo,
+            entry,
+            content_hash=content_hash,
+            skill_file_hash=skill_file_hash,
+        )
 
 
-def prune_skill_body_cache(...):
+def prune_skill_body_cache(
+    paths: SvPaths,
+    *,
+    now: datetime,
+    max_unused_seconds: int = DEFAULT_SKILL_BODY_MAX_UNUSED_SECONDS,
+    max_bytes: int = DEFAULT_SKILL_BODY_MAX_BYTES,
+    force: bool = False,
+) -> None:
     with _CACHE_WRITE_LOCK:
-        return _prune_skill_body_cache_locked(...)
+        return _prune_skill_body_cache_locked(
+            paths,
+            now=now,
+            max_unused_seconds=max_unused_seconds,
+            max_bytes=max_bytes,
+            force=force,
+        )
 
 
-def clean_cache(...):
+def clean_cache(paths: SvPaths, *, now: datetime) -> CacheSummary:
     with _CACHE_WRITE_LOCK:
-        return _clean_cache_locked(...)
+        return _clean_cache_locked(paths, now=now)
+
+
+def _touch_skill_body_cache(paths: SvPaths, content_hash: str, now: datetime) -> None:
+    with _CACHE_WRITE_LOCK:
+        return _touch_skill_body_cache_locked(paths, content_hash, now)
 ```
 
-Use private locked helpers for those functions. Move each existing function body into its helper without changing behavior. Because the lock is an `RLock`, `store_skill_body_cache()` can still call `_prune_after_body_cache_write()`, `try_materialize_from_skill_body_cache()` can still touch and prune after a hit, and `clean_cache()` can still call `prune_skill_body_cache()`.
+Use private locked helpers for those functions. Move each existing function body into its helper without changing behavior. Because the lock is an `RLock`, `store_skill_body_cache()` can still call `_prune_after_body_cache_write()`, `try_materialize_from_skill_body_cache()` can still touch and prune after a hit, `_touch_skill_body_cache()` can still be called from locked helpers, and `clean_cache()` can still call `prune_skill_body_cache()`.
 
-Locking `save_cached_catalog()` is required because same-process concurrent refresh-on-body-miss paths can otherwise write the same catalog cache file through the same atomic temp name. Locking the full `try_materialize_from_skill_body_cache()` body is required because checking validity, copying from the body cache, touching metadata, and pruning must not race with another worker pruning or replacing the same body-cache entry.
+Locking `save_cached_catalog()` is required because same-process concurrent refresh-on-body-miss paths can otherwise write the same catalog cache file through the same atomic temp name. Locking the full `try_materialize_from_skill_body_cache()` body is required because checking validity, copying from the body cache, touching metadata, and pruning must not race with another worker pruning or replacing the same body-cache entry. This first implementation may serialize safe cached-body reads for different hashes; split that later into per-content-hash materialization locks only if profiling shows cached bulk adds are bottlenecked.
 
 Also keep `_touch_skill_body_cache()` itself protected by `_CACHE_WRITE_LOCK` for any internal callers. This prevents lost `use_count`/`last_used_at` updates and prune/delete races outside the store path. Add or update source-cache tests so concurrent cached body misses for two skills in the same repo do not collide on catalog cache writes.
 
@@ -1484,7 +1548,7 @@ import threading
 
 Pass that lock to entry materializers.
 
-At the top of `_catalog_entries_from_backend`, after index handling begins, use:
+In `_catalog_entries_from_backend`, create the lock immediately after `index_content = backend.read_index()` and before the `if index_content is not None:` branch so indexed and non-indexed entries from the same backend instance share one materialization lock:
 
 ```python
     materialize_lock = threading.RLock()
@@ -2394,7 +2458,15 @@ For the final branch where `source_hash is None`, keep the existing materialize-
         updated.append(skill_name)
 ```
 
-Because this final branch prepares a temp tree during the manifest loop, wrap the manifest loop in `try/except Exception` and call `_cleanup_replacement_work(replacement_work)` before re-raising if a later serial compare materialization fails.
+Because this final branch prepares a temp tree during the manifest loop, place `try:` immediately before the full `for skill_name, manifest_entry in sorted(manifest.items()):` loop and indent the entire existing loop body under it. Immediately after that loop, before preparing queued replacements, add this exception handler:
+
+```python
+    except Exception:
+        _cleanup_replacement_work(replacement_work)
+        raise
+```
+
+Do not place `_prepare_replacement_work_ordered(...)` inside this `try`; it has its own cleanup path.
 
 After the manifest loop and before returning `SyncResult`, add:
 
@@ -2608,7 +2680,48 @@ Replace `_refresh_local_skill_states` loop with worker-based collection:
 
 Keep the final `if changed: save_manifest(...)` exactly once after the loop.
 
-Apply the same pattern to `_refresh_skill_states`: build read-only work items, compute `_refreshed_manifest_entry_state(...)` in workers, and save once in input order.
+Replace `_refresh_skill_states` loop with this worker-based collection:
+
+```python
+    refresh_items: list[tuple[str, ManifestEntry, ProjectSourceSkill | None]] = []
+    for key, manifest_entry in entries.items():
+        if not _manifest_entry_matches_target(manifest_entry, target_style):
+            continue
+        _validate_manifest_entry_skill_name(manifest_entry, target_style)
+        target = project_skills_dir / manifest_entry.name
+        _reject_symlinked_project_skill(target, target_style)
+        _validate_project_skill_dir_name(target, target_style)
+        if target.is_dir():
+            refresh_items.append(
+                (
+                    key,
+                    manifest_entry,
+                    _catalog_entry_for_manifest(catalog, manifest_entry),
+                )
+            )
+
+    def worker(
+        item: tuple[str, ManifestEntry, ProjectSourceSkill | None],
+    ) -> _LocalStateRefresh:
+        key, manifest_entry, source_entry = item
+        target = project_skills_dir / manifest_entry.name
+        return _LocalStateRefresh(
+            key=key,
+            entry=manifest_entry,
+            refreshed=_refreshed_manifest_entry_state(
+                manifest_entry,
+                target,
+                source_entry,
+            ),
+        )
+
+    for result in map_ordered(refresh_items, worker):
+        if result.refreshed != result.entry:
+            updated_entries[result.key] = result.refreshed
+            changed = True
+```
+
+Keep the final `if changed: save_manifest(...)` exactly once after the loop.
 
 - [ ] **Step 5: Parallelize index per-skill parse/hash**
 
