@@ -373,3 +373,39 @@ def test_update_reports_source_refresh_failure_without_syncing_project_skills(
     assert_no_traceback(result.stdout)
     assert_no_raw_control_characters(result.stdout)
     assert project_skill.read_text() == "alpha v1\n"
+
+
+def test_update_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    result = run_sv(["update"], cwd=project, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+
+
+def test_update_cached_does_not_refresh_source(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"--cached must not call Git or GitHub backends: {args}")
+
+    result = run_sv(["update", "--cached"], cwd=project, home=home, git_runner=fail_git)
+
+    assert result.exit_code == 0

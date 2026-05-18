@@ -369,3 +369,58 @@ def test_sync_skips_local_only_skill(tmp_path, run_sv):
     assert "Skipped local Pi skill 'local_only'." in result.stdout
     assert (local_only / "notes.md").read_text() == "local only\n"
     assert_no_partial_sv_dirs(project_skills)
+
+
+def test_sync_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    result = run_sv(["sync"], cwd=project, home=home, git_runner=default_runner)
+
+    _assert_sync_success(result)
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+
+
+def test_sync_cached_uses_cached_body_and_does_not_refresh_source(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    managed = project / ".pi" / "skills" / "alpha" / "notes.md"
+    managed.write_text("alpha local edit\n")
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"--cached must not call Git or GitHub backends: {args}")
+
+    result = run_sv(["sync", "--cached"], cwd=project, home=home, git_runner=fail_git)
+
+    _assert_sync_success(result)
+    assert managed.read_text() == "alpha v1\n"
+
+
+def test_sync_fails_closed_when_refresh_fails_even_with_cache(tmp_path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    result = run_sv(["sync"], cwd=project, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 1
+    assert "source" in result.stderr.lower() or "refresh" in result.stderr.lower()

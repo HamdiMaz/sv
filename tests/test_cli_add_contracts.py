@@ -1,5 +1,7 @@
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
+import shutil
 import sys
 
 import pytest
@@ -11,6 +13,7 @@ from sv.config import SvPaths, load_config
 from sv.hashing import sha256_skill_directory
 from sv.manifest import load_manifest
 from sv.source import default_runner
+from sv.source_cache import load_cached_catalog, save_cached_catalog, _cached_catalog_hash
 from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
@@ -45,6 +48,23 @@ def _assert_existing_skill_unchanged(
 
 def _forbid_git_calls(args, cwd=None):
     raise AssertionError(f"unexpected git call: {args}")
+
+
+def _expire_cached_metadata(home: Path) -> None:
+    paths = SvPaths.from_home(home)
+    repo = load_config(paths).repos[0]
+    document = load_cached_catalog(paths, repo)
+    assert document is not None
+    expired_without_hash = replace(
+        document,
+        catalog_hash="sha256:" + ("0" * 64),
+        refreshed_at="2000-01-01T00:00:00Z",
+    )
+    save_cached_catalog(
+        paths,
+        repo,
+        replace(expired_without_hash, catalog_hash=_cached_catalog_hash(expired_without_hash)),
+    )
 
 
 class _TtyStream(StringIO):
@@ -1167,3 +1187,87 @@ def test_invalid_skill_is_not_listed_or_added_by_all(tmp_path: Path, capsys):
 
     assert handle(parse(["add", "--all"]), cwd=project, home=home) == 0
     assert not (project / ".pi" / "skills" / "invalid").exists()
+
+
+def test_add_uses_cached_metadata_and_cached_skill_body_when_source_unavailable(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(project / ".pi" / "skills" / "alpha")
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"--cached must not call Git or GitHub backends: {args}")
+
+    result = run_sv(["add", "alpha", "--cached"], cwd=project, home=home, git_runner=fail_git)
+
+    assert result.exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"
+
+
+def test_add_cached_fails_without_cached_skill_body_and_does_not_call_source(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert run_sv(["list"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"--cached must not call Git or GitHub backends: {args}")
+
+    result = run_sv(["add", "alpha", "--cached"], cwd=project, home=home, git_runner=fail_git)
+
+    assert result.exit_code == 1
+    assert "cached skill body" in result.stderr.lower()
+
+
+def test_add_warns_and_uses_stale_cached_metadata_when_refresh_fails(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(project / ".pi" / "skills" / "alpha")
+    _expire_cached_metadata(home)
+    shutil.rmtree(source / ".git")
+
+    result = run_sv(["add", "alpha"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "using stale cached metadata" in result.stderr.lower()
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"
+
+
+def test_add_all_warns_and_uses_stale_cached_metadata_when_refresh_fails(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "--all"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(project / ".pi" / "skills")
+    _expire_cached_metadata(home)
+    shutil.rmtree(source / ".git")
+
+    result = run_sv(["add", "--all"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "using stale cached metadata" in result.stderr.lower()
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"

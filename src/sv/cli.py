@@ -435,12 +435,18 @@ def handle(
 
         if args.command == "status":
             local_context = _detect_local_context(cwd)
+            status_policy = _cache_policy_from_args(
+                args,
+                default_mode=CacheMode.FORCE_REFRESH,
+                allow_stale_on_error=False,
+            )
             return _handle_status(
                 cwd=cwd,
                 paths=paths,
                 adapter=adapter,
                 git_runner=git_runner,
                 record_global_source_state=record_global_source_state,
+                cache_policy=status_policy,
                 context=local_context,
             )
 
@@ -449,11 +455,16 @@ def handle(
             if args.interactive:
                 if args.all or args.skill is not None or args.repo_id is not None:
                     raise SvError("Use -l by itself, or provide a skill name/--all.")
-                catalog = _update_sources_and_catalog(
+                add_policy = _cache_policy_from_args(args)
+                config = _load_config_for_source_command(paths)
+                catalog = _catalog_for_source_command(
+                    config.repos,
                     paths,
                     git_runner,
-                    update=False,
+                    policy=add_policy,
                     record_global_source_state=record_global_source_state,
+                    lightweight_discovery=True,
+                    update=(not args.interactive) or args.refresh,
                 )
                 return _handle_add_interactive(
                     catalog,
@@ -470,11 +481,24 @@ def handle(
             if args.all and args.skill is not None:
                 raise SvError("Use either a skill name or --all, not both.")
             if args.all:
-                catalog = _update_sources_and_catalog_for_add_all(
+                add_policy = _cache_policy_from_args(args)
+                config = _load_config_for_source_command(paths)
+                selected_repos = config.repos
+                if args.repo_id is not None:
+                    safe_repo_id = _escape_control_characters(args.repo_id)
+                    selected_repos = [repo for repo in config.repos if repo.id == args.repo_id]
+                    if not selected_repos:
+                        raise SvError(
+                            f"Repo '{safe_repo_id}' was not found in configured source repos."
+                        )
+                catalog = _catalog_for_source_command(
+                    selected_repos,
                     paths,
                     git_runner,
-                    repo_id=args.repo_id,
+                    policy=add_policy,
                     record_global_source_state=record_global_source_state,
+                    lightweight_discovery=True,
+                    update=(not args.interactive) or args.refresh,
                 )
                 return _handle_add_all(
                     catalog,
@@ -488,11 +512,16 @@ def handle(
                 raise SvError("Specify a skill name or use --all.")
 
             _validate_skill_reference(args.skill)
-            catalog = _update_sources_and_catalog(
+            add_policy = _cache_policy_from_args(args)
+            config = _load_config_for_source_command(paths)
+            catalog = _catalog_for_source_command(
+                config.repos,
                 paths,
                 git_runner,
-                update=True,
+                policy=add_policy,
                 record_global_source_state=record_global_source_state,
+                lightweight_discovery=True,
+                update=(not args.interactive) or args.refresh,
             )
             return _handle_add(
                 args.skill,
@@ -569,10 +598,17 @@ def handle(
 
         if args.command == "sync":
             local_context = _detect_local_context(cwd)
-            catalog = _update_sources_and_catalog(
+            config = _load_config_for_source_command(paths)
+            sync_policy = _cache_policy_from_args(
+                args,
+                default_mode=CacheMode.FORCE_REFRESH,
+                allow_stale_on_error=False,
+            )
+            catalog = _catalog_for_source_command(
+                config.repos,
                 paths,
                 git_runner,
-                update=True,
+                policy=sync_policy,
                 record_global_source_state=record_global_source_state,
                 allow_partial_failures=False,
             )
@@ -580,12 +616,18 @@ def handle(
 
         if args.command == "update":
             local_context = _detect_local_context(cwd)
+            update_policy = _cache_policy_from_args(
+                args,
+                default_mode=CacheMode.FORCE_REFRESH,
+                allow_stale_on_error=False,
+            )
             return _handle_update(
                 cwd=cwd,
                 paths=paths,
                 adapter=adapter,
                 git_runner=git_runner,
                 record_global_source_state=record_global_source_state,
+                cache_policy=update_policy,
                 context=local_context,
             )
 
@@ -2773,6 +2815,8 @@ def _handle_status(
     adapter: PiAdapter,
     git_runner,
     record_global_source_state: bool,
+    *,
+    cache_policy: CachePolicy,
     context: LocalContext | None = None,
 ) -> int:
     context = (
@@ -2786,6 +2830,7 @@ def _handle_status(
             paths=paths,
             git_runner=git_runner,
             record_global_source_state=record_global_source_state,
+            cache_policy=cache_policy,
         )
     manifest = project_manifest_path(context.repo_root)
     has_project_manifest = manifest.is_file() and _is_non_git_project_manifest(
@@ -2810,6 +2855,7 @@ def _handle_status(
             paths,
             git_runner,
             record_global_source_state=record_global_source_state,
+            cache_policy=cache_policy,
         )
         if catalog is None:
             refresh_project_skill_local_states(project_skills_dir)
@@ -2848,6 +2894,7 @@ def _handle_vault_status(
     paths: SvPaths,
     git_runner,
     record_global_source_state: bool,
+    cache_policy: CachePolicy,
 ) -> int:
     vault_skills_dir = context.vault_skills_dir
     _reject_symlinked_status_vault_skills_path(vault_skills_dir)
@@ -2857,6 +2904,7 @@ def _handle_vault_status(
             paths,
             git_runner,
             record_global_source_state=record_global_source_state,
+            cache_policy=cache_policy,
         )
         if catalog is None:
             refresh_vault_skill_local_states(vault_skills_dir)
@@ -3035,21 +3083,22 @@ def _status_catalog_if_configured(
     git_runner,
     *,
     record_global_source_state: bool,
+    cache_policy: CachePolicy | None = None,
 ) -> list[SourceSkill] | None:
     if not paths.config_file.exists():
         return None
     config = load_config(paths)
     if not config.repos:
         return None
-    return _update_sources_and_catalog_from_repos(
+    return _catalog_for_source_command(
         config.repos,
         paths,
         git_runner,
-        update=True,
+        policy=cache_policy
+        or CachePolicy.force_refresh(allow_stale_on_error=False),
         record_global_source_state=record_global_source_state,
         lightweight_discovery=True,
         allow_partial_failures=False,
-        warn=lambda message: print(message, file=sys.stderr),
     )
 
 
@@ -3182,15 +3231,17 @@ def _handle_update(
     adapter: PiAdapter,
     git_runner,
     record_global_source_state: bool,
+    *,
+    cache_policy: CachePolicy,
     context: LocalContext | None = None,
 ) -> int:
     config = _load_config_for_source_command(paths)
     print("Updating source repos...")
-    catalog = _update_sources_and_catalog_from_repos(
+    catalog = _catalog_for_source_command(
         config.repos,
         paths,
         git_runner,
-        update=True,
+        policy=cache_policy,
         record_global_source_state=record_global_source_state,
         lightweight_discovery=True,
         allow_partial_failures=False,

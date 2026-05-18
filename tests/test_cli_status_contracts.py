@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -815,3 +816,41 @@ def test_status_in_empty_project_does_not_refresh_unreachable_sources(
     assert_no_traceback(result.stderr)
     assert_no_raw_control_characters(result.stdout)
     assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    result = run_sv(["status"], cwd=project, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout
+    assert "update available" in result.stdout
+
+
+def test_status_cached_does_not_refresh_source(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"--cached must not call Git or GitHub backends: {args}")
+
+    result = run_sv(["status", "--cached"], cwd=project, home=home, git_runner=fail_git)
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout
