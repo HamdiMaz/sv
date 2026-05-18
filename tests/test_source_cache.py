@@ -1275,11 +1275,20 @@ def test_prune_skill_body_cache_removes_future_dated_body_metadata(
     assert not skill_body_cache_path(paths, future_hash).exists()
 
 
-def test_prune_skill_body_cache_refuses_symlinked_marker_temp_file(
+def test_prune_skill_body_cache_refuses_symlinked_marker_temp_file_before_deleting(
     tmp_path: Path,
 ) -> None:
     paths = SvPaths.from_home(tmp_path)
-    paths.cache_dir.mkdir(parents=True)
+    old_skill = _write_skill_tree(tmp_path / "old-source", "old", "old body\n")
+    old_hash = sha256_skill_directory(old_skill, expected_name="old")
+    store_skill_body_cache(
+        paths,
+        old_skill,
+        skill_name="old",
+        content_hash=old_hash,
+        source_reference="Org/Skills:skills/old",
+        now=datetime(2026, 4, 1, tzinfo=UTC),
+    )
     temp_path = paths.cache_prune_marker.with_name(
         f".{paths.cache_prune_marker.name}.{os.getpid()}.tmp"
     )
@@ -1294,6 +1303,7 @@ def test_prune_skill_body_cache_refuses_symlinked_marker_temp_file(
         )
 
     assert not attacker_target.exists()
+    assert skill_body_cache_path(paths, old_hash).exists()
 
 
 def test_prune_skill_body_cache_ignores_corrupt_prune_marker(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 import hashlib
+import os
 import stat
 import uuid
 
@@ -404,6 +405,16 @@ def _validate_prune_marker_path(paths: SvPaths) -> None:
     _reject_symlinked_cache_dir(marker.parent)
     if marker.is_symlink():
         raise SvError(f"Refusing to read symlinked cache prune marker at {marker}.")
+    temp_path = _prune_marker_temp_path(paths)
+    if temp_path.is_symlink():
+        raise SvError(
+            f"Refusing to use symlinked sv cache prune marker temp file path at {temp_path}."
+        )
+
+
+def _prune_marker_temp_path(paths: SvPaths) -> Path:
+    marker = paths.cache_prune_marker
+    return marker.with_name(f".{marker.name}.{os.getpid()}.tmp")
 
 
 def _write_prune_marker(paths: SvPaths, *, now: datetime) -> None:
@@ -417,6 +428,7 @@ def _write_prune_marker(paths: SvPaths, *, now: datetime) -> None:
         path,
         text,
         document_name="sv cache prune marker",
+        temp_name=_prune_marker_temp_path(paths).name,
         temp_path_description="sv cache prune marker temp file",
         create_parent=False,
     )
