@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 import os
+import stat
 
 import pytest
 
@@ -74,6 +75,10 @@ def _catalog_document(refreshed_at: str) -> CachedCatalogDocument:
     return replace(document, catalog_hash=_cached_catalog_hash(document))
 
 
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
 def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     document = _catalog_document("2026-05-18T12:00:00Z")
@@ -82,6 +87,41 @@ def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
 
     assert catalog_cache_path(paths, _repo()).is_file()
     assert load_cached_catalog(paths, _repo()) == document
+
+
+def test_catalog_cache_save_makes_cache_directory_chain_owner_private(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    document = _catalog_document("2026-05-18T12:00:00Z")
+    cache_root = paths.sv_home / "cache"
+    cache_root.mkdir(parents=True)
+    cache_root.chmod(0o777)
+
+    save_cached_catalog(paths, _repo(), document)
+
+    assert _mode(cache_root) == 0o700
+    assert _mode(paths.cache_dir) == 0o700
+    assert _mode(paths.catalog_cache_dir) == 0o700
+
+
+def test_catalog_cache_load_repairs_existing_cache_directory_permissions(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = _catalog_document("2026-05-18T12:00:00Z")
+    cache_root = paths.sv_home / "cache"
+    save_cached_catalog(paths, repo, document)
+    cache_root.chmod(0o777)
+    paths.cache_dir.chmod(0o777)
+    paths.catalog_cache_dir.chmod(0o777)
+
+    assert load_cached_catalog(paths, repo) == document
+
+    assert _mode(cache_root) == 0o700
+    assert _mode(paths.cache_dir) == 0o700
+    assert _mode(paths.catalog_cache_dir) == 0o700
 
 
 def test_catalog_cache_write_rejects_catalog_hash_mismatch(tmp_path: Path) -> None:
