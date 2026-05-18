@@ -27,7 +27,7 @@
 - Candidate `SKILL.md` reads within one repo remain sequential in the first implementation pass unless they are part of read-only index scanning. This avoids thread-safety surprises with backend instances.
 - The same sparse Git repo cache path may not be mutated by two threads at once. Lock by `repo_path.resolve()` where possible, and by the raw `Path` if resolving fails.
 - Skill-body cache writes, body-cache pruning, and cached catalog hash writeback are serialized with one process-local `RLock`. This prevents lost cached metadata updates when bulk materialization discovers multiple body hashes from the same repo.
-- Project and vault manifest writes remain serial. No worker writes `.sv/manifest.toml` or `.pi/skills/.sv-manifest.toml`.
+- Project, vault, and global source-state manifest writes remain serial. No worker writes `.sv/manifest.toml`, `.pi/skills/.sv-manifest.toml`, or global source refresh state.
 - Final target mutation remains serial. No worker renames a prepared temp tree into `.pi/skills/<skill>` or `skills/<skill>`.
 - Bulk add/sync/update workers may create and validate hidden temp directories such as `.alpha.sv-add-tmp` or `.alpha.sv-sync-tmp`. Commit steps consume those temps in stable input order.
 - If a parallel prepare step fails before the serial commit phase starts, prepared temps from other workers are removed and no final targets are changed by that phase.
@@ -107,7 +107,6 @@ Create `tests/test_parallel.py` with this content:
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 import pytest
 
@@ -171,6 +170,10 @@ def test_map_ordered_runs_inline_when_jobs_is_one() -> None:
     assert thread_names == [threading.current_thread().name] * 3
 
 
+def test_map_ordered_preserves_none_results_in_threaded_mode() -> None:
+    assert map_ordered(["a", "b"], lambda _value: None, jobs=2) == [None, None]
+
+
 def test_map_ordered_reraises_first_failure_by_input_order() -> None:
     def worker(value: str) -> str:
         if value == "first":
@@ -200,10 +203,10 @@ Create `src/sv/parallel.py` with this exact implementation:
 ```python
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from sv.errors import SvError
 
@@ -212,6 +215,7 @@ R = TypeVar("R")
 
 _DEFAULT_MAX_JOBS = 8
 _MAX_JOBS = 64
+_MISSING = object()
 
 
 def configured_jobs(env: Mapping[str, str] | None = None) -> int:
@@ -235,7 +239,7 @@ def configured_jobs(env: Mapping[str, str] | None = None) -> int:
 
 
 def map_ordered(
-    items: Sequence[T],
+    items: Iterable[T],
     worker: Callable[[T], R],
     *,
     jobs: int | None = None,
@@ -256,7 +260,7 @@ def map_ordered(
     if worker_count == 1 or len(item_list) == 1:
         return [worker(item) for item in item_list]
 
-    results: list[R | None] = [None] * len(item_list)
+    results: list[R | object] = [_MISSING] * len(item_list)
     failures: list[BaseException | None] = [None] * len(item_list)
     max_workers = min(worker_count, len(item_list))
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="sv") as executor:
@@ -275,7 +279,12 @@ def map_ordered(
         if failure is not None:
             raise failure
 
-    return [result for result in results if result is not None]
+    ordered: list[R] = []
+    for result in results:
+        if result is _MISSING:
+            raise AssertionError("parallel worker result missing after successful join")
+        ordered.append(cast(R, result))
+    return ordered
 ```
 
 - [ ] **Step 5: Run helper tests and quality checks**
@@ -288,16 +297,7 @@ uv run ruff check src/sv/parallel.py tests/test_parallel.py
 uv run ty check src tests
 ```
 
-Expected: all pass. If `ty` complains about the final list narrowing in `map_ordered`, replace the return line with this explicit loop:
-
-```python
-    ordered: list[R] = []
-    for result in results:
-        if result is None:
-            raise AssertionError("parallel worker result missing after successful join")
-        ordered.append(result)
-    return ordered
-```
+Expected: all pass.
 
 - [ ] **Step 6: Commit Task 1**
 
@@ -744,7 +744,7 @@ Replace the loop body with ordered parallel work:
 
 - [ ] **Step 5: Parallelize CLI non-lightweight refresh path**
 
-In `src/sv/cli.py`, the helper `_ensure_source_repos_for_refresh` currently loops over repos. Replace that loop with `map_ordered` so failures still record source refresh failure per repo.
+In `src/sv/cli.py`, the helper `_ensure_source_repos_for_refresh` currently loops over repos. Replace that loop with `map_ordered`, but keep global source-state manifest writes in the parent after workers join. Workers must not call `_record_global_source_refresh_failure`.
 
 Add import:
 
@@ -755,7 +755,7 @@ from sv.parallel import map_ordered
 Replace `_ensure_source_repos_for_refresh` body after the function signature with:
 
 ```python
-    def worker(repo: RepoConfig) -> None:
+    def worker(repo: RepoConfig) -> tuple[RepoConfig, str | None]:
         repo_path = paths.source_repo_for(repo.id)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         try:
@@ -767,16 +767,19 @@ Replace `_ensure_source_repos_for_refresh` body after the function signature wit
                 configured_skills_paths=repo.skills_paths,
             )
         except SvError as exc:
-            if record_global_source_state:
-                _record_global_source_refresh_failure(
-                    paths, (repo,), str(exc), started_at
-                )
-            raise
+            return repo, str(exc)
+        return repo, None
 
-    map_ordered(list(repos), worker)
+    results = map_ordered(list(repos), worker)
+    for repo, error in results:
+        if error is None:
+            continue
+        if record_global_source_state:
+            _record_global_source_refresh_failure(paths, (repo,), error, started_at)
+        raise SvError(error)
 ```
 
-This keeps per-repo failure recording and lets `SV_JOBS` errors bubble through the existing `handle` exception block.
+This keeps failure reporting deterministic, records global source-state failures serially, and lets invalid `SV_JOBS` errors bubble through the existing `handle` exception block.
 
 - [ ] **Step 6: Run focused tests**
 
@@ -948,6 +951,7 @@ Expected: sparse materialization may overlap, and cached catalog updates may los
 In `src/sv/source.py`, add imports:
 
 ```python
+from _thread import RLock as RLockType
 import threading
 ```
 
@@ -955,7 +959,7 @@ Add these module-level helpers near constants:
 
 ```python
 _SOURCE_REPO_LOCKS_GUARD = threading.Lock()
-_SOURCE_REPO_LOCKS: dict[Path, threading.RLock] = {}
+_SOURCE_REPO_LOCKS: dict[Path, RLockType] = {}
 
 
 def _source_repo_lock_key(repo_path: Path) -> Path:
@@ -965,7 +969,7 @@ def _source_repo_lock_key(repo_path: Path) -> Path:
         return repo_path.absolute()
 
 
-def _source_repo_lock(repo_path: Path) -> threading.RLock:
+def _source_repo_lock(repo_path: Path) -> RLockType:
     key = _source_repo_lock_key(repo_path)
     with _SOURCE_REPO_LOCKS_GUARD:
         lock = _SOURCE_REPO_LOCKS.get(key)
@@ -1016,7 +1020,7 @@ Use an `RLock` because `_materialize_folder_locked` calls `_prepare_checkout`, a
 
 - [ ] **Step 5: Lock sparse checkout preparation**
 
-In `src/sv/source.py`, wrap `_prepare_checkout` with the same repo lock so metadata refresh for a repo does not interleave sparse checkout commands with another materialization:
+In `src/sv/source.py`, wrap `_prepare_checkout` with the same repo lock so metadata refresh for a repo does not interleave sparse checkout commands with another materialization. Also lock the shared direct helper used by `ensure_source_repo()` so the non-lightweight refresh path cannot mutate the same sparse cache concurrently:
 
 ```python
     def _prepare_checkout(self, patterns: Sequence[str], operation: str) -> None:
@@ -1047,6 +1051,31 @@ In `src/sv/source.py`, wrap `_prepare_checkout` with the same repo lock so metad
             ) from exc
 ```
 
+Then wrap `_ensure_sparse_git_repo_after_git_check` with the same repo lock by moving its current body into `_ensure_sparse_git_repo_after_git_check_locked(...)` and replacing the public helper with:
+
+```python
+def _ensure_sparse_git_repo_after_git_check(
+    repo_url: str,
+    repo_path: Path,
+    runner: Runner,
+    *,
+    filter_spec: str,
+    sparse_patterns: Sequence[str],
+    update: bool,
+) -> None:
+    with _source_repo_lock(repo_path):
+        _ensure_sparse_git_repo_after_git_check_locked(
+            repo_url,
+            repo_path,
+            runner,
+            filter_spec=filter_spec,
+            sparse_patterns=sparse_patterns,
+            update=update,
+        )
+```
+
+Keep the existing `_ensure_sparse_git_repo_after_git_check` logic unchanged inside the locked helper. This central lock covers `ensure_source_repo()`, `ensure_source_repos()`, CLI non-lightweight refresh, and sparse backend metadata checkout.
+
 - [ ] **Step 6: Add cache write lock**
 
 In `src/sv/source_cache.py`, import `threading` and add this near constants:
@@ -1057,7 +1086,7 @@ import threading
 _CACHE_WRITE_LOCK = threading.RLock()
 ```
 
-Wrap the bodies of these functions with `with _CACHE_WRITE_LOCK:`:
+Serialize every skill-body cache metadata write, body-cache install/delete, prune, and cached catalog hash writeback with `with _CACHE_WRITE_LOCK:`:
 
 ```python
 def store_skill_body_cache(...):
@@ -1068,15 +1097,31 @@ def store_skill_body_cache(...):
 def record_cached_skill_body_hash(...):
     with _CACHE_WRITE_LOCK:
         return _record_cached_skill_body_hash_locked(...)
+
+
+def prune_skill_body_cache(...):
+    with _CACHE_WRITE_LOCK:
+        return _prune_skill_body_cache_locked(...)
+
+
+def clean_cache(...):
+    with _CACHE_WRITE_LOCK:
+        return _clean_cache_locked(...)
 ```
 
-Use a private locked helper for each function. Move the existing function body into the private helper without changing behavior. This keeps call sites unchanged and prevents lost update/write/prune races.
+Use private locked helpers for those functions. Move each existing function body into its helper without changing behavior. Because the lock is an `RLock`, `store_skill_body_cache()` can still call `_prune_after_body_cache_write()`, and `clean_cache()` can still call `prune_skill_body_cache()`.
 
-Also wrap `clean_cache` if it deletes skill-body cache entries and wrap `_prune_after_body_cache_write` if it is not already called inside the `store_skill_body_cache` lock.
+Also wrap `_touch_skill_body_cache()` with `_CACHE_WRITE_LOCK`, because `try_materialize_from_skill_body_cache()` updates body-cache metadata and then prunes after a cache hit. This prevents lost `use_count`/`last_used_at` updates and prune/delete races outside the store path.
 
 - [ ] **Step 7: Attach materializer locks for in-memory backend instances**
 
-In `src/sv/catalog.py`, create one `threading.RLock()` per `_catalog_entries_from_backend` call and pass it to entry materializers.
+In `src/sv/catalog.py`, import `RLockType` for annotations and create one `threading.RLock()` per `_catalog_entries_from_backend` call:
+
+```python
+from _thread import RLock as RLockType
+```
+
+Pass that lock to entry materializers.
 
 At the top of `_catalog_entries_from_backend`, after index handling begins, use:
 
@@ -1084,7 +1129,7 @@ At the top of `_catalog_entries_from_backend`, after index handling begins, use:
     materialize_lock = threading.RLock()
 ```
 
-Change both `_catalog_entries_from_index` and non-index entry creation to pass that lock:
+Change `_catalog_entries_from_index` to accept a `materialize_lock: RLockType` parameter, and update both `_catalog_entries_from_index` and non-index entry creation to pass that lock:
 
 ```python
                 _materializer=_backend_materializer(
@@ -1098,7 +1143,7 @@ Change `_backend_materializer` to:
 def _backend_materializer(
     backend: SourceBackend,
     source_relative_path: str,
-    lock: threading.RLock | None = None,
+    lock: RLockType | None = None,
 ) -> Callable[[Path], None]:
     def materialize(destination: Path) -> None:
         if lock is None:
@@ -1142,6 +1187,7 @@ git commit -m "fix: serialize shared source and cache mutations"
 - Modify: `src/sv/cli.py`
 - Modify: `tests/test_project.py`
 - Modify: `tests/test_cli_add_contracts.py`
+- Modify: `tests/test_vault_mode_targets.py`
 
 - [ ] **Step 1: Add a project-level overlap test for `add_all_project_skills`**
 
@@ -1206,7 +1252,7 @@ Add imports if missing:
 
 ```python
 import threading
-from sv.project import add_all_project_skills
+from sv.project import add_all_project_skills, add_all_vault_skills
 ```
 
 - [ ] **Step 2: Add a no-final-target-on-prepare-failure test**
@@ -1216,6 +1262,8 @@ Append this test to `tests/test_project.py`:
 ```python
 class FailingPrepareProjectSourceSkill(BlockingProjectSourceSkill):
     def materialize_to(self, destination: Path) -> None:
+        self.started.set()
+        assert self.peer_started.wait(2), "failing add-all materialization did not overlap"
         raise SvError("simulated materialization failure")
 
 
@@ -1241,6 +1289,26 @@ def test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails(
 
 This locks in the all-prepare-before-commit safety guarantee for bulk adds.
 
+Append this replacement-status/temp-path regression test to `tests/test_project.py`:
+
+```python
+def test_add_all_vault_skills_replaces_existing_targets_with_replace_temp(
+    tmp_path: Path,
+) -> None:
+    alpha = make_source_skill(tmp_path / "source", "alpha")
+    vault_skills = tmp_path / "vault" / "skills"
+    add_vault_skill(alpha, vault_skills)
+    (alpha.source_path / "notes.md").write_text("alpha replacement\n")
+
+    result = add_all_vault_skills([alpha], vault_skills, replace_existing=True)
+
+    assert [(item.skill, item.status) for item in result.results] == [
+        ("alpha", "replaced")
+    ]
+    assert (vault_skills / "alpha" / "notes.md").read_text() == "alpha replacement\n"
+    assert_no_partial_sv_dirs(vault_skills)
+```
+
 - [ ] **Step 3: Run the new tests and verify they fail**
 
 Run:
@@ -1249,10 +1317,11 @@ Run:
 uv run pytest \
   tests/test_project.py::test_add_all_project_skills_prepares_new_skills_in_parallel \
   tests/test_project.py::test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails \
+  tests/test_project.py::test_add_all_vault_skills_replaces_existing_targets_with_replace_temp \
   -q --no-cov
 ```
 
-Expected: first test fails because add-all is serial; second may fail because sequential add can commit `alpha` before `beta` fails.
+Expected: first test fails because add-all is serial; second may fail because sequential add can commit `alpha` before `beta` fails; third fails until bulk replacement prepares into the sync temp and reports `replaced`.
 
 - [ ] **Step 4: Add add-all plan dataclasses**
 
@@ -1270,6 +1339,7 @@ class _AddPlan:
     entry: ProjectSourceSkill
     skill_name: str
     target: Path
+    replace_existing_target: bool = False
     result: AddSkillResult | None = None
 
 
@@ -1290,24 +1360,48 @@ def _plan_add_all_skills(
     target_style: _TargetStyle,
     *,
     replace_existing: bool,
+    replace_existing_names: frozenset[str] = frozenset(),
 ) -> tuple[list[_AddPlan], list[_AddPlan]]:
     manifest = _load_manifest_for_target(project_skills_dir, target_style)
     existing_or_skipped: list[_AddPlan] = []
     to_prepare: list[_AddPlan] = []
+    planned_targets: dict[str, ProjectSourceSkill] = {}
     for entry in catalog:
         skill_name = normalize_skill_name(entry.name)
         if entry.source_backend == "local-cache" and not entry.source_path.is_dir():
             raise SvError(f"Skill '{skill_name}' was not found in source skills directory.")
         target = project_skills_dir / skill_name
         _reject_symlinked_project_skill(target, target_style)
-        if target.exists() or target.is_symlink():
+        planned_entry = planned_targets.get(skill_name)
+        if planned_entry is not None:
+            existing_or_skipped.append(
+                _AddPlan(
+                    entry=entry,
+                    skill_name=skill_name,
+                    target=target,
+                    result=AddSkillResult(
+                        skill=skill_name,
+                        target=target,
+                        status="exists",
+                        repo_id=entry.repo_id,
+                        existing_repo_id=planned_entry.repo_id,
+                        source_reference=_source_reference_for(entry),
+                        existing_source_reference=_source_reference_for(planned_entry),
+                        target_kind=target_style.target_kind,
+                    ),
+                )
+            )
+            continue
+        target_exists = target.exists() or target.is_symlink()
+        should_replace = replace_existing or skill_name in replace_existing_names
+        if target_exists:
             _reject_symlinked_project_skill(target, target_style)
             if not target.is_dir():
                 raise SvError(
                     f"Cannot add {target_style.skill_label} '{skill_name}': non-directory path already exists at {target}."
                 )
             existing_entry = manifest.get(skill_name)
-            if not replace_existing:
+            if not should_replace:
                 existing_or_skipped.append(
                     _AddPlan(
                         entry=entry,
@@ -1332,7 +1426,15 @@ def _plan_add_all_skills(
                     )
                 )
                 continue
-        to_prepare.append(_AddPlan(entry=entry, skill_name=skill_name, target=target))
+        to_prepare.append(
+            _AddPlan(
+                entry=entry,
+                skill_name=skill_name,
+                target=target,
+                replace_existing_target=target_exists and should_replace,
+            )
+        )
+        planned_targets[skill_name] = entry
     return existing_or_skipped, to_prepare
 ```
 
@@ -1341,14 +1443,23 @@ def _plan_add_all_skills(
 Add these helpers near `_materialize_entry_for_add`:
 
 ```python
+def _add_plan_temp_target(plan: _AddPlan) -> Path:
+    if plan.replace_existing_target:
+        return _sync_temp_target(plan.target)
+    return _add_temp_target(plan.target)
+
+
 def _prepare_add_plan(plan: _AddPlan, target_style: _TargetStyle) -> _PreparedAdd:
-    metadata = _materialize_entry_for_add(plan.entry, plan.target, target_style)
+    if plan.replace_existing_target:
+        metadata = _materialize_entry_for_replace(plan.entry, plan.target, target_style)
+    else:
+        metadata = _materialize_entry_for_add(plan.entry, plan.target, target_style)
     return _PreparedAdd(plan=plan, metadata=metadata)
 
 
 def _cleanup_prepared_adds(prepared: Sequence[_PreparedAdd]) -> None:
     for item in prepared:
-        remove_materialization_path(_add_temp_target(item.plan.target), ignore_errors=True)
+        remove_materialization_path(_add_plan_temp_target(item.plan), ignore_errors=True)
 ```
 
 Add this bulk helper near `add_all_project_skills`:
@@ -1360,6 +1471,7 @@ def _add_all_skills_parallel(
     target_style: _TargetStyle,
     *,
     replace_existing: bool = False,
+    replace_existing_names: frozenset[str] = frozenset(),
 ) -> AddAllSkillsResult:
     _ensure_safe_project_skills_dir(project_skills_dir, target_style)
     try:
@@ -1374,6 +1486,7 @@ def _add_all_skills_parallel(
         project_skills_dir,
         target_style,
         replace_existing=replace_existing,
+        replace_existing_names=replace_existing_names,
     )
 
     prepared: list[_PreparedAdd] = []
@@ -1385,7 +1498,7 @@ def _add_all_skills_parallel(
     except Exception:
         _cleanup_prepared_adds(prepared)
         for plan in to_prepare:
-            remove_materialization_path(_add_temp_target(plan.target), ignore_errors=True)
+            remove_materialization_path(_add_plan_temp_target(plan), ignore_errors=True)
         raise
 
     results_by_skill: dict[str, AddSkillResult] = {
@@ -1414,12 +1527,13 @@ def _add_all_skills_parallel(
                     target_style,
                 )
 
-            if plan.target.exists() and replace_existing:
+            if plan.replace_existing_target:
                 _replace_with_materialized_entry(
                     plan.target,
                     after_replace=update_manifest,
                     target_style=target_style,
                 )
+                status = "replaced"
             else:
                 install_materialized_skill_folder(
                     _add_temp_target(plan.target),
@@ -1427,17 +1541,18 @@ def _add_all_skills_parallel(
                     error_message=f"Failed to add {target_style.skill_label} '{plan.skill_name}'",
                     after_install=update_manifest,
                 )
+                status = "added"
             results_by_skill[plan.skill_name] = AddSkillResult(
                 skill=plan.skill_name,
                 target=plan.target,
-                status="added",
+                status=status,
                 repo_id=plan.entry.repo_id,
                 source_reference=_source_reference_for(plan.entry),
                 target_kind=target_style.target_kind,
             )
     except Exception:
         for item in prepared:
-            remove_materialization_path(_add_temp_target(item.plan.target), ignore_errors=True)
+            remove_materialization_path(_add_plan_temp_target(item.plan), ignore_errors=True)
         raise
 
     ordered_results = [
@@ -1474,12 +1589,14 @@ def add_all_vault_skills(
     vault_skills_dir: Path,
     *,
     replace_existing: bool = False,
+    replace_existing_names: frozenset[str] = frozenset(),
 ) -> AddAllSkillsResult:
     return _add_all_skills_parallel(
         catalog,
         vault_skills_dir,
         _VAULT_TARGET,
         replace_existing=replace_existing,
+        replace_existing_names=replace_existing_names,
     )
 ```
 
@@ -1487,29 +1604,28 @@ def add_all_vault_skills(
 
 In `src/sv/cli.py`, import `add_all_vault_skills` from `sv.project`.
 
-Replace the skill-vault branch of `_add_all_skills_to_context` with serial replacement resolution followed by one bulk call:
+Replace the skill-vault branch of `_add_all_skills_to_context` with serial replacement resolution followed by one bulk call. Keep the full catalog so "no" prompt decisions still report `exists`, and pass affirmative prompt decisions as per-skill replacement names:
 
 ```python
     if context.is_skill_vault:
-        resolved_entries: list[SourceSkill] = []
+        replace_names: set[str] = set()
         for entry in catalog:
             should_replace = _resolve_vault_replacement(
                 entry,
                 context.vault_skills_dir,
                 replace_existing=replace_existing,
             )
-            if should_replace or not (context.vault_skills_dir / entry.name).exists():
-                resolved_entries.append(entry)
-            else:
-                resolved_entries.append(entry)
+            if should_replace:
+                replace_names.add(normalize_skill_name(entry.name))
         return add_all_vault_skills(
-            resolved_entries,
+            catalog,
             context.vault_skills_dir,
             replace_existing=replace_existing,
+            replace_existing_names=frozenset(replace_names),
         )
 ```
 
-Keep prompts serial. Do not prompt from workers.
+Keep prompts serial. Do not prompt from workers, and do not discard per-skill prompt decisions.
 
 - [ ] **Step 9: Run add tests**
 
@@ -1519,8 +1635,10 @@ Run:
 uv run pytest \
   tests/test_project.py::test_add_all_project_skills_prepares_new_skills_in_parallel \
   tests/test_project.py::test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails \
+  tests/test_project.py::test_add_all_vault_skills_replaces_existing_targets_with_replace_temp \
   tests/test_project.py \
   tests/test_cli_add_contracts.py \
+  tests/test_vault_mode_targets.py \
   -q --no-cov
 ```
 
@@ -1529,7 +1647,7 @@ Expected: all pass. If any CLI add-all output ordering test fails, keep printing
 - [ ] **Step 10: Commit Task 5**
 
 ```bash
-git add src/sv/project.py src/sv/cli.py tests/test_project.py tests/test_cli_add_contracts.py
+git add src/sv/project.py src/sv/cli.py tests/test_project.py tests/test_cli_add_contracts.py tests/test_vault_mode_targets.py
 git commit -m "feat: prepare bulk adds in parallel"
 ```
 
