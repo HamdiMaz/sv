@@ -463,6 +463,19 @@ def test_sync_project_skills_prepares_replacements_in_parallel(
     assert result.skipped == []
     assert (project_skills / "alpha" / "notes.md").read_text() == "alpha v2\n"
     assert (project_skills / "beta" / "notes.md").read_text() == "beta v2\n"
+    manifest = load_manifest(project_skills)
+    alpha_hash = sha256_skill_directory(alpha.source_path, expected_name="alpha")
+    beta_hash = sha256_skill_directory(beta.source_path, expected_name="beta")
+    assert manifest["alpha"].source_content_hash == alpha_hash
+    assert manifest["alpha"].installed_content_hash == alpha_hash
+    assert manifest["alpha"].local_content_hash == alpha_hash
+    assert manifest["alpha"].modified is False
+    assert manifest["alpha"].update_available is False
+    assert manifest["beta"].source_content_hash == beta_hash
+    assert manifest["beta"].installed_content_hash == beta_hash
+    assert manifest["beta"].local_content_hash == beta_hash
+    assert manifest["beta"].modified is False
+    assert manifest["beta"].update_available is False
 
 
 def test_update_project_skills_prepares_changed_replacements_in_parallel(
@@ -488,6 +501,19 @@ def test_update_project_skills_prepares_changed_replacements_in_parallel(
     assert [skip.reason for skip in result.skipped] == []
     assert (project_skills / "alpha" / "notes.md").read_text() == "alpha update\n"
     assert (project_skills / "beta" / "notes.md").read_text() == "beta update\n"
+    manifest = load_manifest(project_skills)
+    alpha_hash = sha256_skill_directory(alpha.source_path, expected_name="alpha")
+    beta_hash = sha256_skill_directory(beta.source_path, expected_name="beta")
+    assert manifest["alpha"].source_content_hash == alpha_hash
+    assert manifest["alpha"].installed_content_hash == alpha_hash
+    assert manifest["alpha"].local_content_hash == alpha_hash
+    assert manifest["alpha"].modified is False
+    assert manifest["alpha"].update_available is False
+    assert manifest["beta"].source_content_hash == beta_hash
+    assert manifest["beta"].installed_content_hash == beta_hash
+    assert manifest["beta"].local_content_hash == beta_hash
+    assert manifest["beta"].modified is False
+    assert manifest["beta"].update_available is False
 
 
 class FailingPrepareProjectSourceSkill(BlockingProjectSourceSkill):
@@ -495,6 +521,89 @@ class FailingPrepareProjectSourceSkill(BlockingProjectSourceSkill):
         self.started.set()
         assert self.peer_started.wait(2), "failing add-all materialization did not overlap"
         raise SvError("simulated materialization failure")
+
+
+def test_sync_project_skills_cleans_prepared_temps_when_one_prepare_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    source_root = tmp_path / "source"
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    alpha = BlockingProjectSourceSkill("alpha", source_root, alpha_started, beta_started)
+    beta = BlockingProjectSourceSkill("beta", source_root, beta_started, alpha_started)
+    add_all_project_skills([alpha, beta], project_skills)
+    alpha.started = threading.Event()
+    beta_failing = FailingPrepareProjectSourceSkill.__new__(FailingPrepareProjectSourceSkill)
+    beta_failing.__dict__.update(beta.__dict__)
+    beta_failing.started = threading.Event()
+    beta_failing.peer_started = alpha.started
+    beta = beta_failing
+    alpha.peer_started = beta.started
+    (alpha.source_path / "notes.md").write_text("alpha v2\n")
+    (beta.source_path / "notes.md").write_text("beta v2\n")
+
+    with pytest.raises(SvError, match="Failed to sync skill 'beta'"):
+        sync_project_skills([alpha, beta], project_skills)
+
+    assert not (project_skills / "alpha" / "notes.md").exists()
+    assert not (project_skills / "beta" / "notes.md").exists()
+    assert_no_partial_sv_dirs(project_skills)
+
+
+def test_update_project_skills_cleans_prepared_temps_when_one_prepare_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    source_root = tmp_path / "source"
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    alpha = BlockingProjectSourceSkill("alpha", source_root, alpha_started, beta_started)
+    beta = BlockingProjectSourceSkill("beta", source_root, beta_started, alpha_started)
+    add_all_project_skills([alpha, beta], project_skills)
+    alpha.started = threading.Event()
+    beta_failing = FailingPrepareProjectSourceSkill.__new__(FailingPrepareProjectSourceSkill)
+    beta_failing.__dict__.update(beta.__dict__)
+    beta_failing.started = threading.Event()
+    beta_failing.peer_started = alpha.started
+    beta = beta_failing
+    alpha.peer_started = beta.started
+    (alpha.source_path / "notes.md").write_text("alpha update\n")
+    (beta.source_path / "notes.md").write_text("beta update\n")
+
+    with pytest.raises(SvError, match="Failed to sync skill 'beta'"):
+        update_project_skills([alpha, beta], project_skills)
+
+    assert not (project_skills / "alpha" / "notes.md").exists()
+    assert not (project_skills / "beta" / "notes.md").exists()
+    assert_no_partial_sv_dirs(project_skills)
+
+
+def test_sync_project_skills_cleans_prepared_temps_when_serial_commit_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    alpha = make_source_skill(tmp_path / "source", "alpha")
+    beta = make_source_skill(tmp_path / "source", "beta")
+    add_all_project_skills([alpha, beta], project_skills)
+    (alpha.source_path / "notes.md").write_text("alpha v2\n")
+    (beta.source_path / "notes.md").write_text("beta v2\n")
+
+    def fail_replace(target, after_replace, target_style=project_module._PI_TARGET):
+        assert (project_skills / ".alpha.sv-sync-tmp").is_dir()
+        assert (project_skills / ".beta.sv-sync-tmp").is_dir()
+        raise SvError("replace commit failed")
+
+    monkeypatch.setattr(project_module, "_replace_with_materialized_entry", fail_replace)
+
+    with pytest.raises(SvError, match="replace commit failed"):
+        sync_project_skills([alpha, beta], project_skills)
+
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha remote\n"
+    assert (project_skills / "beta" / "notes.md").read_text() == "beta remote\n"
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails(
