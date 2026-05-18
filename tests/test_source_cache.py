@@ -88,6 +88,30 @@ def test_cache_summary_counts_catalogs_and_skill_bodies(tmp_path: Path) -> None:
     assert cleaned == summary
 
 
+def test_clean_cache_refuses_symlinked_catalog_cache_before_pruning(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    old_skill = _write_skill_tree(tmp_path / "old-source", "old", "old body\n")
+    old_hash = sha256_skill_directory(old_skill, expected_name="old")
+    store_skill_body_cache(
+        paths,
+        old_skill,
+        skill_name="old",
+        content_hash=old_hash,
+        source_reference="Org/Skills:skills/old",
+        now=datetime(2026, 4, 1, tzinfo=UTC),
+    )
+    attacker_catalog = tmp_path / "attacker-catalog"
+    attacker_catalog.mkdir()
+    paths.catalog_cache_dir.symlink_to(attacker_catalog, target_is_directory=True)
+
+    with pytest.raises(SvError, match="symlinked"):
+        clean_cache(paths, now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC))
+
+    assert skill_body_cache_path(paths, old_hash).exists()
+
+
 def _repo() -> RepoConfig:
     return RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
 

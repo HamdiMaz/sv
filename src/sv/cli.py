@@ -1852,7 +1852,7 @@ def _handle_cache(args: argparse.Namespace, paths: SvPaths) -> int:
     if args.cache_command == "clean":
         summary = clean_cache(paths, now=datetime.now(UTC))
         print(
-            f"Cleaned global sv cache. Skill bodies: {summary.skill_bodies}; bytes: {summary.skill_body_bytes}."
+            f"Pruned global sv skill body cache. Skill bodies: {summary.skill_bodies}; bytes: {summary.skill_body_bytes}."
         )
         return 0
     raise SvError(f"Unknown cache command: {args.cache_command}")

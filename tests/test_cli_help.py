@@ -1,6 +1,7 @@
 import pytest
 
 from sv import cli as cli_module
+from sv.source_cache import CacheSummary
 from tests.helpers import parse_sv
 
 
@@ -130,6 +131,28 @@ def test_cli_help_is_available(args, required_phrases, capsys):
     output = capsys.readouterr().out
     for phrase in required_phrases:
         assert phrase in output
+
+
+def test_cache_clean_output_describes_skill_body_pruning(
+    tmp_path, capsys, monkeypatch
+):
+    def fake_clean_cache(paths, *, now):
+        return CacheSummary(
+            catalog_files=3,
+            skill_bodies=2,
+            skill_body_bytes=123,
+        )
+
+    monkeypatch.setattr(cli_module, "clean_cache", fake_clean_cache)
+
+    exit_code = cli_module.handle(
+        parse_sv(["cache", "clean"]), cwd=tmp_path / "project", home=tmp_path / "home"
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == (
+        "Pruned global sv skill body cache. Skill bodies: 2; bytes: 123.\n"
+    )
 
 
 def test_removed_command_still_fails_to_parse(capsys):

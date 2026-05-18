@@ -322,18 +322,10 @@ def prune_skill_body_cache(
 
 def cache_summary(paths: SvPaths, *, now: datetime | None = None) -> CacheSummary:
     current_time = datetime.now(UTC) if now is None else now
+    _validate_catalog_cache_paths(paths)
     catalog_files = 0
-    _reject_symlinked_cache_dir(paths.catalog_cache_dir.parent)
-    if paths.catalog_cache_dir.is_symlink():
-        raise SvError(
-            f"Refusing to inspect symlinked sv catalog cache directory at {paths.catalog_cache_dir}."
-        )
     if paths.catalog_cache_dir.is_dir():
         for path in paths.catalog_cache_dir.glob("*.toml"):
-            if path.is_symlink():
-                raise SvError(
-                    f"Refusing to inspect symlinked sv catalog cache file at {path}."
-                )
             if path.is_file():
                 catalog_files += 1
     skill_entries = _skill_body_cache_entries(paths, now=current_time)
@@ -345,8 +337,23 @@ def cache_summary(paths: SvPaths, *, now: datetime | None = None) -> CacheSummar
 
 
 def clean_cache(paths: SvPaths, *, now: datetime) -> CacheSummary:
+    _validate_catalog_cache_paths(paths)
     prune_skill_body_cache(paths, now=now, force=True)
     return cache_summary(paths, now=now)
+
+
+def _validate_catalog_cache_paths(paths: SvPaths) -> None:
+    _reject_symlinked_cache_dir(paths.catalog_cache_dir.parent)
+    if paths.catalog_cache_dir.is_symlink():
+        raise SvError(
+            f"Refusing to inspect symlinked sv catalog cache directory at {paths.catalog_cache_dir}."
+        )
+    if paths.catalog_cache_dir.is_dir():
+        for path in paths.catalog_cache_dir.glob("*.toml"):
+            if path.is_symlink():
+                raise SvError(
+                    f"Refusing to inspect symlinked sv catalog cache file at {path}."
+                )
 
 
 def _skill_body_cache_entries(
