@@ -74,6 +74,23 @@ def test_scan_repo_for_index_recursively_includes_valid_skills_and_skips_build_d
     assert "description" in warnings[0]
 
 
+def test_scan_repo_for_index_propagates_hashing_filesystem_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+    warnings: list[str] = []
+
+    def fail_hash(_path: Path, *, expected_name=None):
+        raise SvError("Failed to hash file something")
+
+    monkeypatch.setattr(index_module, "sha256_skill_directory", fail_hash)
+
+    with pytest.raises(SvError, match="Failed to hash file something"):
+        scan_repo_for_index(tmp_path, generated_at="2026-05-15T00:00:00Z", warn=warnings.append)
+
+    assert warnings == []
+
+
 def test_scan_repo_for_index_hashes_candidate_skills_in_parallel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

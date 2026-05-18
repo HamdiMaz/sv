@@ -475,7 +475,15 @@ def _warn_invalid_skill(
 
 def _is_filesystem_error(error: SvError) -> bool:
     message = str(error)
-    return message.startswith(("Failed to scan", "Failed to inspect", "Failed to read"))
+    return message.startswith(
+        (
+            "Failed to scan",
+            "Failed to inspect",
+            "Failed to read",
+            "Failed to hash",
+            "Failed to list skill directory",
+        )
+    )
 
 
 def _utc_now() -> str:
