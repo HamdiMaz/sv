@@ -14,6 +14,7 @@
 
 - Metadata cache TTL: **24 hours**.
 - Future-dated cached metadata timestamps are treated as stale in normal/refresh modes so clock skew or tampering cannot pin a catalog indefinitely.
+- Future-dated skill-body metadata timestamps are treated as corrupt during pruning so clock skew or tampering cannot pin body-cache retention indefinitely.
 - Skill body cache retention: **30 days unused** and **256 MiB max total skill-body bytes**.
 - Skill-body quota decisions use the actual cached directory size, not only the stored metadata size field.
 - Fresh prune markers may skip age-based cleanup only while actual skill-body bytes are within the 256 MiB cap; over-budget caches are pruned after writes even if the last prune ran less than a day ago.
@@ -23,7 +24,7 @@
   - `sync`, `update`, and source-aware `status` are refresh-first by default and fail closed on refresh errors so existing update/status semantics stay current.
 - Skill bodies are content-addressed by source content hash; indexed sources provide the hash up front, and non-index sources learn it after the first successful materialization and write it back to cached metadata.
 - Cached skill folders are validated by hash before use. Existing body-cache entries are reused only when both metadata and the cached `skill/` tree validate against the requested content hash.
-- Cached catalog files are validated on load: schema, configured repo identity, every normalized field, and stored `catalog_hash` must match the serialized entries.
+- Cached catalog files are validated on load: schema, configured repo identity, every normalized field, and stored `catalog_hash` must match the canonical trust-relevant document fields (schema, repo identity, provenance, freshness, index hash, and normalized entries).
 - Cached metadata + body-cache miss policy:
   - `--cached`: fail with guidance and never call source backends.
   - normal/`--refresh`: refresh that repo's metadata first, then materialize the refreshed catalog entry from source. Indexed entries still validate the materialized tree against the refreshed content hash.
@@ -225,6 +226,7 @@ git commit -m "feat: add global cache paths and policy"
 Append these tests to `tests/test_source_cache.py`:
 
 ```python
+from dataclasses import replace
 from datetime import UTC, datetime
 import os
 
@@ -240,6 +242,7 @@ from sv.source_cache import (
     cached_catalog_is_fresh,
     load_cached_catalog,
     save_cached_catalog,
+    _cached_catalog_hash,
 )
 
 
@@ -248,14 +251,14 @@ def _repo() -> RepoConfig:
 
 
 def _catalog_document(refreshed_at: str) -> CachedCatalogDocument:
-    return CachedCatalogDocument(
+    document = CachedCatalogDocument(
         repo_id="Org/Skills",
         repo_url="https://github.com/Org/Skills.git",
         source_key="github:org/skills",
         skills_paths=(),
         backend="github-https-api",
         refreshed_at=refreshed_at,
-        catalog_hash="sha256:b7e19923e6ccb927a2135016aee79cbb3c0d851b45bf53850669c2507ee20b0e",
+        catalog_hash="sha256:" + ("0" * 64),
         index_hash="sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c",
         entries=(
             CachedCatalogEntry(
@@ -267,6 +270,7 @@ def _catalog_document(refreshed_at: str) -> CachedCatalogDocument:
             ),
         ),
     )
+    return replace(document, catalog_hash=_cached_catalog_hash(document))
 
 
 def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
@@ -308,18 +312,56 @@ def test_catalog_cache_write_refuses_symlinked_temp_file(tmp_path: Path) -> None
 def test_catalog_cache_load_rejects_catalog_hash_mismatch(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     repo = _repo()
+    document = _catalog_document("2026-05-18T12:00:00Z")
+    save_cached_catalog(paths, repo, document)
+    path = catalog_cache_path(paths, repo)
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        text.replace(
+            f'catalog_hash = "{document.catalog_hash}"',
+            'catalog_hash = "sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d"',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SvError, match="catalog_hash does not match document"):
+        load_cached_catalog(paths, repo)
+
+
+def test_catalog_cache_load_rejects_trust_field_tampering(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
     save_cached_catalog(paths, repo, _catalog_document("2026-05-18T12:00:00Z"))
     path = catalog_cache_path(paths, repo)
     text = path.read_text(encoding="utf-8")
     path.write_text(
         text.replace(
-            "sha256:b7e19923e6ccb927a2135016aee79cbb3c0d851b45bf53850669c2507ee20b0e",
-            "sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d",
+            'refreshed_at = "2026-05-18T12:00:00Z"',
+            'refreshed_at = "2026-05-18T12:30:00Z"',
         ),
         encoding="utf-8",
     )
 
-    with pytest.raises(SvError, match="catalog_hash does not match entries"):
+    with pytest.raises(SvError, match="catalog_hash does not match document"):
+        load_cached_catalog(paths, repo)
+
+
+def test_catalog_cache_load_rejects_provenance_field_tampering(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = _catalog_document("2026-05-18T12:00:00Z")
+    save_cached_catalog(paths, repo, document)
+    path = catalog_cache_path(paths, repo)
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        text.replace(
+            f'index_hash = "{document.index_hash}"',
+            'index_hash = "sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d"',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SvError, match="catalog_hash does not match document"):
         load_cached_catalog(paths, repo)
 ```
 
@@ -335,12 +377,13 @@ Expected: failures for missing catalog cache symbols.
 
 - [ ] **Step 3: Add catalog cache dataclasses and path helpers**
 
-In `src/sv/source_cache.py`, add imports and dataclasses:
+In `src/sv/source_cache.py`, merge imports into the existing Task 1 import block so the top of the file includes:
 
 ```python
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 import hashlib
 
@@ -416,8 +459,8 @@ def load_cached_catalog(paths: SvPaths, repo: RepoConfig) -> CachedCatalogDocume
     data = load_toml_document(path, "sv catalog cache")
     document = _parse_cached_catalog_document(data, path)
     _validate_cached_catalog_matches_repo(document, repo, path)
-    if document.catalog_hash != _cached_catalog_hash(document.entries):
-        raise SvError(f"Failed to read sv catalog cache at {path}: catalog_hash does not match entries.")
+    if document.catalog_hash != _cached_catalog_hash(document):
+        raise SvError(f"Failed to read sv catalog cache at {path}: catalog_hash does not match document.")
     return document
 
 
@@ -536,7 +579,7 @@ def save_cached_catalog(paths: SvPaths, repo: RepoConfig, document: CachedCatalo
         or document.skills_paths != tuple(repo.skills_paths)
     ):
         raise SvError("Refusing to write sv catalog cache for a different repo.")
-    if document.catalog_hash != _cached_catalog_hash(document.entries):
+    if document.catalog_hash != _cached_catalog_hash(document):
         raise SvError("Refusing to write sv catalog cache with mismatched catalog_hash.")
     atomic_write_text(
         path,
@@ -552,7 +595,7 @@ def cached_catalog_is_fresh(document: CachedCatalogDocument, *, now: datetime, t
     return timedelta(seconds=0) <= age <= timedelta(seconds=ttl_seconds)
 ```
 
-Add imports:
+Merge `timedelta` into the existing `datetime` import:
 
 ```python
 from datetime import UTC, datetime, timedelta
@@ -589,14 +632,37 @@ def _format_cached_catalog_document(document: CachedCatalogDocument) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _cached_catalog_hash(entries: Sequence[CachedCatalogEntry]) -> str:
+def _cached_catalog_hash(document: CachedCatalogDocument) -> str:
     digest = hashlib.sha256()
     digest.update(b"sv-cached-catalog-v1\0")
-    for entry in entries:
-        for value in (entry.name, entry.description, entry.source_path, entry.content_hash or "", entry.skill_file_hash or ""):
-            digest.update(value.encode("utf-8"))
-            digest.update(b"\0")
+    _update_cache_hash_field(digest, "schema_version", str(CACHE_SCHEMA_VERSION))
+    for label, value in (
+        ("repo_id", document.repo_id),
+        ("repo_url", document.repo_url),
+        ("source_key", document.source_key),
+        ("backend", document.backend),
+        ("refreshed_at", document.refreshed_at),
+        ("index_hash", document.index_hash or ""),
+    ):
+        _update_cache_hash_field(digest, label, value)
+    for skills_path in document.skills_paths:
+        _update_cache_hash_field(digest, "skills_path", skills_path)
+    for entry in document.entries:
+        _update_cache_hash_field(digest, "entry.name", entry.name)
+        _update_cache_hash_field(digest, "entry.description", entry.description)
+        _update_cache_hash_field(digest, "entry.source_path", entry.source_path)
+        _update_cache_hash_field(digest, "entry.content_hash", entry.content_hash or "")
+        _update_cache_hash_field(digest, "entry.skill_file_hash", entry.skill_file_hash or "")
     return f"sha256:{digest.hexdigest()}"
+
+
+def _update_cache_hash_field(digest, label: str, value: str) -> None:
+    encoded_label = label.encode("utf-8")
+    encoded_value = value.encode("utf-8")
+    digest.update(len(encoded_label).to_bytes(4, "big"))
+    digest.update(encoded_label)
+    digest.update(len(encoded_value).to_bytes(8, "big"))
+    digest.update(encoded_value)
 
 
 def _toml_string(value: str) -> str:
@@ -899,11 +965,11 @@ Expected: failures for missing `get_catalog_with_cache` and conversion helpers.
 
 - [ ] **Step 3: Add catalog conversion helpers**
 
-In `src/sv/source_cache.py`, add imports, merging with the existing `sv.catalog` import from Task 2:
+In `src/sv/source_cache.py`, merge these names into the existing `collections.abc`, `dataclasses`, and `sv.catalog` imports from earlier tasks:
 
 ```python
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import field, replace
+from dataclasses import dataclass, field, replace
 
 from sv.catalog import SourceSkill, normalize_source_relative_path
 ```
@@ -929,17 +995,18 @@ def _catalog_document_from_entries(
         )
         for entry in sorted(entries, key=lambda item: (item.name, item.source_relative_path))
     )
-    return CachedCatalogDocument(
+    document = CachedCatalogDocument(
         repo_id=repo.id,
         repo_url=repo.url,
         source_key=repo_source_key(repo.url),
         skills_paths=tuple(repo.skills_paths),
         backend=backend or _catalog_backend(entries),
         refreshed_at=refreshed_at,
-        catalog_hash=_cached_catalog_hash(cached_entries),
+        catalog_hash="sha256:" + ("0" * 64),
         index_hash=index_hash,
         entries=cached_entries,
     )
+    return replace(document, catalog_hash=_cached_catalog_hash(document))
 
 
 def _catalog_backend(entries: Sequence[SourceSkill]) -> str:
@@ -948,6 +1015,7 @@ def _catalog_backend(entries: Sequence[SourceSkill]) -> str:
 
 
 # `_cached_catalog_hash` was added in Task 2 and is reused here for refreshed catalog writes.
+# It hashes the canonical trust-relevant document fields, excluding `catalog_hash` itself.
 
 
 def _source_skills_from_cached_document(
@@ -1410,12 +1478,12 @@ Expected: failures for missing body cache functions.
 
 - [ ] **Step 3: Add skill body metadata dataclass and paths**
 
-In `src/sv/source_cache.py`, add imports:
+In `src/sv/source_cache.py`, merge these imports into the existing import block:
 
 ```python
 import uuid
 
-from sv.hashformat import SHA256_PREFIX
+from sv.hashformat import SHA256_PREFIX, is_sha256_digest
 from sv.hashing import sha256_file, sha256_skill_directory
 from sv.materialization import (
     copy_skill_folder_to_temp,
@@ -1713,11 +1781,9 @@ git commit -m "feat: cache materialized skill bodies globally"
 
 - [ ] **Step 1: Write tests for wrapper hit and miss behavior**
 
-Append:
+Append (keep the existing `from dataclasses import replace` import from Task 2):
 
 ```python
-from dataclasses import replace
-
 from sv.hashing import sha256_file
 from sv.source import FakeSourceBackend
 from sv.source_cache import (
@@ -1954,11 +2020,12 @@ def test_record_cached_skill_body_hash_updates_non_index_cached_metadata(tmp_pat
     paths = SvPaths.from_home(tmp_path)
     repo = _repo()
     document = _catalog_document("2026-05-18T12:00:00Z")
-    document = replace(
+    document_without_hash = replace(
         document,
-        catalog_hash="sha256:28c7cd425c65b4157604a799935b1444db9b0b8c1debf303d76e475e5519d89a",
+        catalog_hash="sha256:" + ("0" * 64),
         entries=(replace(document.entries[0], content_hash=None, skill_file_hash=None),),
     )
+    document = replace(document_without_hash, catalog_hash=_cached_catalog_hash(document_without_hash))
     save_cached_catalog(paths, repo, document)
     source_skill = _write_skill_tree(tmp_path / "source", "find-docs")
     content_hash = sha256_skill_directory(source_skill, expected_name="find-docs")
@@ -2082,11 +2149,12 @@ def record_cached_skill_body_hash(
             updated_entries.append(cached_entry)
     if not changed:
         return
-    updated_document = replace(
+    updated_without_hash = replace(
         document,
-        catalog_hash=_cached_catalog_hash(updated_entries),
+        catalog_hash="sha256:" + ("0" * 64),
         entries=tuple(updated_entries),
     )
+    updated_document = replace(updated_without_hash, catalog_hash=_cached_catalog_hash(updated_without_hash))
     save_cached_catalog(paths, repo, updated_document)
 
 
@@ -2424,6 +2492,38 @@ def test_prune_skill_body_cache_treats_future_marker_as_due(tmp_path: Path) -> N
     )
 
 
+def test_prune_skill_body_cache_removes_future_dated_body_metadata(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    future_skill = _write_skill_tree(tmp_path / "future", "future-skill")
+    future_hash = sha256_skill_directory(future_skill, expected_name="future-skill")
+    store_skill_body_cache(
+        paths,
+        future_skill,
+        skill_name="future-skill",
+        content_hash=future_hash,
+        source_reference="Org/Skills:skills/future-skill",
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+    )
+    metadata_path = skill_body_cache_path(paths, future_hash) / "metadata.toml"
+    metadata_path.write_text(
+        metadata_path.read_text(encoding="utf-8").replace(
+            'created_at = "2026-05-18T12:00:00Z"\nlast_used_at = "2026-05-18T12:00:00Z"',
+            'created_at = "2026-05-19T00:00:00Z"\nlast_used_at = "2026-05-19T00:00:00Z"',
+        ),
+        encoding="utf-8",
+    )
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC),
+        max_unused_seconds=30 * 24 * 60 * 60,
+        max_bytes=256 * 1024 * 1024,
+        force=True,
+    )
+
+    assert not skill_body_cache_path(paths, future_hash).exists()
+
+
 def test_prune_skill_body_cache_refuses_symlinked_marker_temp_file(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     paths.cache_dir.mkdir(parents=True)
@@ -2518,7 +2618,7 @@ def prune_skill_body_cache(
     max_bytes: int = DEFAULT_SKILL_BODY_MAX_BYTES,
     force: bool = False,
 ) -> None:
-    entries = _skill_body_cache_entries(paths)
+    entries = _skill_body_cache_entries(paths, now=now)
     if not force and not _should_prune(
         paths,
         now=now,
@@ -2544,7 +2644,7 @@ def prune_skill_body_cache(
     _write_prune_marker(paths, now=now)
 
 
-def _skill_body_cache_entries(paths: SvPaths) -> list[_SkillBodyCacheEntry]:
+def _skill_body_cache_entries(paths: SvPaths, *, now: datetime) -> list[_SkillBodyCacheEntry]:
     root = paths.skill_body_cache_dir / "sha256"
     _reject_symlinked_cache_dir(root.parent)
     if root.is_symlink():
@@ -2560,6 +2660,10 @@ def _skill_body_cache_entries(paths: SvPaths) -> list[_SkillBodyCacheEntry]:
         content_hash = f"sha256:{child.name}"
         try:
             metadata = load_skill_body_metadata(paths, content_hash)
+            created_at = _parse_utc(metadata.created_at, child)
+            last_used_at = _parse_utc(metadata.last_used_at, child)
+            if created_at > now or last_used_at > now:
+                raise SvError("cached skill body metadata timestamp is in the future")
             skill_folder = _skill_body_folder(paths, content_hash)
             if skill_folder.is_symlink():
                 raise SvError(f"Refusing to inspect symlinked cached skill body folder at {skill_folder}.")
@@ -3223,7 +3327,7 @@ Add these imports near the top of `tests/test_cli_add_contracts.py`:
 from dataclasses import replace
 import shutil
 
-from sv.source_cache import load_cached_catalog, save_cached_catalog
+from sv.source_cache import load_cached_catalog, save_cached_catalog, _cached_catalog_hash
 ```
 
 If `import shutil` is already present after earlier edits, do not duplicate it. Add this helper near the other test helpers in that file:
@@ -3234,10 +3338,15 @@ def _expire_cached_metadata(home: Path) -> None:
     repo = load_config(paths).repos[0]
     document = load_cached_catalog(paths, repo)
     assert document is not None
+    expired_without_hash = replace(
+        document,
+        catalog_hash="sha256:" + ("0" * 64),
+        refreshed_at="2000-01-01T00:00:00Z",
+    )
     save_cached_catalog(
         paths,
         repo,
-        replace(document, refreshed_at="2000-01-01T00:00:00Z"),
+        replace(expired_without_hash, catalog_hash=_cached_catalog_hash(expired_without_hash)),
     )
 ```
 
@@ -3579,7 +3688,8 @@ class CacheSummary:
     skill_body_bytes: int
 
 
-def cache_summary(paths: SvPaths) -> CacheSummary:
+def cache_summary(paths: SvPaths, *, now: datetime | None = None) -> CacheSummary:
+    current_time = datetime.now(UTC) if now is None else now
     catalog_files = 0
     _reject_symlinked_cache_dir(paths.catalog_cache_dir.parent)
     if paths.catalog_cache_dir.is_symlink():
@@ -3590,7 +3700,7 @@ def cache_summary(paths: SvPaths) -> CacheSummary:
                 raise SvError(f"Refusing to inspect symlinked sv catalog cache file at {path}.")
             if path.is_file():
                 catalog_files += 1
-    skill_entries = _skill_body_cache_entries(paths)
+    skill_entries = _skill_body_cache_entries(paths, now=current_time)
     return CacheSummary(
         catalog_files=catalog_files,
         skill_bodies=len(skill_entries),
@@ -3600,7 +3710,7 @@ def cache_summary(paths: SvPaths) -> CacheSummary:
 
 def clean_cache(paths: SvPaths, *, now: datetime) -> CacheSummary:
     prune_skill_body_cache(paths, now=now, force=True)
-    return cache_summary(paths)
+    return cache_summary(paths, now=now)
 ```
 
 - [ ] **Step 2: Add parser entries**
@@ -3682,7 +3792,7 @@ def test_cache_summary_counts_catalogs_and_skill_bodies(tmp_path: Path) -> None:
         now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
     )
 
-    summary = cache_summary(paths)
+    summary = cache_summary(paths, now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC))
     cleaned = clean_cache(paths, now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC))
 
     assert summary.catalog_files == 1
@@ -3900,10 +4010,11 @@ If `git status --short` shows no changes after Step 1-6, do not create an empty 
 - Normal/`--refresh` materialization from cached metadata refreshes that repo first on body-cache miss.
 - `--refresh` bypasses fresh metadata cache.
 - `sv add -l --refresh` forces source backend refresh even though normal `sv add -l` preserves the existing no-update interactive behavior.
-- Cached catalog loads verify `catalog_hash` against normalized entries and preserve backend/index-hash provenance when refreshed metadata is cached.
+- Cached catalog loads verify `catalog_hash` against canonical trust-relevant document fields and preserve backend/index-hash provenance when refreshed metadata is cached.
 - Non-index sources write the observed content hash back into cached metadata after a successful materialization.
 - Skill bodies are copied from cache only when the content hash matches.
 - Body cache entries update `last_used_at` and `use_count` on hit and store.
+- Future-dated body metadata timestamps are removed as corrupt during pruning and summary walks.
 - Lazy pruning respects 30 days unused and 256 MiB body-cache cap using actual cached directory sizes, not trust-only metadata size fields.
 - Over-budget body caches prune even with a fresh prune marker, and future-dated/corrupt prune markers do not pin cleanup indefinitely.
 - All cache reads, writes, summaries, pruning deletes, and body materializations reject symlinked cache roots/entries and use unique temp files/directories followed by atomic replace of complete cache entries.
