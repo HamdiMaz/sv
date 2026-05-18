@@ -1,6 +1,6 @@
 # Adapter Modularization Implementation Plan
 
-> **For agentic workers:** Use a task-by-task execution workflow. Steps use checkbox (`- [ ]`) syntax for tracking. Implement one task, run its verification, commit it, then continue.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Implement one task, run its verification, commit it, then continue.
 
 **Goal:** Modularize `sv` around eight adapter seams—UI/terminal, runtime/environment, concurrency, process execution, source backends, filesystem/materialization, persistence, and cache—without changing user-visible behavior or adding runtime dependencies.
 
@@ -11,7 +11,11 @@
 
 **Change Log:**
 For reviewers, any changes to the plan should be logged here with a brief description and rationale.
-- 
+- 2026-05-18: Aligned the handoff header with the agentic plan workflow requirement.
+- 2026-05-18: Fixed runtime and concurrency implementation guidance that would have caused lint failures or broken existing monkeypatch-based worker-count tests.
+- 2026-05-18: Clarified process and source-backend split order, compatibility exports, and private-test retargeting to avoid import cycles and façade monkeypatch regressions.
+- 2026-05-18: Corrected materialization adapter signatures and refactor approach so required `error_message` behavior and existing public-function monkeypatch tests remain intact.
+- 2026-05-18: Tightened persistence-store and CLI-boundary tasks with exact signatures, runtime stderr/env assertions, preserved first-run config loading semantics, and broader manifest-store routing notes.
 
 ---
 
@@ -100,7 +104,7 @@ Create:
 - `src/sv/source_backends/base.py` — source backend protocols/errors/shared dataclasses.
 - `src/sv/source_backends/factory.py` — backend factory.
 - `src/sv/source_backends/github.py` — GitHub API/HTTPS backend implementations.
-- `src/sv/source_backends/git.py` — local Git and sparse Git backend implementations.
+- `src/sv/source_backends/git.py` — local Git and sparse Git backend implementations plus shared Git/path/cache-lock helpers used by the factory.
 - `src/sv/stores.py` — config and manifest store adapters.
 - `tests/test_runtime.py` — runtime adapter tests.
 - `tests/test_process.py` — process adapter tests.
@@ -345,7 +349,7 @@ Create `src/sv/runtime.py` with:
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 from pathlib import Path
@@ -472,19 +476,21 @@ Expected: fails because `ConcurrencyConfig` and `OrderedExecutor` do not exist.
 
 In `src/sv/parallel.py`:
 
+- Add `from dataclasses import dataclass, field`.
 - Add:
 
 ```python
 @dataclass(frozen=True)
 class ConcurrencyConfig:
     env: Mapping[str, str] | None = None
-    cpu_count: Callable[[], int | None] = os.cpu_count
+    cpu_count: Callable[[], int | None] | None = None
 
     def jobs(self) -> int:
         values = os.environ if self.env is None else self.env
         raw_value = values.get("SV_JOBS")
         if raw_value is None:
-            return min(_DEFAULT_MAX_JOBS, (self.cpu_count() or 1) + 4)
+            detected_cpu_count = (self.cpu_count or os.cpu_count)() or 1
+            return min(_DEFAULT_MAX_JOBS, detected_cpu_count + 4)
         try:
             jobs = int(raw_value, 10)
         except ValueError as exc:
@@ -496,7 +502,7 @@ class ConcurrencyConfig:
 
 @dataclass(frozen=True)
 class OrderedExecutor:
-    config: ConcurrencyConfig = ConcurrencyConfig()
+    config: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
 
     def map(self, items: Iterable[T], worker: Callable[[T], R], *, jobs: int | None = None) -> list[R]:
         worker_count = self.config.jobs() if jobs is None else jobs
@@ -504,7 +510,8 @@ class OrderedExecutor:
 ```
 
 - Move the body of `map_ordered()` into private `_map_ordered_with_worker_count(...)`.
-- Keep `configured_jobs(env=None)` as `return ConcurrencyConfig(env=env).jobs()`.
+- Preserve current validation order: compute and validate `worker_count` before returning for an empty input list, so invalid `SV_JOBS` still fails even for `map_ordered([], ...)`.
+- Keep `configured_jobs(env=None)` as `return ConcurrencyConfig(env=env).jobs()`; with `cpu_count=None`, this must still read `os.cpu_count` at call time so existing monkeypatch tests keep working.
 - Keep `map_ordered(...)` as `return OrderedExecutor().map(items, worker, jobs=jobs)`.
 
 - [ ] **Step 4: Validate `SV_JOBS` with runtime env at CLI entry**
@@ -601,14 +608,18 @@ Expected: fails with `ModuleNotFoundError: No module named 'sv.process'`.
 
 - [ ] **Step 3: Move runner code into `src/sv/process.py`**
 
-Create `src/sv/process.py` containing:
+Create `src/sv/process.py` containing only generic process-runner pieces:
 
 - `Runner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]]`
 - `DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 60`
+- `_COMMAND_TIMEOUT_EXIT_CODE = 124`
+- `_ALLOWED_GIT_PROTOCOLS = "file:https:ssh"`
 - `default_runner()` currently in `src/sv/source.py`
 - `_noninteractive_subprocess_env()` currently in `src/sv/source.py`
+- `_ssh_batch_mode_command()` currently in `src/sv/source.py`
 - `_timeout_error_message()` currently in `src/sv/source.py`
-- `_run_gh_api_with_limited_output()` and helper output-limit constants if moving them does not create import cycles
+- `_timeout_stream_text()` currently in `src/sv/source.py`
+- `_missing_git_guidance()` currently in `src/sv/source.py`
 - `default_process_runner()` currently in `src/sv/cli.py`
 
 Implementation guidance:
@@ -620,15 +631,25 @@ def default_process_runner(command: Sequence[str]) -> int:
 
 For `default_runner()`, preserve current timeout, text decoding, invalid UTF-8 replacement behavior, missing Git guidance, and noninteractive environment exactly.
 
+Do **not** move `_run_gh_api_with_limited_output()` or `_read_limited_process_output_file()` in this task. They currently raise `SourceBackendError`; moving them before Task 5 would create a `sv.process -> sv.source -> sv.process` cycle or force the source-backend error split too early. Leave them in `src/sv/source.py` for Task 4 and let them import/use the generic process constants/helpers as needed.
+
 - [ ] **Step 4: Add compatibility imports**
 
-In `src/sv/source.py`, import and re-export the moved names:
+In `src/sv/source.py`, import and re-export the moved process names that existing tests or downstream imports may reach through `sv.source`:
 
 ```python
-from sv.process import Runner, default_runner
+from sv.process import (
+    DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+    Runner,
+    default_runner,
+    _COMMAND_TIMEOUT_EXIT_CODE,
+    _noninteractive_subprocess_env,
+    _timeout_error_message,
+    _timeout_stream_text,
+)
 ```
 
-If `_run_gh_api_with_limited_output`, `_noninteractive_subprocess_env`, or `_timeout_error_message` remain imported by tests or source code from `sv.source`, leave compatibility aliases in `sv.source`.
+Keep `_run_gh_api_with_limited_output()` and `_read_limited_process_output_file()` defined in `src/sv/source.py` in this task. Before committing, run `rg "source_module\._|from sv\.source import" tests/test_source.py tests -n` and ensure every moved process helper or constant still has a compatibility alias or the test has been intentionally retargeted.
 
 In `src/sv/cli.py`, import `default_process_runner` from `sv.process` and remove the local definition.
 
@@ -718,11 +739,12 @@ Move these from `src/sv/source.py` into `src/sv/source_backends/base.py`:
 - `SourceBackend` protocol
 - `SourceBackendError`
 - `SourceBackendFailure`
-- shared backend constants that are needed by multiple backend modules
+- `FakeSourceBackend`
+- shared backend constants/helpers needed by multiple backend modules, including source-relative path normalization and source metadata size enforcement used by `FakeSourceBackend`, GitHub backends, and Git/local backends
 
 In `src/sv/source.py`, re-export those names from `sv.source_backends.base`.
 
-Update imports in `src/sv/catalog.py` and `src/sv/source_cache.py` to import base types from `sv.source_backends.base`.
+Update imports in `src/sv/catalog.py` and `src/sv/source_cache.py` to import base types from `sv.source_backends.base`; after `sv.source.py` becomes a façade, these modules must not import backend base types from `sv.source` because that can create cycles.
 
 - [ ] **Step 4: Move GitHub backends**
 
@@ -733,9 +755,10 @@ Move GitHub-specific code from `src/sv/source.py` into `src/sv/source_backends/g
 - `GitHubGhApiBackend`
 - `GitHubHttpsApiBackend`
 - `parse_github_repo_ref`
-- GitHub API URL/content traversal helpers used only by those classes
+- `_run_gh_api_with_limited_output()` and `_read_limited_process_output_file()` now that `SourceBackendError` lives in `sv.source_backends.base`
+- GitHub API URL/content traversal helpers, GitHub constants, and response-size limits used only by those classes
 
-Keep backend names exactly `github-gh-api` and `github-https-api`.
+Keep backend names exactly `github-gh-api` and `github-https-api`. Retarget tests that monkeypatch GitHub private constants/helpers from `sv.source` to `sv.source_backends.github`; keep `sv.source` direct class/type imports compatible, but do not rely on a façade alias to propagate monkeypatches into moved module globals.
 
 - [ ] **Step 5: Move Git/local sparse backends**
 
@@ -748,9 +771,12 @@ Move Git/local source code from `src/sv/source.py` into `src/sv/source_backends/
 - `GitBloblessSparseBackend`
 - sparse checkout helpers
 - per-repo source cache lock helper
-- Git URL/path validation helpers required by the factory
+- `ensure_source_repo()` and `ensure_source_repos()`
+- `list_source_skills()`
+- `reject_symlinked_source_cache_path()` and source path safety helpers
+- Git URL/path validation helpers required by the factory, including `_validate_repo_url()` and `_local_source_repo_path()`
 
-Preserve per-repo sparse checkout locking exactly.
+Preserve per-repo sparse checkout locking exactly. Update `src/sv/catalog.py` to import `LocalGitSourceBackend` and `reject_symlinked_source_cache_path` from `sv.source_backends.git`, not from the `sv.source` compatibility façade.
 
 - [ ] **Step 6: Move factory**
 
@@ -761,17 +787,32 @@ Move `source_backends_for_repo()` into `src/sv/source_backends/factory.py`.
 ```python
 from sv.source_backends.base import SourceBackend, SourceBackendError, SourceBackendFailure
 from sv.source_backends.factory import source_backends_for_repo
-from sv.source_backends.github import GitHubGhApiBackend, GitHubHttpsApiBackend
+from sv.source_backends.github import (
+    GitHubGhApiBackend,
+    GitHubHttpResponse,
+    GitHubHttpsApiBackend,
+    GitHubRepoRef,
+    parse_github_repo_ref,
+)
 from sv.source_backends.git import (
     GitBloblessSparseBackend,
     GitLocalSourceBackend,
     GitSparseSourceBackend,
     GitTreelessPartialBackend,
     LocalGitSourceBackend,
+    reject_symlinked_source_cache_path,
 )
 ```
 
-`src/sv/source.py` should become a compatibility façade that re-exports all names that existing tests import from `sv.source`.
+`src/sv/source.py` should become a compatibility façade that re-exports all public/source-test imported names from `sv.source`, including `FakeSourceBackend`, `ensure_source_repo`, `ensure_source_repos`, `list_source_skills`, `reject_symlinked_source_cache_path`, `GitHubRepoRef`, `GitHubHttpResponse`, all backend classes, `SourceBackend`, `SourceBackendError`, `SourceBackendFailure`, `Runner`, and `default_runner`. If any legacy helper is intentionally left implemented in `sv.source` for this migration, call that out in a comment and keep its dependencies acyclic; do not leave its destination ambiguous.
+
+Compatibility audit before Step 7:
+
+```bash
+rg "from sv\.source import|source_module\." tests/test_source.py tests/test_source_cache.py tests/test_cli_* tests/test_global_manifest.py tests/test_vault_mode_targets.py
+```
+
+For direct imports, keep `sv.source` re-exports. For tests that monkeypatch private implementation details such as `_MAX_GITHUB_API_RESPONSE_BYTES`, `_MAX_GITHUB_MATERIALIZATION_BYTES`, `base64.b64decode`, `subprocess.run`, `validate_materialization_source_tree`, `shutil.copytree`, or private helper functions, retarget the monkeypatch to the new implementation module (`sv.source_backends.github`, `sv.source_backends.git`, or `sv.process`) so the monkeypatch affects the code path under test.
 
 - [ ] **Step 7: Run focused verification**
 
@@ -802,12 +843,9 @@ git commit -m "refactor: split source backend adapters"
 
 - [ ] **Step 1: Write failing materialization adapter tests**
 
-Append to `tests/test_materialization.py`:
+Add `MaterializationAdapter` to the existing grouped `from sv.materialization import (...)` block in `tests/test_materialization.py`, then append these tests:
 
 ```python
-from sv.materialization import MaterializationAdapter
-
-
 def test_materialization_adapter_installs_temp_folder(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
@@ -867,46 +905,67 @@ Expected: fails because `MaterializationAdapter` does not exist.
 
 In `src/sv/materialization.py`:
 
-- Rename existing public function bodies to private implementations:
-  - `_copy_skill_folder_to_temp_impl`
-  - `_install_materialized_skill_folder_impl`
-  - `_replace_with_materialized_skill_folder_impl`
-  - `_validate_materialization_source_tree_impl`
-  - `_remove_materialization_path_impl`
-- Add:
+- Do **not** rename the existing public function bodies in this task. Existing tests monkeypatch `materialization_module.validate_materialization_source_tree` and expect `copy_skill_folder_to_temp()` to call that public symbol. Keep those public functions as the canonical implementations for now.
+- Add the adapter as a thin delegating façade over the existing public functions:
 
 ```python
 @dataclass(frozen=True)
 class MaterializationAdapter:
-    def copy_skill_folder_to_temp(self, source: Path, temp_target: Path, *, error_message: str) -> None:
-        _copy_skill_folder_to_temp_impl(source, temp_target, error_message=error_message)
+    def copy_skill_folder_to_temp(self, source: Path, temp_target: Path, *, error_message: str) -> Path:
+        return copy_skill_folder_to_temp(source, temp_target, error_message=error_message)
 
-    def install_materialized_skill_folder(self, materialized_target: Path, target: Path, *, after_install: Callable[[], None] | None = None) -> None:
-        _install_materialized_skill_folder_impl(materialized_target, target, after_install=after_install)
+    def install_materialized_skill_folder(
+        self,
+        materialized_target: Path,
+        target: Path,
+        *,
+        error_message: str = "Failed to install materialized skill folder",
+        after_install: Callable[[], None] | None = None,
+    ) -> None:
+        install_materialized_skill_folder(
+            materialized_target,
+            target,
+            error_message=error_message,
+            after_install=after_install,
+        )
 
-    def replace_with_materialized_skill_folder(self, materialized_target: Path, target: Path, backup_target: Path, *, after_replace: Callable[[], None] | None = None) -> None:
-        _replace_with_materialized_skill_folder_impl(materialized_target, target, backup_target, after_replace=after_replace)
+    def replace_with_materialized_skill_folder(
+        self,
+        materialized_target: Path,
+        target: Path,
+        backup_target: Path,
+        *,
+        error_message: str = "Failed to replace materialized skill folder",
+        after_replace: Callable[[], None] | None = None,
+    ) -> None:
+        replace_with_materialized_skill_folder(
+            materialized_target,
+            target,
+            backup_target,
+            error_message=error_message,
+            after_replace=after_replace,
+        )
 
     def validate_materialization_source_tree(self, source: Path) -> None:
-        _validate_materialization_source_tree_impl(source)
+        validate_materialization_source_tree(source)
 
-    def remove_materialization_path(self, path: Path) -> None:
-        _remove_materialization_path_impl(path)
+    def remove_materialization_path(self, path: Path, *, ignore_errors: bool = False) -> None:
+        remove_materialization_path(path, ignore_errors=ignore_errors)
 
 
 DEFAULT_MATERIALIZATION_ADAPTER = MaterializationAdapter()
 ```
 
-- Keep existing public functions as wrappers delegating to `DEFAULT_MATERIALIZATION_ADAPTER`.
+The default adapter error messages are only for direct adapter use in tests or future callers. Existing public functions still require their current explicit `error_message` arguments.
 
 - [ ] **Step 4: Route project internals through the adapter wrappers**
 
-In `src/sv/project.py`, keep imports of public materialization functions or switch to `DEFAULT_MATERIALIZATION_ADAPTER`. Do not change operation order. If switching to the adapter, update each current call site to use the matching method:
+In `src/sv/project.py`, keep imports of public materialization functions or switch to `DEFAULT_MATERIALIZATION_ADAPTER`. Do not change operation order. If switching to the adapter, update each current call site to use the matching method and pass the existing explicit `error_message` strings for install/replace operations:
 
 - copy/stage source skill folder
 - install prepared temp folder
 - replace target with prepared temp and backup
-- cleanup temp/backup paths
+- cleanup temp/backup paths, including existing `ignore_errors=True` behavior
 
 - [ ] **Step 5: Run focused verification**
 
@@ -1010,10 +1069,19 @@ Create `src/sv/stores.py`:
 ```python
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sv.config import RepoChangeResult, SvConfig, SvPaths, add_repo, load_config, remove_repo
+from sv.config import (
+    RepoChangeResult,
+    RepoConfig,
+    SvConfig,
+    SvPaths,
+    add_repo as add_repo_config,
+    load_config as load_sv_config,
+    remove_repo as remove_repo_config,
+)
 from sv.manifest import (
     GlobalSourceState,
     ManifestEntry,
@@ -1051,13 +1119,13 @@ class ConfigStore:
     paths: SvPaths
 
     def load(self) -> SvConfig:
-        return load_config(self.paths)
+        return load_sv_config(self.paths)
 
-    def add_repo(self, repo: str, *, skills_paths: list[str] | None = None) -> RepoChangeResult:
-        return add_repo(self.paths, repo, skills_paths=skills_paths or [])
+    def add_repo(self, repo: str, *, skills_paths: Sequence[str] = ()) -> RepoChangeResult:
+        return add_repo_config(self.paths, repo, skills_paths=skills_paths)
 
-    def remove_repo(self, repo_id: str):
-        return remove_repo(self.paths, repo_id)
+    def remove_repo(self, repo_id: str) -> RepoConfig:
+        return remove_repo_config(self.paths, repo_id)
 ```
 
 Adjust signatures to match current `add_repo()` / `remove_repo()` definitions exactly.
@@ -1066,13 +1134,14 @@ Adjust signatures to match current `add_repo()` / `remove_repo()` definitions ex
 
 In `src/sv/project.py`:
 
-- Replace direct `load_manifest(project_skills_dir)` / `save_manifest(project_skills_dir, manifest)` pairs inside add/remove/sync/update workflows with `ProjectManifestStore(project_skills_dir).load()` and `.save(...)`.
+- Replace direct `load_manifest(project_skills_dir)` / `save_manifest(project_skills_dir, manifest)` pairs inside add/remove/sync/update/refresh workflows with `ProjectManifestStore(project_skills_dir).load()` and `.save(...)`. This includes `_refresh_skill_states()` and `_refresh_local_skill_states()`.
 - Preserve all existing manifest mutation order and rollback callbacks.
+- Keep `upsert_manifest_entry()` and `remove_manifest_entry()` for Pi-target helper semantics unless you add equivalent explicit `ProjectManifestStore` methods and tests in this task; do not silently replace them with generic load/mutate/save code.
 
 In `src/sv/cli.py`:
 
-- Use `ConfigStore(paths).load()` where config is loaded for source commands.
-- Use `ConfigStore(paths).add_repo(...)` and `.remove_repo(...)` in repo command handlers.
+- Keep `_load_config_for_source_command(paths)` as the single entry point for source-command config loading so first-run prompt/guidance behavior is unchanged; inside that helper, use `ConfigStore(paths).load()` for the raw config read.
+- Use `ConfigStore(paths).add_repo(...)` and `.remove_repo(...)` in repo command handlers and initial-source prompting.
 - Use `GlobalManifestStore(paths)` where global source state is read/written.
 
 Keep the public functions in `sv.config` and `sv.manifest` unchanged.
@@ -1082,7 +1151,7 @@ Keep the public functions in `sv.config` and `sv.manifest` unchanged.
 Run:
 
 ```bash
-uv run pytest tests/test_stores.py tests/test_manifest.py tests/test_config.py tests/test_project.py tests/test_cli.py -q --no-cov
+uv run pytest tests/test_stores.py tests/test_manifest.py tests/test_config.py tests/test_project.py tests/test_cli.py tests/test_first_run_source_config.py -q --no-cov
 ```
 
 Expected: all tests pass.
@@ -1248,10 +1317,11 @@ Append to `tests/test_cli.py`:
 
 ```python
 
-def test_handle_validates_sv_jobs_from_injected_environment(tmp_path, monkeypatch):
-    from sv.cli import handle, parse
-    from sv.runtime import Runtime
+def test_handle_validates_sv_jobs_from_injected_environment(tmp_path):
     from io import StringIO
+
+    from sv.cli import handle
+    from sv.runtime import Runtime
 
     runtime = Runtime(
         cwd=tmp_path,
@@ -1262,9 +1332,18 @@ def test_handle_validates_sv_jobs_from_injected_environment(tmp_path, monkeypatc
         stderr=StringIO(),
     )
 
-    exit_code = handle(parse(["list"]), cwd=runtime.cwd, home=runtime.home, runtime=runtime)
+    exit_code = handle(
+        parse(["list"]),
+        cwd=runtime.cwd,
+        home=runtime.home,
+        runtime=runtime,
+    )
 
     assert exit_code == 1
+    assert (
+        "SV_JOBS must be an integer between 1 and 64."
+        in runtime.stderr.getvalue()
+    )
 ```
 
 Append to `tests/test_ui.py`:
@@ -1273,7 +1352,10 @@ Append to `tests/test_ui.py`:
 
 def test_plain_output_and_tty_ui_are_separate_adapter_instances():
     plain = PlainOutput()
-    tty = TtyUi(selector=lambda items, **kwargs: list(items), table_browser=lambda headers, rows, **kwargs: None)
+    tty = TtyUi(
+        selector=lambda items, **kwargs: list(items),
+        table_browser=lambda headers, rows, **kwargs: None,
+    )
 
     assert plain.table(["A"], [["B"]]).splitlines()[0] == "A"
     assert tty.select_many(["alpha"]) == ["alpha"]
@@ -1294,25 +1376,39 @@ Expected: CLI test fails because `handle()` has no `runtime` parameter; UI test 
 
 In `src/sv/cli.py`:
 
-- Update `handle()` signature to include `runtime: Runtime | None = None` after injected chooser arguments.
-- At the top of `handle()`:
+- Update `handle()` signature to include a keyword-only `runtime: Runtime | None = None` after injected chooser arguments, preserving existing positional compatibility for `git_runner`, `process_runner`, `skill_selector`, and `skill_chooser`.
+- At the top of `handle()`, before the `try` block:
 
 ```python
-runtime = Runtime(cwd=cwd, home=home, env=os.environ, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr) if runtime is None else runtime
+runtime = (
+    Runtime(
+        cwd=cwd,
+        home=home,
+        env=os.environ,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+    if runtime is None
+    else runtime
+)
+cwd = runtime.cwd
+home = runtime.home
 paths = SvPaths.from_home(runtime.home)
 ```
 
-Import `os` only if needed. If `cli.py` already uses `sys`, keep existing `sys` import.
+Import `os`, and import `Runtime` from `sv.runtime`. If `cli.py` already uses `sys`, keep the existing `sys` import.
 
-- Use `runtime.cwd` and `runtime.home` for local variables where `cwd`/`home` are currently used at handle entry.
+- Use `runtime.cwd` and `runtime.home` for local variables where `cwd`/`home` are currently used at handle entry, including the `record_global_source_state = _should_record_global_source_state(cwd, home)` calculation.
 - Replace the early `configured_jobs()` call with `configured_jobs(runtime.env)`.
-- Keep downstream helper signatures unchanged unless a helper needs runtime immediately.
+- In the top-level `except SvError as exc` block, print to `runtime.stderr` instead of `sys.stderr`.
+- Keep downstream helper signatures unchanged unless a helper needs runtime immediately. When later migrating prompt or terminal-width helpers, use `runtime.can_prompt()`, `runtime.prompt()`, and `runtime.width()` rather than adding new direct `sys.stdin`/`sys.stdout`/`input()`/`shutil.get_terminal_size()` reads.
 
 - [ ] **Step 4: Use stores and adapters at service boundaries**
 
 In `src/sv/cli.py`:
 
-- Use `ConfigStore(paths)` for config load/add/remove in command handlers.
+- Use `ConfigStore(paths)` for repo add/remove and raw config reads inside existing config-loading helpers. Do not replace calls to `_load_config_for_source_command(paths)` with bare `ConfigStore(paths).load()`.
 - Use `GlobalManifestStore(paths)` for global source-state functions.
 - Use `browse_tty_table` and `select_tty_items` only through `sv.ui` imports.
 - Use `default_process_runner` from `sv.process`.
@@ -1330,7 +1426,7 @@ Do not change visible output strings in this task.
 Run:
 
 ```bash
-uv run pytest tests/test_cli.py tests/test_ui.py tests/test_project.py tests/test_parallel.py -q --no-cov
+uv run pytest tests/test_cli.py tests/test_first_run_source_config.py tests/test_ui.py tests/test_project.py tests/test_parallel.py -q --no-cov
 ```
 
 Expected: all tests pass.
@@ -1522,3 +1618,5 @@ If no fixes were needed, do not create an empty commit.
 - Each task starts with a failing test step.
 - Each task has exact paths, commands, expected results, and commit messages.
 - Final release gate matches `docs/testing.md` and `.github/workflows/tests.yml`.
+- Existing monkeypatch-heavy tests for `sv.source` and `sv.materialization` are either preserved through public compatibility behavior or intentionally retargeted to the new implementation modules in the task that moves those internals.
+- Runtime wiring preserves existing positional `handle()` compatibility while using injected env/stderr for top-level validation and errors.
