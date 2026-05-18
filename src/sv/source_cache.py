@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from _thread import RLock as RLockType
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -9,6 +10,7 @@ from typing import Any, cast
 import hashlib
 import os
 import stat
+import threading
 import uuid
 
 from sv.catalog import SourceSkill, normalize_source_relative_path
@@ -33,6 +35,19 @@ DEFAULT_SKILL_BODY_MAX_BYTES = 256 * 1024 * 1024
 CACHE_SCHEMA_VERSION = 1
 _MAX_CATALOG_CACHE_BYTES = 1 * 1024 * 1024
 _CATALOG_CACHE_DOCUMENT = "sv catalog cache"
+_CACHE_WRITE_LOCK = threading.RLock()
+_SOURCE_FALLBACK_LOCKS_GUARD = threading.Lock()
+_SOURCE_FALLBACK_LOCKS: dict[tuple[str, str], RLockType] = {}
+
+
+def _source_fallback_lock(entry: SourceSkill) -> RLockType:
+    key = (entry.repo_id, repo_source_key(entry.repo_url))
+    with _SOURCE_FALLBACK_LOCKS_GUARD:
+        lock = _SOURCE_FALLBACK_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _SOURCE_FALLBACK_LOCKS[key] = lock
+        return lock
 
 
 class CacheMode(Enum):
@@ -166,6 +181,26 @@ def store_skill_body_cache(
     source_reference: str,
     now: datetime,
 ) -> None:
+    with _CACHE_WRITE_LOCK:
+        return _store_skill_body_cache_locked(
+            paths,
+            source_skill_dir,
+            skill_name=skill_name,
+            content_hash=content_hash,
+            source_reference=source_reference,
+            now=now,
+        )
+
+
+def _store_skill_body_cache_locked(
+    paths: SvPaths,
+    source_skill_dir: Path,
+    *,
+    skill_name: str,
+    content_hash: str,
+    source_reference: str,
+    now: datetime,
+) -> None:
     skill_name = normalize_skill_name(skill_name)
     if not is_sha256_digest(content_hash):
         raise SvError("Skill body cache content hash must be a sha256 digest.")
@@ -236,6 +271,26 @@ def try_materialize_from_skill_body_cache(
     now: datetime,
     warn: Warn | None = None,
 ) -> bool:
+    with _CACHE_WRITE_LOCK:
+        return _try_materialize_from_skill_body_cache_locked(
+            paths,
+            content_hash=content_hash,
+            skill_name=skill_name,
+            destination=destination,
+            now=now,
+            warn=warn,
+        )
+
+
+def _try_materialize_from_skill_body_cache_locked(
+    paths: SvPaths,
+    *,
+    content_hash: str,
+    skill_name: str,
+    destination: Path,
+    now: datetime,
+    warn: Warn | None = None,
+) -> bool:
     skill_name = normalize_skill_name(skill_name)
     if not _cached_skill_body_is_valid(paths, content_hash, skill_name):
         return False
@@ -279,6 +334,24 @@ def try_materialize_from_skill_body_cache(
 
 
 def prune_skill_body_cache(
+    paths: SvPaths,
+    *,
+    now: datetime,
+    max_unused_seconds: int = DEFAULT_SKILL_BODY_MAX_UNUSED_SECONDS,
+    max_bytes: int = DEFAULT_SKILL_BODY_MAX_BYTES,
+    force: bool = False,
+) -> None:
+    with _CACHE_WRITE_LOCK:
+        return _prune_skill_body_cache_locked(
+            paths,
+            now=now,
+            max_unused_seconds=max_unused_seconds,
+            max_bytes=max_bytes,
+            force=force,
+        )
+
+
+def _prune_skill_body_cache_locked(
     paths: SvPaths,
     *,
     now: datetime,
@@ -343,6 +416,11 @@ def cache_summary(paths: SvPaths, *, now: datetime | None = None) -> CacheSummar
 
 
 def clean_cache(paths: SvPaths, *, now: datetime) -> CacheSummary:
+    with _CACHE_WRITE_LOCK:
+        return _clean_cache_locked(paths, now=now)
+
+
+def _clean_cache_locked(paths: SvPaths, *, now: datetime) -> CacheSummary:
     _validate_catalog_cache_paths(paths)
     prune_skill_body_cache(paths, now=now, force=True)
     return cache_summary(paths, now=now)
@@ -555,6 +633,11 @@ def _save_skill_body_metadata(paths: SvPaths, metadata: SkillBodyMetadata) -> No
 
 
 def _touch_skill_body_cache(paths: SvPaths, content_hash: str, now: datetime) -> None:
+    with _CACHE_WRITE_LOCK:
+        return _touch_skill_body_cache_locked(paths, content_hash, now)
+
+
+def _touch_skill_body_cache_locked(paths: SvPaths, content_hash: str, now: datetime) -> None:
     metadata = load_skill_body_metadata(paths, content_hash)
     _save_skill_body_metadata(
         paths,
@@ -669,6 +752,13 @@ def load_cached_catalog(
 
 
 def save_cached_catalog(
+    paths: SvPaths, repo: RepoConfig, document: CachedCatalogDocument
+) -> None:
+    with _CACHE_WRITE_LOCK:
+        return _save_cached_catalog_locked(paths, repo, document)
+
+
+def _save_cached_catalog_locked(
     paths: SvPaths, repo: RepoConfig, document: CachedCatalogDocument
 ) -> None:
     path = catalog_cache_path(paths, repo)
@@ -826,27 +916,48 @@ def attach_source_materializers(
             cached_entry: SourceSkill = entry,
             selected_repo: RepoConfig = repo,
         ) -> None:
-            failures: list[str] = []
-            for backend in backend_factory(selected_repo):
-                try:
-                    backend.materialize_folder(
-                        cached_entry.source_relative_path, destination
-                    )
-                    return
-                except SourceBackendError as exc:
-                    failures.append(f"{backend.name}: {exc.detail}")
-            details = (
-                "; ".join(failures) if failures else "no source backends were available"
-            )
-            raise SvError(
-                f"Failed to materialize {cached_entry.qualified_reference} from source: {details}."
-            )
+            with _source_fallback_lock(cached_entry):
+                failures: list[str] = []
+                for backend in backend_factory(selected_repo):
+                    try:
+                        backend.materialize_folder(
+                            cached_entry.source_relative_path, destination
+                        )
+                        return
+                    except SourceBackendError as exc:
+                        failures.append(f"{backend.name}: {exc.detail}")
+                details = (
+                    "; ".join(failures)
+                    if failures
+                    else "no source backends were available"
+                )
+                raise SvError(
+                    f"Failed to materialize {cached_entry.qualified_reference} from source: {details}."
+                )
 
         attached.append(replace(entry, _materializer=materialize))
     return attached
 
 
 def record_cached_skill_body_hash(
+    paths: SvPaths,
+    repo: RepoConfig,
+    entry: SourceSkill,
+    *,
+    content_hash: str,
+    skill_file_hash: str,
+) -> None:
+    with _CACHE_WRITE_LOCK:
+        return _record_cached_skill_body_hash_locked(
+            paths,
+            repo,
+            entry,
+            content_hash=content_hash,
+            skill_file_hash=skill_file_hash,
+        )
+
+
+def _record_cached_skill_body_hash_locked(
     paths: SvPaths,
     repo: RepoConfig,
     entry: SourceSkill,
@@ -955,24 +1066,25 @@ def _wrap_source_skill(
             )
 
         if entry.source_backend.startswith("cache:"):
-            if refresh_entry_on_body_miss is None:
-                raise SvError(
-                    f"Cached skill body for {entry.qualified_reference} was not found and no source refresh was provided."
-                )
-            refreshed = refresh_entry_on_body_miss(entry)
-            if refreshed is None:
-                raise SvError(
-                    f"Refreshed source metadata did not include {entry.qualified_reference}."
-                )
-            _wrap_source_skill(
-                refreshed,
-                paths,
-                now=now,
-                after_store=after_store,
-                allow_source_fallback=True,
-                refresh_entry_on_body_miss=None,
-                warn=warn,
-            ).materialize_to(destination)
+            with _source_fallback_lock(entry):
+                if refresh_entry_on_body_miss is None:
+                    raise SvError(
+                        f"Cached skill body for {entry.qualified_reference} was not found and no source refresh was provided."
+                    )
+                refreshed = refresh_entry_on_body_miss(entry)
+                if refreshed is None:
+                    raise SvError(
+                        f"Refreshed source metadata did not include {entry.qualified_reference}."
+                    )
+                _wrap_source_skill(
+                    refreshed,
+                    paths,
+                    now=now,
+                    after_store=after_store,
+                    allow_source_fallback=True,
+                    refresh_entry_on_body_miss=None,
+                    warn=warn,
+                ).materialize_to(destination)
             return
 
         try:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from _thread import RLock as RLockType
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import hashlib
 from pathlib import Path, PurePosixPath
+import threading
 import unicodedata
 
 from sv.config import RepoConfig, SvPaths, repo_source_key
@@ -427,6 +429,7 @@ def _catalog_entries_from_backend(
     warn: Callable[[str], None] | None,
 ) -> _BackendCatalogResult:
     index_content = backend.read_index()
+    materialize_lock = threading.RLock()
     if index_content is not None:
         from sv.index import load_index_bytes
 
@@ -441,6 +444,7 @@ def _catalog_entries_from_backend(
                 repo_aliases,
                 backend,
                 index,
+                materialize_lock,
             ),
             index_hash=f"sha256:{hashlib.sha256(index_content).hexdigest()}",
         )
@@ -487,7 +491,9 @@ def _catalog_entries_from_backend(
                 source_relative_path=source_relative_path,
                 repo_aliases=repo_aliases,
                 source_backend=backend.name,
-                _materializer=_backend_materializer(backend, source_relative_path),
+                _materializer=_backend_materializer(
+                    backend, source_relative_path, materialize_lock
+                ),
             )
         )
     return _BackendCatalogResult(entries=entries, index_hash=None)
@@ -499,6 +505,7 @@ def _catalog_entries_from_index(
     repo_aliases: tuple[str, ...],
     backend: SourceBackend,
     index,
+    materialize_lock: RLockType,
 ) -> list[SourceSkill]:
     entries: list[SourceSkill] = []
     for index_entry in index.skills:
@@ -522,7 +529,9 @@ def _catalog_entries_from_index(
                 source_backend=backend.name,
                 source_content_hash=index_entry.content_hash,
                 source_skill_file_hash=index_entry.skill_file_hash,
-                _materializer=_backend_materializer(backend, source_relative_path),
+                _materializer=_backend_materializer(
+                    backend, source_relative_path, materialize_lock
+                ),
             )
         )
     return entries
@@ -537,10 +546,16 @@ def _source_path_for_backend(
 
 
 def _backend_materializer(
-    backend: SourceBackend, source_relative_path: str
+    backend: SourceBackend,
+    source_relative_path: str,
+    lock: RLockType | None = None,
 ) -> Callable[[Path], None]:
     def materialize(destination: Path) -> None:
-        backend.materialize_folder(source_relative_path, destination)
+        if lock is None:
+            backend.materialize_folder(source_relative_path, destination)
+            return
+        with lock:
+            backend.materialize_folder(source_relative_path, destination)
 
     return materialize
 

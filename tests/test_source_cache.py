@@ -5,7 +5,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 import os
+import shutil
 import stat
+import threading
 import time
 
 import pytest
@@ -117,7 +119,21 @@ def _repo() -> RepoConfig:
     return RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
 
 
-def _catalog_document(refreshed_at: str) -> CachedCatalogDocument:
+def _catalog_document(
+    refreshed_at: str,
+    *,
+    entries: tuple[CachedCatalogEntry, ...] | None = None,
+) -> CachedCatalogDocument:
+    if entries is None:
+        entries = (
+            CachedCatalogEntry(
+                name="find-docs",
+                description="Find documentation.",
+                source_path="skills/find-docs",
+                content_hash="sha256:25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
+                skill_file_hash="sha256:c651ccb96b0c0e490de4cc12b9b46d643e6dba87840fab27e2c8d4d5cc2037fa",
+            ),
+        )
     document = CachedCatalogDocument(
         repo_id="Org/Skills",
         repo_url="https://github.com/Org/Skills.git",
@@ -127,15 +143,7 @@ def _catalog_document(refreshed_at: str) -> CachedCatalogDocument:
         refreshed_at=refreshed_at,
         catalog_hash="sha256:" + ("0" * 64),
         index_hash="sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c",
-        entries=(
-            CachedCatalogEntry(
-                name="find-docs",
-                description="Find documentation.",
-                source_path="skills/find-docs",
-                content_hash="sha256:25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
-                skill_file_hash="sha256:c651ccb96b0c0e490de4cc12b9b46d643e6dba87840fab27e2c8d4d5cc2037fa",
-            ),
-        ),
+        entries=entries,
     )
     return replace(document, catalog_hash=_cached_catalog_hash(document))
 
@@ -3179,3 +3187,287 @@ def test_restrict_private_cache_dir_reports_unexpected_mode(
 
     with pytest.raises(SvError, match="mode is 0o755"):
         source_cache._restrict_private_cache_dir(directory)
+
+
+def test_record_cached_skill_body_hash_preserves_parallel_updates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    alpha = _source_skill(repo, paths, "alpha")
+    beta = _source_skill(repo, paths, "beta")
+    document = _catalog_document(
+        "2026-05-18T12:00:00Z",
+        entries=(
+            CachedCatalogEntry("alpha", "Alpha skill.", "skills/alpha"),
+            CachedCatalogEntry("beta", "Beta skill.", "skills/beta"),
+        ),
+    )
+    save_cached_catalog(paths, repo, document)
+
+    alpha_hash = "sha256:" + "a" * 64
+    alpha_skill_file_hash = "sha256:" + "b" * 64
+    beta_hash = "sha256:" + "c" * 64
+    beta_skill_file_hash = "sha256:" + "d" * 64
+
+    original_save_cached_catalog = source_cache.save_cached_catalog
+    active_saves = 0
+    active_saves_lock = threading.Lock()
+    first_save_waiting = threading.Event()
+    concurrent_save_entered = threading.Event()
+
+    def coordinated_save_cached_catalog(
+        save_paths: SvPaths,
+        save_repo: RepoConfig,
+        save_document: CachedCatalogDocument,
+    ) -> None:
+        nonlocal active_saves
+        with active_saves_lock:
+            active_saves += 1
+            active_count = active_saves
+            if active_count == 1:
+                first_save_waiting.set()
+            else:
+                concurrent_save_entered.set()
+        if active_count == 1:
+            concurrent_save_entered.wait(0.5)
+        else:
+            assert first_save_waiting.is_set(), "first catalog save did not start"
+        try:
+            original_save_cached_catalog(save_paths, save_repo, save_document)
+        finally:
+            with active_saves_lock:
+                active_saves -= 1
+            concurrent_save_entered.set()
+
+    monkeypatch.setattr(
+        source_cache,
+        "save_cached_catalog",
+        coordinated_save_cached_catalog,
+    )
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def record(entry: SourceSkill, content_hash: str, skill_file_hash: str) -> None:
+        try:
+            barrier.wait(2)
+            record_cached_skill_body_hash(
+                paths,
+                repo,
+                entry,
+                content_hash=content_hash,
+                skill_file_hash=skill_file_hash,
+            )
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    first = threading.Thread(target=record, args=(alpha, alpha_hash, alpha_skill_file_hash))
+    second = threading.Thread(target=record, args=(beta, beta_hash, beta_skill_file_hash))
+    first.start()
+    second.start()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    updated = load_cached_catalog(paths, repo)
+    assert updated is not None
+    by_name = {entry.name: entry for entry in updated.entries}
+    assert by_name["alpha"].content_hash == alpha_hash
+    assert by_name["alpha"].skill_file_hash == alpha_skill_file_hash
+    assert by_name["beta"].content_hash == beta_hash
+    assert by_name["beta"].skill_file_hash == beta_skill_file_hash
+
+
+def test_cached_body_miss_source_fallback_serializes_same_repo_materialization(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    cached_alpha = replace(
+        _source_skill(repo, paths, "alpha"),
+        source_backend="cache:github-https-api",
+        source_content_hash="sha256:" + "a" * 64,
+    )
+    cached_beta = replace(
+        _source_skill(repo, paths, "beta"),
+        source_backend="cache:github-https-api",
+        source_content_hash="sha256:" + "b" * 64,
+    )
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+    alpha_inside = threading.Event()
+    beta_thread_started = threading.Event()
+    beta_inside = threading.Event()
+    release = threading.Event()
+
+    def blocking_materializer(name: str):
+        def materialize(destination: Path) -> None:
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+                if name == "alpha":
+                    alpha_inside.set()
+                else:
+                    beta_inside.set()
+            try:
+                assert release.wait(2), "test did not release source fallback"
+                destination.mkdir(parents=True, exist_ok=True)
+                (destination / "SKILL.md").write_text(
+                    "---\n"
+                    f"name: {name}\n"
+                    "description: Fallback skill.\n"
+                    "---\n"
+                )
+                (destination / "notes.md").write_text(f"{name} fallback\n")
+            finally:
+                with active_lock:
+                    active -= 1
+
+        return materialize
+
+    refreshed_by_name = {
+        "alpha": replace(
+            cached_alpha,
+            source_backend="fake-remote",
+            source_content_hash=None,
+            _materializer=blocking_materializer("alpha"),
+        ),
+        "beta": replace(
+            cached_beta,
+            source_backend="fake-remote",
+            source_content_hash=None,
+            _materializer=blocking_materializer("beta"),
+        ),
+    }
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [cached_alpha, cached_beta],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        after_store=lambda *_args: None,
+        refresh_entry_on_body_miss=lambda entry: refreshed_by_name[entry.name],
+    )
+    errors: list[BaseException] = []
+
+    def run_materialize(entry: SourceSkill, destination: Path) -> None:
+        try:
+            if entry.name == "beta":
+                beta_thread_started.set()
+            entry.materialize_to(destination)
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    first = threading.Thread(target=run_materialize, args=(wrapped[0], tmp_path / "alpha-dest"))
+    second = threading.Thread(target=run_materialize, args=(wrapped[1], tmp_path / "beta-dest"))
+    first.start()
+    assert alpha_inside.wait(2), "first source fallback did not start"
+    second.start()
+    assert beta_thread_started.wait(2), "second source fallback thread did not start"
+    assert not beta_inside.wait(0.25), "same-repo source fallback materialization overlapped"
+    release.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert beta_inside.is_set(), "second source fallback never ran after first released"
+    assert max_active == 1
+    assert (tmp_path / "alpha-dest" / "notes.md").read_text() == "alpha fallback\n"
+    assert (tmp_path / "beta-dest" / "notes.md").read_text() == "beta fallback\n"
+
+
+def test_attach_source_materializers_serializes_same_repo_cached_entries(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    source_root = tmp_path / "remote"
+    _write_skill_tree(source_root / "skills", "alpha", "alpha fallback\n")
+    _write_skill_tree(source_root / "skills", "beta", "beta fallback\n")
+    cached_alpha = replace(
+        _source_skill(repo, paths, "alpha"),
+        source_backend="cache:github-https-api",
+    )
+    cached_beta = replace(
+        _source_skill(repo, paths, "beta"),
+        source_backend="cache:github-https-api",
+    )
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+    alpha_inside = threading.Event()
+    beta_thread_started = threading.Event()
+    beta_inside = threading.Event()
+    release = threading.Event()
+
+    class BlockingBackend:
+        name = "blocking"
+
+        def read_index(self) -> bytes | None:
+            raise AssertionError("fallback materialization test should not read indexes")
+
+        def list_candidate_skill_files(self, configured_skills_paths=()):
+            raise AssertionError("fallback materialization test should not list skills")
+
+        def read_file(self, path: str) -> bytes:
+            raise AssertionError("fallback materialization test should not read files")
+
+        def materialize_folder(self, source_path: str, destination: Path) -> None:
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+                if source_path.endswith("/alpha"):
+                    alpha_inside.set()
+                else:
+                    beta_inside.set()
+            try:
+                assert release.wait(2), "test did not release source fallback"
+                source = source_root / Path(*source_path.split("/"))
+                shutil.copytree(source, destination)
+            finally:
+                with active_lock:
+                    active -= 1
+
+    def backend_factory(selected_repo: RepoConfig):
+        assert selected_repo == repo
+        return (BlockingBackend(),)
+
+    attached = attach_source_materializers(
+        [cached_alpha, cached_beta],
+        [repo],
+        backend_factory=backend_factory,
+    )
+    errors: list[BaseException] = []
+
+    def run_materialize(entry: SourceSkill, destination: Path) -> None:
+        try:
+            if entry.name == "beta":
+                beta_thread_started.set()
+            entry.materialize_to(destination)
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    first = threading.Thread(target=run_materialize, args=(attached[0], tmp_path / "alpha-attached"))
+    second = threading.Thread(target=run_materialize, args=(attached[1], tmp_path / "beta-attached"))
+    first.start()
+    assert alpha_inside.wait(2), "first attached fallback did not start"
+    second.start()
+    assert beta_thread_started.wait(2), "second attached fallback thread did not start"
+    assert not beta_inside.wait(0.25), "same-repo attached fallback materialization overlapped"
+    release.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert beta_inside.is_set(), "second attached fallback never ran after first released"
+    assert max_active == 1
+    assert (tmp_path / "alpha-attached" / "notes.md").read_text() == "alpha fallback\n"
+    assert (tmp_path / "beta-attached" / "notes.md").read_text() == "beta fallback\n"

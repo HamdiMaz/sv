@@ -1612,6 +1612,69 @@ def test_source_backend_failure_formats_actionable_message():
     )
 
 
+
+def test_sparse_backend_materialization_serializes_same_repo_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_path = tmp_path / "cache" / "repo"
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+    first_inside = threading.Event()
+    second_thread_started = threading.Event()
+    second_inside = threading.Event()
+    release = threading.Event()
+
+    def fake_prepare(*args, **kwargs):
+        return None
+
+    def fake_copy(self, source_path, destination):
+        nonlocal active, max_active
+        with active_lock:
+            active += 1
+            max_active = max(max_active, active)
+            if destination.name == "a":
+                first_inside.set()
+            else:
+                second_inside.set()
+        assert release.wait(2), "test did not release materialization"
+        with active_lock:
+            active -= 1
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha.\n---\n")
+
+    monkeypatch.setattr(source_module, "_ensure_sparse_git_repo", fake_prepare)
+    monkeypatch.setattr(source_module, "_remove_backend_cache_folder", lambda *args, **kwargs: None)
+    monkeypatch.setattr(source_module.GitLocalSourceBackend, "materialize_folder", fake_copy)
+
+    first = GitTreelessPartialBackend("https://example.com/repo.git", repo_path, runner=FakeRunner([]))
+    second = GitTreelessPartialBackend("https://example.com/repo.git", repo_path, runner=FakeRunner([]))
+    errors: list[BaseException] = []
+
+    def run_backend(backend, destination):
+        try:
+            if destination.name == "b":
+                second_thread_started.set()
+            backend.materialize_folder("skills/alpha", destination)
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    thread_a = threading.Thread(target=run_backend, args=(first, tmp_path / "a"))
+    thread_b = threading.Thread(target=run_backend, args=(second, tmp_path / "b"))
+    thread_a.start()
+    assert first_inside.wait(2), "first materialization did not start"
+    thread_b.start()
+    assert second_thread_started.wait(2), "second materialization thread did not start"
+    assert not second_inside.wait(0.25), "second materialization entered while first held same-repo lock"
+    release.set()
+    thread_a.join(2)
+    thread_b.join(2)
+
+    assert errors == []
+    assert second_inside.is_set(), "second materialization never ran after first released"
+    assert max_active == 1
+
 def test_ensure_source_repo_excludes_nested_skills_root_from_default_metadata(
     tmp_path: Path,
 ):

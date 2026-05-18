@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from _thread import RLock as RLockType
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -12,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import unicodedata
 from typing import Any, Protocol, cast
 from urllib import error as urllib_error
@@ -38,6 +40,26 @@ _MAX_GITHUB_API_RESPONSE_BYTES = 16 * 1024 * 1024
 _MAX_GITHUB_API_ERROR_BYTES = 64 * 1024
 _MAX_SOURCE_INDEX_BYTES = 4 * 1024 * 1024
 _MAX_SOURCE_SKILL_FILE_BYTES = 1024 * 1024
+
+_SOURCE_REPO_LOCKS_GUARD = threading.Lock()
+_SOURCE_REPO_LOCKS: dict[Path, RLockType] = {}
+
+
+def _source_repo_lock_key(repo_path: Path) -> Path:
+    try:
+        return repo_path.resolve()
+    except OSError:
+        return repo_path.absolute()
+
+
+def _source_repo_lock(repo_path: Path) -> RLockType:
+    key = _source_repo_lock_key(repo_path)
+    with _SOURCE_REPO_LOCKS_GUARD:
+        lock = _SOURCE_REPO_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _SOURCE_REPO_LOCKS[key] = lock
+        return lock
 
 
 @dataclass(frozen=True)
@@ -847,6 +869,10 @@ class GitSparseSourceBackend:
         return False
 
     def materialize_folder(self, source_path: str, destination: Path) -> None:
+        with _source_repo_lock(self.repo_path):
+            self._materialize_folder_locked(source_path, destination)
+
+    def _materialize_folder_locked(self, source_path: str, destination: Path) -> None:
         operation = "materializing selected folder"
         normalized_source_path = _normalize_backend_relative_path(source_path)
         self._prepare_checkout([_sparse_folder_pattern(normalized_source_path)], operation)
@@ -876,6 +902,10 @@ class GitSparseSourceBackend:
                 )
 
     def _prepare_checkout(self, patterns: Sequence[str], operation: str) -> None:
+        with _source_repo_lock(self.repo_path):
+            self._prepare_checkout_locked(patterns, operation)
+
+    def _prepare_checkout_locked(self, patterns: Sequence[str], operation: str) -> None:
         repo_existed_before = self.repo_path.exists() or self.repo_path.is_symlink()
         try:
             _ensure_sparse_git_repo(
@@ -1173,6 +1203,24 @@ def ensure_source_repo(
     update: bool = True,
     configured_skills_paths: Sequence[str] = (),
 ) -> None:
+    with _source_repo_lock(repo_path):
+        _ensure_source_repo_locked(
+            repo_url,
+            repo_path,
+            runner=runner,
+            update=update,
+            configured_skills_paths=configured_skills_paths,
+        )
+
+
+def _ensure_source_repo_locked(
+    repo_url: str,
+    repo_path: Path,
+    runner: Runner = default_runner,
+    *,
+    update: bool = True,
+    configured_skills_paths: Sequence[str] = (),
+) -> None:
     _validate_repo_url(repo_url)
     _reject_symlinked_source_path(repo_path, "Source repo cache path")
     _reject_symlinked_source_cache_ancestors(repo_path)
@@ -1182,7 +1230,7 @@ def ensure_source_repo(
     patterns = _metadata_sparse_patterns(configured_skills_paths)
     repo_existed_before_treeless = repo_path.exists() or repo_path.is_symlink()
     try:
-        _ensure_sparse_git_repo_after_git_check(
+        _ensure_sparse_git_repo_after_git_check_locked(
             repo_url,
             repo_path,
             runner,
@@ -1195,7 +1243,7 @@ def ensure_source_repo(
             raise
         _remove_failed_lightweight_checkout(repo_path)
         try:
-            _ensure_sparse_git_repo_after_git_check(
+            _ensure_sparse_git_repo_after_git_check_locked(
                 repo_url,
                 repo_path,
                 runner,
@@ -1244,12 +1292,32 @@ def _ensure_sparse_git_repo(
     sparse_patterns: Sequence[str],
     update: bool,
 ) -> None:
+    with _source_repo_lock(repo_path):
+        _ensure_sparse_git_repo_locked(
+            repo_url,
+            repo_path,
+            runner,
+            filter_spec=filter_spec,
+            sparse_patterns=sparse_patterns,
+            update=update,
+        )
+
+
+def _ensure_sparse_git_repo_locked(
+    repo_url: str,
+    repo_path: Path,
+    runner: Runner,
+    *,
+    filter_spec: str,
+    sparse_patterns: Sequence[str],
+    update: bool,
+) -> None:
     _validate_repo_url(repo_url)
     _reject_symlinked_source_path(repo_path, "Source repo cache path")
     _reject_symlinked_source_cache_ancestors(repo_path)
     _reject_symlinked_source_path(repo_path / ".git", "Source Git metadata path")
     _run_git(["--version"], cwd=None, runner=runner, action="Checking Git availability")
-    _ensure_sparse_git_repo_after_git_check(
+    _ensure_sparse_git_repo_after_git_check_locked(
         repo_url,
         repo_path,
         runner,
@@ -1260,6 +1328,26 @@ def _ensure_sparse_git_repo(
 
 
 def _ensure_sparse_git_repo_after_git_check(
+    repo_url: str,
+    repo_path: Path,
+    runner: Runner,
+    *,
+    filter_spec: str,
+    sparse_patterns: Sequence[str],
+    update: bool,
+) -> None:
+    with _source_repo_lock(repo_path):
+        _ensure_sparse_git_repo_after_git_check_locked(
+            repo_url,
+            repo_path,
+            runner,
+            filter_spec=filter_spec,
+            sparse_patterns=sparse_patterns,
+            update=update,
+        )
+
+
+def _ensure_sparse_git_repo_after_git_check_locked(
     repo_url: str,
     repo_path: Path,
     runner: Runner,
