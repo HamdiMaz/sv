@@ -166,6 +166,13 @@ class _ManifestUpdatePlan:
     target_style: _TargetStyle
 
 
+@dataclass(frozen=True)
+class _LocalStateRefresh:
+    key: str
+    entry: ManifestEntry
+    refreshed: ManifestEntry
+
+
 def normalize_skill_name(skill: str) -> str:
     """Return a safe single-folder skill name for source and project paths."""
     name = skill.strip()
@@ -998,8 +1005,7 @@ def _refresh_skill_states(
     if not entries:
         return
 
-    updated_entries = dict(entries)
-    changed = False
+    refresh_items: list[tuple[str, ManifestEntry, ProjectSourceSkill | None]] = []
     for key, manifest_entry in entries.items():
         if not _manifest_entry_matches_target(manifest_entry, target_style):
             continue
@@ -1007,15 +1013,31 @@ def _refresh_skill_states(
         target = project_skills_dir / manifest_entry.name
         _reject_symlinked_project_skill(target, target_style)
         _validate_project_skill_dir_name(target, target_style)
-        if not target.is_dir():
-            continue
-        refreshed = _refreshed_manifest_entry_state(
-            manifest_entry,
-            target,
-            _catalog_entry_for_manifest(catalog, manifest_entry),
+        if target.is_dir():
+            refresh_items.append(
+                (key, manifest_entry, _catalog_entry_for_manifest(catalog, manifest_entry))
+            )
+
+    def worker(
+        item: tuple[str, ManifestEntry, ProjectSourceSkill | None],
+    ) -> _LocalStateRefresh:
+        key, manifest_entry, source_entry = item
+        target = project_skills_dir / manifest_entry.name
+        return _LocalStateRefresh(
+            key=key,
+            entry=manifest_entry,
+            refreshed=_refreshed_manifest_entry_state(
+                manifest_entry,
+                target,
+                source_entry,
+            ),
         )
-        if refreshed != manifest_entry:
-            updated_entries[key] = refreshed
+
+    updated_entries = dict(entries)
+    changed = False
+    for result in map_ordered(refresh_items, worker):
+        if result.refreshed != result.entry:
+            updated_entries[result.key] = result.refreshed
             changed = True
 
     if changed:
@@ -1033,8 +1055,7 @@ def _refresh_local_skill_states(
     if not entries:
         return
 
-    updated_entries = dict(entries)
-    changed = False
+    refresh_items: list[tuple[str, ManifestEntry]] = []
     for key, manifest_entry in entries.items():
         if not _manifest_entry_matches_target(manifest_entry, target_style):
             continue
@@ -1042,8 +1063,12 @@ def _refresh_local_skill_states(
         target = project_skills_dir / manifest_entry.name
         _reject_symlinked_project_skill(target, target_style)
         _validate_project_skill_dir_name(target, target_style)
-        if not target.is_dir():
-            continue
+        if target.is_dir():
+            refresh_items.append((key, manifest_entry))
+
+    def worker(item: tuple[str, ManifestEntry]) -> _LocalStateRefresh:
+        key, manifest_entry = item
+        target = project_skills_dir / manifest_entry.name
         local_content_hash = sha256_skill_directory(
             target, expected_name=manifest_entry.name
         )
@@ -1051,13 +1076,21 @@ def _refresh_local_skill_states(
             manifest_entry.installed_content_hash is not None
             and local_content_hash != manifest_entry.installed_content_hash
         )
-        refreshed = replace(
-            manifest_entry,
-            local_content_hash=local_content_hash,
-            modified=modified,
+        return _LocalStateRefresh(
+            key=key,
+            entry=manifest_entry,
+            refreshed=replace(
+                manifest_entry,
+                local_content_hash=local_content_hash,
+                modified=modified,
+            ),
         )
-        if refreshed != manifest_entry:
-            updated_entries[key] = refreshed
+
+    updated_entries = dict(entries)
+    changed = False
+    for result in map_ordered(refresh_items, worker):
+        if result.refreshed != result.entry:
+            updated_entries[result.key] = result.refreshed
             changed = True
 
     if changed:

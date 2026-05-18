@@ -8,6 +8,7 @@ import pytest
 from tests.helpers import assert_no_partial_sv_dirs
 from sv import project as project_module
 from sv.agents import PiAdapter
+import sv.hashing as hashing_module
 from sv.catalog import SourceSkill
 from sv.errors import SvError
 from sv.hashing import sha256_skill_directory
@@ -21,6 +22,7 @@ from sv.project import (
     normalize_skill_name,
     remove_project_skill,
     sync_project_skills,
+    refresh_project_skill_local_states,
     update_project_skills,
 )
 
@@ -438,6 +440,45 @@ def test_add_all_project_skills_prepares_new_skills_in_parallel(
     ]
     assert sorted(path.name for path in project_skills.iterdir() if not path.name.startswith(".")) == ["alpha", "beta"]
     assert sorted(load_manifest(project_skills)) == ["alpha", "beta"]
+
+
+def test_refresh_project_skill_local_states_hashes_skills_in_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    source_root = tmp_path / "source"
+    project_skills.mkdir(parents=True)
+    alpha_materialize_started = threading.Event()
+    beta_materialize_started = threading.Event()
+    alpha = BlockingProjectSourceSkill(
+        "alpha", source_root, alpha_materialize_started, beta_materialize_started
+    )
+    beta = BlockingProjectSourceSkill(
+        "beta", source_root, beta_materialize_started, alpha_materialize_started
+    )
+    add_all_project_skills([alpha, beta], project_skills)
+
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    original_hash = hashing_module.sha256_skill_directory
+
+    def blocking_hash(path: Path, *, expected_name=None):
+        if path.name == "alpha":
+            alpha_started.set()
+            assert beta_started.wait(2), "local state hashing did not overlap"
+        if path.name == "beta":
+            beta_started.set()
+            assert alpha_started.wait(2), "local state hashing did not overlap"
+        return original_hash(path, expected_name=expected_name)
+
+    monkeypatch.setattr(hashing_module, "sha256_skill_directory", blocking_hash)
+
+    refresh_project_skill_local_states(project_skills)
+
+    manifest = load_manifest(project_skills)
+    assert manifest["alpha"].local_content_hash is not None
+    assert manifest["beta"].local_content_hash is not None
 
 
 def test_sync_project_skills_prepares_replacements_in_parallel(

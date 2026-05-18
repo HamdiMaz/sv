@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, cast
 import os
+import threading
 import tomllib
 
 import pytest
@@ -71,6 +72,35 @@ def test_scan_repo_for_index_recursively_includes_valid_skills_and_skips_build_d
     assert all(entry.skill_file_hash.startswith("sha256:") for entry in document.skills)
     assert warnings and "broken" in warnings[0]
     assert "description" in warnings[0]
+
+
+def test_scan_repo_for_index_hashes_candidate_skills_in_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+    _write_skill(tmp_path / "skills" / "beta", "beta", "Beta skill.")
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    original_hash = index_module.sha256_skill_directory
+
+    def blocking_hash(path: Path, *, expected_name=None):
+        if path.name == "alpha":
+            alpha_started.set()
+            assert beta_started.wait(2), "index skill hashing did not overlap"
+        if path.name == "beta":
+            beta_started.set()
+            assert alpha_started.wait(2), "index skill hashing did not overlap"
+        return original_hash(path, expected_name=expected_name)
+
+    monkeypatch.setattr(index_module, "sha256_skill_directory", blocking_hash)
+
+    document = scan_repo_for_index(tmp_path, generated_at="2026-05-18T12:00:00Z")
+
+    assert [(entry.name, entry.source_path) for entry in document.skills] == [
+        ("alpha", "skills/alpha"),
+        ("beta", "skills/beta"),
+    ]
 
 
 def test_scan_repo_for_index_honors_include_and_exclude_paths(tmp_path: Path):

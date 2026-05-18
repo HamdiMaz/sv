@@ -12,6 +12,7 @@ from sv.catalog import normalize_source_relative_path
 from sv.errors import SvError
 from sv.hashformat import SHA256_DIGEST_DESCRIPTION, is_sha256_digest
 from sv.hashing import sha256_file, sha256_skill_directory
+from sv.parallel import map_ordered
 from sv.project import normalize_skill_name
 from sv.skills import InvalidSkillError, parse_skill_file
 from sv.terminal import escape_terminal_controls
@@ -60,6 +61,12 @@ class IndexScanConfig:
     include_paths: tuple[str, ...] = ()
     exclude_paths: tuple[str, ...] = ()
     schema_version: int = INDEX_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class _ScannedSkill:
+    entry: IndexSkillEntry | None
+    warning: str | None = None
 
 
 def index_path(repo_root: Path) -> Path:
@@ -222,25 +229,14 @@ def scan_repo_for_index(
     includes = _normalize_scan_paths(include_paths, field="include_paths")
     excludes = _normalize_scan_paths(exclude_paths, field="exclude_paths")
     entries: list[IndexSkillEntry] = []
-    for skill_file in _iter_candidate_skill_files(root, includes, excludes, warn=warn):
-        skill_dir = skill_file.parent
-        try:
-            metadata = parse_skill_file(skill_file, expected_folder=skill_dir.name)
-            entries.append(
-                IndexSkillEntry(
-                    name=metadata.name,
-                    description=metadata.description,
-                    source_path=_repo_relative_path(skill_dir, root),
-                    content_hash=sha256_skill_directory(skill_dir),
-                    skill_file_hash=sha256_file(skill_file),
-                )
-            )
-        except InvalidSkillError as exc:
-            _warn_invalid_skill(warn, skill_dir, exc)
-        except SvError as exc:
-            if _is_filesystem_error(exc):
-                raise
-            _warn_invalid_skill(warn, skill_dir, exc)
+    for scanned in map_ordered(
+        _iter_candidate_skill_files(root, includes, excludes, warn=warn),
+        lambda skill_file: _scan_one_skill_for_index(skill_file, root),
+    ):
+        if scanned.warning is not None and warn is not None:
+            warn(scanned.warning)
+        if scanned.entry is not None:
+            entries.append(scanned.entry)
 
     return IndexDocument(
         kind=kind,
@@ -248,6 +244,41 @@ def scan_repo_for_index(
         generated_at=generated_at or _utc_now(),
         skills=tuple(sorted(entries, key=lambda entry: entry.source_path)),
     )
+
+
+def _scan_one_skill_for_index(skill_file: Path, root: Path) -> _ScannedSkill:
+    skill_dir = skill_file.parent
+    try:
+        metadata = parse_skill_file(skill_file, expected_folder=skill_dir.name)
+        return _ScannedSkill(
+            entry=IndexSkillEntry(
+                name=metadata.name,
+                description=metadata.description,
+                source_path=_repo_relative_path(skill_dir, root),
+                content_hash=sha256_skill_directory(skill_dir),
+                skill_file_hash=sha256_file(skill_file),
+            )
+        )
+    except InvalidSkillError as exc:
+        return _ScannedSkill(
+            entry=None,
+            warning=(
+                "warning: skipping invalid skill at "
+                f"{_escape_control_characters(str(skill_dir))}: "
+                f"{_escape_control_characters(str(exc))}"
+            ),
+        )
+    except SvError as exc:
+        if _is_filesystem_error(exc):
+            raise
+        return _ScannedSkill(
+            entry=None,
+            warning=(
+                "warning: skipping invalid skill at "
+                f"{_escape_control_characters(str(skill_dir))}: "
+                f"{_escape_control_characters(str(exc))}"
+            ),
+        )
 
 
 _SKIPPED_SCAN_DIRS = {
