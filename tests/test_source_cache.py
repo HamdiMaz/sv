@@ -84,6 +84,49 @@ def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
     assert load_cached_catalog(paths, _repo()) == document
 
 
+def test_catalog_cache_write_rejects_catalog_hash_mismatch(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = replace(
+        _catalog_document("2026-05-18T12:00:00Z"),
+        catalog_hash="sha256:" + ("1" * 64),
+    )
+
+    with pytest.raises(SvError, match="mismatched catalog_hash"):
+        save_cached_catalog(paths, repo, document)
+
+    assert not catalog_cache_path(paths, repo).exists()
+
+
+def test_catalog_cache_access_rejects_symlinked_cache_ancestor(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    symlink_target = tmp_path / "attacker-cache"
+    symlink_target.mkdir()
+    paths.sv_home.mkdir()
+    (paths.sv_home / "cache").symlink_to(symlink_target, target_is_directory=True)
+
+    with pytest.raises(SvError, match="symlinked"):
+        save_cached_catalog(paths, repo, _catalog_document("2026-05-18T12:00:00Z"))
+    with pytest.raises(SvError, match="symlinked"):
+        load_cached_catalog(paths, repo)
+
+
+def test_catalog_cache_load_rejects_broken_symlink_cache_file(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    path = catalog_cache_path(paths, repo)
+    path.parent.mkdir(parents=True)
+    path.symlink_to(tmp_path / "missing-cache.toml")
+
+    with pytest.raises(SvError, match="symlinked"):
+        load_cached_catalog(paths, repo)
+
+
 def test_cached_catalog_freshness_uses_ttl() -> None:
     now = datetime(2026, 5, 18, 12, 0, tzinfo=UTC)
     fresh = _catalog_document("2026-05-18T11:30:00Z")

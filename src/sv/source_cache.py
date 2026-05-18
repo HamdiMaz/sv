@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -95,11 +95,11 @@ def load_cached_catalog(
     paths: SvPaths, repo: RepoConfig
 ) -> CachedCatalogDocument | None:
     path = catalog_cache_path(paths, repo)
-    _reject_symlinked_cache_dir(paths)
-    if not path.exists():
-        return None
+    _reject_symlinked_cache_dir(path.parent)
     if path.is_symlink():
         raise SvError(f"Refusing to read symlinked catalog cache file at {path}.")
+    if not path.exists():
+        return None
     try:
         if path.stat().st_size > _MAX_CATALOG_CACHE_BYTES:
             raise SvError(
@@ -124,7 +124,10 @@ def save_cached_catalog(
 ) -> None:
     path = catalog_cache_path(paths, repo)
     _validate_cached_catalog_matches_repo(document, repo, path)
-    document = _update_cache_hash_field(document)
+    if document.catalog_hash != _cached_catalog_hash(document):
+        raise SvError(
+            "Refusing to write sv catalog cache with mismatched catalog_hash."
+        )
     text = _format_cached_catalog_document(document)
     _ensure_private_cache_dir(paths)
     try:
@@ -138,7 +141,7 @@ def save_cached_catalog(
         if _cache_write_error_must_fail(exc):
             raise
         raise
-    _reject_symlinked_cache_dir(paths)
+    _reject_symlinked_cache_dir(path.parent)
 
 
 def cached_catalog_is_fresh(
@@ -299,7 +302,6 @@ def _parse_utc(value: str, path: Path, field: str) -> datetime:
 
 
 def _format_cached_catalog_document(document: CachedCatalogDocument) -> str:
-    document = _update_cache_hash_field(document)
     lines = [
         f"schema_version = {CACHE_SCHEMA_VERSION}",
         f'repo_id = "{toml_escape(document.repo_id)}"',
@@ -363,16 +365,12 @@ def _hash_labeled_value(hasher: Any, label: str, value: str) -> None:
     hasher.update(value_bytes)
 
 
-def _update_cache_hash_field(document: CachedCatalogDocument) -> CachedCatalogDocument:
-    return replace(document, catalog_hash=_cached_catalog_hash(document))
-
-
 def _toml_string(value: str) -> str:
     return f'"{toml_escape(value)}"'
 
 
 def _ensure_private_cache_dir(paths: SvPaths) -> None:
-    _reject_symlinked_cache_dir(paths)
+    _reject_symlinked_cache_dir(paths.catalog_cache_dir)
     for directory in _cache_directory_chain(paths):
         try:
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -382,23 +380,23 @@ def _ensure_private_cache_dir(paths: SvPaths) -> None:
             raise SvError(
                 f"Failed to create sv catalog cache directory {directory}: {exc}"
             ) from exc
-        _reject_symlinked_cache_dir(paths)
+        _reject_symlinked_cache_dir(paths.catalog_cache_dir)
 
 
 def _cache_directory_chain(paths: SvPaths) -> Sequence[Path]:
     return (paths.cache_dir, paths.catalog_cache_dir)
 
 
-def _reject_symlinked_cache_dir(paths: SvPaths) -> None:
-    for directory in _cache_directory_chain(paths):
+def _reject_symlinked_cache_dir(path: Path) -> None:
+    for candidate in (*reversed(path.parents), path):
         try:
-            if directory.is_symlink():
+            if candidate.is_symlink():
                 raise SvError(
-                    f"Refusing to use symlinked sv catalog cache directory at {directory}."
+                    f"Refusing to use symlinked sv catalog cache directory at {candidate}."
                 )
         except OSError as exc:
             raise SvError(
-                f"Failed to inspect sv catalog cache directory {directory}: {exc}"
+                f"Failed to inspect sv catalog cache directory {candidate}: {exc}"
             ) from exc
 
 
