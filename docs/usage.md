@@ -40,6 +40,12 @@ sv run -- <pi args>
 
 Run commands from the project root where `.pi/skills` should be managed.
 
+## Global cache behavior
+
+`sv` keeps source metadata in the global cache for 24 hours for normal browsing and install commands. `sv list`, `sv search`, and all `sv add` modes use fresh cached metadata, refresh lazily when it expires, and warn while falling back to stale metadata if a refresh fails. `sv sync`, `sv update`, and source-aware `sv status` are refresh-first by default so they report and apply current source changes.
+
+Use `--cached` to avoid network and Git refreshes. Cached mode requires existing metadata, and commands that copy or update skills also require a matching cached skill body before materializing a folder. Normal mode refreshes the source first when metadata exists but the matching skill body is missing, so stale metadata is not paired with newer source content. Cached skill bodies are pruned lazily after cache writes when unused for more than 30 days or when the body cache exceeds 256 MiB. See [global cache](commands.md#global-cache) for details.
+
 ## Reading `sv list`
 
 If no source repos are configured, `sv list` tells you to add one with `sv repo add <owner/repo>` instead of showing an empty skill table.

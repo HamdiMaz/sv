@@ -64,11 +64,11 @@ sv remove find-docs
 
 ## Global cache and offline mode
 
-If you see a warning like `using stale cached metadata`, `sv` tried to refresh source metadata, the refresh failed, and the command used an older cached catalog instead. Only browsing/install commands allow this fallback: `sv list`, `sv search`, `sv add`, and `sv add --all`.
+If you see a warning like `using stale cached metadata`, `sv` tried to refresh source metadata, the refresh failed, and the command used an older cached catalog instead. Only browsing/install commands allow this fallback: `sv list`, `sv search`, and all `sv add` modes (`sv add`, `sv add -l`, and `sv add --all`).
 
 Use `--refresh` to force a new source check. `sv sync`, `sv update`, and source-aware `sv status` already refresh by default and fail closed on refresh errors unless you explicitly pass `--cached`.
 
-Use `--cached` when you need to avoid network and Git source refreshes. This mode requires existing cached metadata. Commands that materialize skills (`sv add --cached`, `sv sync --cached`, and `sv update --cached`) also require matching cached skill bodies. If a cached body is missing, rerun once without `--cached` to populate the body cache, then retry the cached command.
+Use `--cached` when you need to avoid network and Git source refreshes. This mode requires existing cached metadata. Commands that materialize skills (all add modes that copy skills, including `sv add --cached`, `sv add --all --cached`, and interactive add with `--cached`; plus `sv sync --cached` and `sv update --cached`) also require matching cached skill bodies. If a cached body is missing, rerun once without `--cached` to populate the body cache, then retry the cached command.
 
 In normal mode, if cached metadata exists but the matching cached skill body is missing, `sv` refreshes that source repo before materializing from source. This prevents stale metadata from being paired with newer source content.
 

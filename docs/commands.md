@@ -86,7 +86,7 @@ Sources can publish skills under `skills/<name>`, one-level `*/skills/<name>` fo
 
 ## Global cache
 
-`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, `sv add`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
+`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, and all `sv add` modes, including `sv add`, `sv add -l`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
 
 `sv sync`, `sv update`, and source-aware `sv status` are refresh-first by default so they continue to report and apply current source changes. They still use the cache manager for `--cached`, cache writes, body-cache reuse, and cache-only error handling, but they do not silently trust 24-hour-old metadata by default.
 
