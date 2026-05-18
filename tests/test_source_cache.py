@@ -690,6 +690,51 @@ def test_skill_body_cache_stores_and_materializes_valid_skill(tmp_path: Path) ->
     assert metadata.last_used_at == "2026-05-18T13:00:00Z"
 
 
+def test_skill_body_cache_hit_prunes_stale_body_entries(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    old_skill = _write_skill_tree(tmp_path / "old-source", "old", "old body\n")
+    fresh_skill = _write_skill_tree(
+        tmp_path / "fresh-source", "fresh", "fresh body\n"
+    )
+    old_hash = sha256_skill_directory(old_skill, expected_name="old")
+    fresh_hash = sha256_skill_directory(fresh_skill, expected_name="fresh")
+    initial_now = datetime(2026, 4, 1, tzinfo=UTC)
+    store_skill_body_cache(
+        paths,
+        old_skill,
+        skill_name="old",
+        content_hash=old_hash,
+        source_reference="Org/Skills:skills/old",
+        now=initial_now,
+    )
+    store_skill_body_cache(
+        paths,
+        fresh_skill,
+        skill_name="fresh",
+        content_hash=fresh_hash,
+        source_reference="Org/Skills:skills/fresh",
+        now=initial_now,
+    )
+    paths.cache_prune_marker.write_text(
+        'schema_version = 1\nlast_pruned_at = "2026-04-01T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+    destination = tmp_path / "dest" / "fresh"
+
+    materialized = try_materialize_from_skill_body_cache(
+        paths,
+        content_hash=fresh_hash,
+        skill_name="fresh",
+        destination=destination,
+        now=datetime(2026, 5, 18, tzinfo=UTC),
+    )
+
+    assert materialized is True
+    assert not skill_body_cache_path(paths, old_hash).exists()
+    assert skill_body_cache_path(paths, fresh_hash).exists()
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "fresh body\n"
+
+
 def test_skill_body_cache_touch_repairs_permissive_entry_directory(
     tmp_path: Path,
 ) -> None:
@@ -1296,6 +1341,36 @@ def test_prune_skill_body_cache_refuses_symlinked_marker_file(tmp_path: Path) ->
             now=datetime(2026, 5, 18, 13, tzinfo=UTC),
             force=False,
         )
+
+
+def test_prune_skill_body_cache_force_refuses_symlinked_marker_before_deleting(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    old_skill = _write_skill_tree(tmp_path / "old-source", "old", "old body\n")
+    old_hash = sha256_skill_directory(old_skill, expected_name="old")
+    store_skill_body_cache(
+        paths,
+        old_skill,
+        skill_name="old",
+        content_hash=old_hash,
+        source_reference="Org/Skills:skills/old",
+        now=datetime(2026, 4, 1, tzinfo=UTC),
+    )
+    attacker_file = tmp_path / "attacker-marker.toml"
+    attacker_file.write_text("do not overwrite\n", encoding="utf-8")
+    paths.cache_prune_marker.unlink()
+    paths.cache_prune_marker.symlink_to(attacker_file)
+
+    with pytest.raises(SvError, match="symlinked"):
+        prune_skill_body_cache(
+            paths,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+            force=True,
+        )
+
+    assert attacker_file.read_text(encoding="utf-8") == "do not overwrite\n"
+    assert skill_body_cache_path(paths, old_hash).exists()
 
 
 def test_cache_aware_materializer_uses_body_cache_before_source(tmp_path: Path) -> None:

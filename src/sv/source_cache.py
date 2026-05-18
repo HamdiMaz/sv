@@ -249,6 +249,7 @@ def try_materialize_from_skill_body_cache(
             return False
         try:
             _touch_skill_body_cache(paths, content_hash, now)
+            _prune_after_body_cache_write(paths, now=now)
         except SvError as exc:
             remove_materialization_path(destination, ignore_errors=True)
             if _cache_error_is_symlink_violation(exc):
@@ -271,6 +272,7 @@ def prune_skill_body_cache(
     max_bytes: int = DEFAULT_SKILL_BODY_MAX_BYTES,
     force: bool = False,
 ) -> None:
+    _validate_prune_marker_path(paths)
     entries = _skill_body_cache_entries(paths, now=now)
     if not force and not _should_prune(
         paths, now=now, entries=entries, max_bytes=max_bytes
@@ -395,6 +397,13 @@ def _should_prune(
         return True
     age = now.astimezone(UTC) - last_pruned
     return age < timedelta(0) or age >= timedelta(days=1)
+
+
+def _validate_prune_marker_path(paths: SvPaths) -> None:
+    marker = paths.cache_prune_marker
+    _reject_symlinked_cache_dir(marker.parent)
+    if marker.is_symlink():
+        raise SvError(f"Refusing to read symlinked cache prune marker at {marker}.")
 
 
 def _write_prune_marker(paths: SvPaths, *, now: datetime) -> None:
