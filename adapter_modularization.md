@@ -17,6 +17,8 @@ For reviewers, any changes to the plan should be logged here with a brief descri
 - 2026-05-18: Corrected materialization adapter signatures and refactor approach so required `error_message` behavior and existing public-function monkeypatch tests remain intact.
 - 2026-05-18: Tightened persistence-store and CLI-boundary tasks with exact signatures, runtime stderr/env assertions, preserved first-run config loading semantics, and broader manifest-store routing notes.
 - 2026-05-18: Reviewed the plan against current source/tests and tightened process/source split compatibility audits, private-helper retargeting, source import-smoke verification, and runtime CLI error-handling guidance.
+- 2026-05-18: Added follow-up review fixes for process runner assertions, source-backend façade exports/import-cycle audits, cache store coverage, materialization/store routing cautions, and runtime boundary signature guidance.
+- 2026-05-18: Clarified source-process compatibility exports and limited final verification fixes to implementation-owned source, test, and docs files.
 
 ---
 
@@ -590,6 +592,8 @@ def test_default_runner_sets_noninteractive_environment(monkeypatch, tmp_path: P
     assert captured["args"] == ["git", "status"]
     assert captured["cwd"] == tmp_path
     assert captured["text"] is True
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
     assert captured["capture_output"] is True
     assert captured["timeout"] == 60
     assert captured["env"]["GIT_TERMINAL_PROMPT"] == "0"
@@ -703,7 +707,7 @@ git commit -m "refactor: extract process runner adapter"
 - Test: `tests/test_source.py`
 - Test: `tests/test_catalog.py`
 - Test: `tests/test_source_cache.py`
-- Test: source-dependent compatibility files from the Step 6 audit, currently including `tests/test_second_coverage_batch.py`, `tests/test_security_control_characters.py`, `tests/test_security_source_symlinks.py`, `tests/test_global_manifest.py`, `tests/test_cli.py`, `tests/test_cli_error_contracts.py`, `tests/test_cli_list_contracts.py`, `tests/test_cli_add_contracts.py`, `tests/test_cli_sync_contracts.py`, `tests/test_cli_update_contracts.py`, `tests/test_cli_status_contracts.py`, `tests/test_cli_index_refresh.py`, `tests/test_vault_mode_targets.py`, `tests/test_end_to_end.py`, and `tests/test_regressions_duplicates.py`.
+- Test: source-dependent compatibility files from the Step 6 audit, currently including `tests/test_second_coverage_batch.py`, `tests/test_security_control_characters.py`, `tests/test_security_source_symlinks.py`, `tests/test_global_manifest.py`, `tests/test_cli.py`, `tests/test_cli_source_commands.py`, `tests/test_cli_error_contracts.py`, `tests/test_cli_list_contracts.py`, `tests/test_cli_search_contracts.py`, `tests/test_cli_add_contracts.py`, `tests/test_cli_sync_contracts.py`, `tests/test_cli_update_contracts.py`, `tests/test_cli_status_contracts.py`, `tests/test_cli_index_refresh.py`, `tests/test_vault_mode_targets.py`, `tests/test_end_to_end.py`, `tests/test_regressions_duplicates.py`, and `tests/test_regressions_source_identity.py`.
 
 - [ ] **Step 1: Write failing source backend package tests**
 
@@ -713,8 +717,10 @@ Create `tests/test_source_backends.py`:
 from __future__ import annotations
 
 from sv.config import RepoConfig, SvPaths
+from sv.source import FakeSourceBackend as CompatFakeSourceBackend
 from sv.source import SourceBackend as CompatSourceBackend
 from sv.source import source_backends_for_repo as compat_source_backends_for_repo
+from sv.source_backends import FakeSourceBackend as PackageFakeSourceBackend
 from sv.source_backends.base import SourceBackend
 from sv.source_backends.factory import source_backends_for_repo
 
@@ -723,12 +729,22 @@ def test_source_backend_protocol_is_available_from_package():
     assert SourceBackend is CompatSourceBackend
 
 
+def test_source_backend_package_reexports_fake_backend_for_tests():
+    assert PackageFakeSourceBackend is CompatFakeSourceBackend
+
+
 def test_source_backend_factory_is_available_from_package(tmp_path):
     repo = RepoConfig(id="Org/Repo", url="https://github.com/Org/Repo.git")
     paths = SvPaths.from_home(tmp_path)
 
-    packaged = [backend.name for backend in source_backends_for_repo(repo, paths, update=False)]
-    compat = [backend.name for backend in compat_source_backends_for_repo(repo, paths, update=False)]
+    packaged = [
+        backend.name
+        for backend in source_backends_for_repo(repo, paths, update=False)
+    ]
+    compat = [
+        backend.name
+        for backend in compat_source_backends_for_repo(repo, paths, update=False)
+    ]
 
     assert packaged == compat
     assert packaged == [
@@ -761,7 +777,7 @@ Move these from `src/sv/source.py` into `src/sv/source_backends/base.py`:
 
 In `src/sv/source.py`, re-export those names from `sv.source_backends.base`.
 
-Update imports in `src/sv/catalog.py` and `src/sv/source_cache.py` to import base types from `sv.source_backends.base`; after `sv.source.py` becomes a façade, these modules must not import backend base types from `sv.source` because that can create cycles.
+Update imports in `src/sv/catalog.py` and `src/sv/source_cache.py` to import base types from `sv.source_backends.base`; after `sv.source.py` becomes a façade, these modules must not import backend base types from `sv.source` because that can create cycles. Keep backend-relative path normalization helpers independent of `sv.catalog`; do not make `sv.source_backends.base` import `sv.catalog`.
 
 - [ ] **Step 4: Move GitHub backends**
 
@@ -802,7 +818,12 @@ Move `source_backends_for_repo()` into `src/sv/source_backends/factory.py`.
 `src/sv/source_backends/__init__.py` should export:
 
 ```python
-from sv.source_backends.base import SourceBackend, SourceBackendError, SourceBackendFailure
+from sv.source_backends.base import (
+    FakeSourceBackend,
+    SourceBackend,
+    SourceBackendError,
+    SourceBackendFailure,
+)
 from sv.source_backends.factory import source_backends_for_repo
 from sv.source_backends.github import (
     GitHubGhApiBackend,
@@ -821,7 +842,7 @@ from sv.source_backends.git import (
 )
 ```
 
-`src/sv/source.py` should become a compatibility façade that re-exports all public/source-test imported names from `sv.source`, including `FakeSourceBackend`, `ensure_source_repo`, `ensure_source_repos`, `list_source_skills`, `reject_symlinked_source_cache_path`, `GitHubRepoRef`, `GitHubHttpResponse`, all backend classes, `SourceBackend`, `SourceBackendError`, `SourceBackendFailure`, `Runner`, and `default_runner`. Prefer an explicit import list and `__all__` so compatibility exports are auditable. If any legacy helper is intentionally left implemented in `sv.source` for this migration, call that out in a comment and keep its dependencies acyclic; do not leave its destination ambiguous.
+`src/sv/source.py` should become a compatibility façade that re-exports all public/source-test imported names from `sv.source`, including `FakeSourceBackend`, `ensure_source_repo`, `ensure_source_repos`, `list_source_skills`, `reject_symlinked_source_cache_path`, `GitHubRepoRef`, `GitHubHttpResponse`, all backend classes, `SourceBackend`, `SourceBackendError`, `SourceBackendFailure`, and the Task 4 process compatibility names: `Runner`, `DEFAULT_SUBPROCESS_TIMEOUT_SECONDS`, `default_runner`, `_ALLOWED_GIT_PROTOCOLS`, `_COMMAND_TIMEOUT_EXIT_CODE`, `_missing_git_guidance`, `_noninteractive_subprocess_env`, `_ssh_batch_mode_command`, `_timeout_error_message`, and `_timeout_stream_text`. Prefer an explicit import list and `__all__` so compatibility exports are auditable. Keep `tests/test_source.py` as the main compatibility/regression suite: direct public imports from `sv.source` must still work, while private monkeypatch tests should target the owning implementation module and not rely on `sv.source` private aliases propagating monkeypatches. If any legacy helper is intentionally left implemented in `sv.source` for this migration, call that out in a comment and keep its dependencies acyclic; do not leave its destination ambiguous.
 
 Compatibility audit before Step 7:
 
@@ -843,7 +864,8 @@ Audit the output as follows:
 Run:
 
 ```bash
-uv run python -c "import sv.source, sv.source_backends, sv.catalog, sv.source_cache"
+uv run python -c "import sv.source, sv.source_backends, sv.source_backends.base, sv.source_backends.github, sv.source_backends.git, sv.source_backends.factory, sv.catalog, sv.source_cache"
+! rg "from sv\.source|import sv\.source" src/sv/catalog.py src/sv/source_cache.py -n
 uv run pytest \
   tests/test_source_backends.py \
   tests/test_source.py \
@@ -854,8 +876,10 @@ uv run pytest \
   tests/test_security_source_symlinks.py \
   tests/test_global_manifest.py \
   tests/test_cli.py \
+  tests/test_cli_source_commands.py \
   tests/test_cli_error_contracts.py \
   tests/test_cli_list_contracts.py \
+  tests/test_cli_search_contracts.py \
   tests/test_cli_add_contracts.py \
   tests/test_cli_sync_contracts.py \
   tests/test_cli_update_contracts.py \
@@ -864,10 +888,11 @@ uv run pytest \
   tests/test_vault_mode_targets.py \
   tests/test_end_to_end.py \
   tests/test_regressions_duplicates.py \
+  tests/test_regressions_source_identity.py \
   -q --no-cov
 ```
 
-Expected: import smoke exits `0` and all listed tests pass.
+Expected: import smoke exits `0`; the negated `rg` audit exits `0` with no matches; all listed tests pass.
 
 - [ ] **Step 8: Commit**
 
@@ -886,8 +911,10 @@ git add \
   tests/test_security_source_symlinks.py \
   tests/test_global_manifest.py \
   tests/test_cli.py \
+  tests/test_cli_source_commands.py \
   tests/test_cli_error_contracts.py \
   tests/test_cli_list_contracts.py \
+  tests/test_cli_search_contracts.py \
   tests/test_cli_add_contracts.py \
   tests/test_cli_sync_contracts.py \
   tests/test_cli_update_contracts.py \
@@ -895,7 +922,8 @@ git add \
   tests/test_cli_index_refresh.py \
   tests/test_vault_mode_targets.py \
   tests/test_end_to_end.py \
-  tests/test_regressions_duplicates.py
+  tests/test_regressions_duplicates.py \
+  tests/test_regressions_source_identity.py
 git commit -m "refactor: split source backend adapters"
 ```
 
@@ -1028,12 +1056,17 @@ The default adapter error messages are only for direct adapter use in tests or f
 
 - [ ] **Step 4: Route project internals through the adapter wrappers**
 
-In `src/sv/project.py`, keep imports of public materialization functions or switch to `DEFAULT_MATERIALIZATION_ADAPTER`. Do not change operation order. If switching to the adapter, update each current call site to use the matching method and pass the existing explicit `error_message` strings for install/replace operations:
+In `src/sv/project.py`, keep imports of public materialization functions or switch to `DEFAULT_MATERIALIZATION_ADAPTER`. Do not change operation order. If switching to the adapter, update each current call site to use the matching method and pass the existing explicit `error_message` strings for install/replace operations. Do not replace `entry.materialize_to(temp_target)` in `_materialize_entry_to_temp()` with `copy_skill_folder_to_temp()`: source and cache materializers own staging selected skills into temp folders.
 
-- copy/stage source skill folder
+Route or preserve these operations only:
+
+- cleanup temp paths before and after materialization, including existing `ignore_errors=True` behavior
+- validate prepared materialized folders after `entry.materialize_to(...)`
 - install prepared temp folder
 - replace target with prepared temp and backup
-- cleanup temp/backup paths, including existing `ignore_errors=True` behavior
+- cleanup backup paths, including existing `ignore_errors=True` behavior
+
+If switching project internals to `DEFAULT_MATERIALIZATION_ADAPTER`, add or update tests/audits for any existing `sv.project.install_materialized_skill_folder`, `sv.project.remove_materialization_path`, or `sv.project.replace_with_materialized_skill_folder` monkeypatches before relying on adapter methods. Keeping the direct public-function imports in this task is acceptable when that preserves compatibility.
 
 - [ ] **Step 5: Run focused verification**
 
@@ -1196,7 +1229,7 @@ class ConfigStore:
         return remove_repo_config(self.paths, repo_id)
 ```
 
-Adjust signatures to match current `add_repo()` / `remove_repo()` definitions exactly.
+Keep store method signatures locked to the current public functions exactly: `ConfigStore.add_repo(self, repo: str, *, skills_paths: Sequence[str] = ()) -> RepoChangeResult` and `ConfigStore.remove_repo(self, repo_id: str) -> RepoConfig`.
 
 - [ ] **Step 4: Route high-churn call sites through stores**
 
@@ -1204,6 +1237,7 @@ In `src/sv/project.py`:
 
 - Replace direct `load_manifest(project_skills_dir)` / `save_manifest(project_skills_dir, manifest)` pairs inside add/remove/sync/update/refresh workflows with `ProjectManifestStore(project_skills_dir).load()` and `.save(...)`. This includes `_refresh_skill_states()` and `_refresh_local_skill_states()`.
 - Preserve all existing manifest mutation order and rollback callbacks.
+- Route `_load_manifest_for_target()`, `_upsert_manifest_entry_for_target()`, and `_remove_manifest_entry_for_target()` through `ProjectManifestStore.load()` / `.save(...)` internally only if their current target filtering and vault duplicate-key semantics remain byte-for-byte equivalent.
 - Keep `upsert_manifest_entry()` and `remove_manifest_entry()` for Pi-target helper semantics unless you add equivalent explicit `ProjectManifestStore` methods and tests in this task; do not silently replace them with generic load/mutate/save code.
 
 In `src/sv/cli.py`:
@@ -1241,25 +1275,64 @@ git commit -m "refactor: add persistence store adapters"
 
 - [ ] **Step 1: Write failing cache adapter tests**
 
-Append to `tests/test_source_cache.py`:
+Add `CatalogCacheStore` and `SkillBodyCacheStore` to the existing grouped `from sv.source_cache import (...)` block in `tests/test_source_cache.py`, then append these tests without adding new imports at the bottom of the file:
 
 ```python
-from sv.config import RepoConfig, SvPaths
-from sv.source_cache import CatalogCacheStore, SkillBodyCacheStore, catalog_cache_path, skill_body_cache_path
-
 
 def test_catalog_cache_store_exposes_existing_cache_path(tmp_path):
     paths = SvPaths.from_home(tmp_path)
     repo = RepoConfig(id="Org/Repo", url="https://github.com/Org/Repo.git")
 
-    assert CatalogCacheStore(paths).path_for(repo) == catalog_cache_path(paths, repo)
+    assert CatalogCacheStore(paths).path_for(repo) == catalog_cache_path(
+        paths,
+        repo,
+    )
+
+
+def test_catalog_cache_store_round_trips_document(tmp_path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = _catalog_document("2026-05-18T12:00:00Z")
+    store = CatalogCacheStore(paths)
+
+    store.save(repo, document)
+
+    assert store.load(repo) == document
 
 
 def test_skill_body_cache_store_exposes_existing_body_path(tmp_path):
     paths = SvPaths.from_home(tmp_path)
     content_hash = "sha256:" + "a" * 64
 
-    assert SkillBodyCacheStore(paths).path_for(content_hash) == skill_body_cache_path(paths, content_hash)
+    assert SkillBodyCacheStore(paths).path_for(content_hash) == skill_body_cache_path(
+        paths,
+        content_hash,
+    )
+
+
+def test_skill_body_cache_store_stores_and_materializes_body(tmp_path):
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store = SkillBodyCacheStore(paths)
+    now = datetime(2026, 5, 18, 12, 0, tzinfo=UTC)
+
+    store.store(
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=now,
+    )
+    destination = tmp_path / "materialized"
+
+    assert store.try_materialize(
+        content_hash=content_hash,
+        skill_name="alpha",
+        destination=destination,
+        now=now,
+    ) is True
+    assert (destination / "SKILL.md").is_file()
 ```
 
 - [ ] **Step 2: Run tests and verify intended failure**
@@ -1267,7 +1340,7 @@ def test_skill_body_cache_store_exposes_existing_body_path(tmp_path):
 Run:
 
 ```bash
-uv run pytest tests/test_source_cache.py::test_catalog_cache_store_exposes_existing_cache_path tests/test_source_cache.py::test_skill_body_cache_store_exposes_existing_body_path -q --no-cov
+uv run pytest tests/test_source_cache.py::test_catalog_cache_store_exposes_existing_cache_path tests/test_source_cache.py::test_catalog_cache_store_round_trips_document tests/test_source_cache.py::test_skill_body_cache_store_exposes_existing_body_path tests/test_source_cache.py::test_skill_body_cache_store_stores_and_materializes_body -q --no-cov
 ```
 
 Expected: fails because `CatalogCacheStore` and `SkillBodyCacheStore` do not exist.
@@ -1345,7 +1418,8 @@ Use the current `source_cache.py` public functions as compatibility wrappers.
 In `src/sv/source_cache.py`:
 
 - Update `get_catalog_with_cache()` to instantiate `CatalogCacheStore(paths)` and call store methods for path/load/save operations.
-- Update `wrap_catalog_with_skill_body_cache()` and body-cache materializer helpers to instantiate `SkillBodyCacheStore(paths)` and call store methods for path/materialize/store operations.
+- Update `record_cached_skill_body_hash()` to use `CatalogCacheStore(paths).load()` / `.save(...)` instead of direct catalog cache function calls.
+- Update `wrap_catalog_with_skill_body_cache()` and body-cache materializer helpers to instantiate `SkillBodyCacheStore(paths)` and call store methods for path/materialize/store operations. If `_wrap_source_skill()` or its nested `refresh_entry_on_body_miss` recursion accepts a store instance, pass the same store through recursive wrapping so behavior and locks stay unchanged.
 - Keep current cache locks, stale fallback warnings, cache-only failures, pruning behavior, and security failures unchanged.
 
 - [ ] **Step 5: Run focused verification**
@@ -1444,8 +1518,23 @@ Expected: CLI test fails because `handle()` has no `runtime` parameter; UI test 
 
 In `src/sv/cli.py`:
 
-- Update `handle()` signature to include a keyword-only `runtime: Runtime | None = None` after injected chooser arguments, preserving existing positional compatibility for `git_runner`, `process_runner`, `skill_selector`, and `skill_chooser`.
-- At the top of `handle()`, before the `try` block, construct or normalize the runtime and then derive `cwd`, `home`, and `paths` from it:
+- Update `handle()` signature to this shape so `git_runner`, `process_runner`, `skill_selector`, and `skill_chooser` remain positional-compatible and only `runtime` is newly keyword-only:
+
+```python
+def handle(
+    args: argparse.Namespace,
+    cwd: Path,
+    home: Path,
+    git_runner=default_runner,
+    process_runner=default_process_runner,
+    skill_selector: SkillSelector = select_skills,
+    skill_chooser: SkillChooser | None = None,
+    *,
+    runtime: Runtime | None = None,
+) -> int:
+```
+
+- At the top of `handle()`, before the `try` block, construct or normalize the runtime and then derive `cwd`, `home`, and `paths` from it. Do not call `Runtime.from_process()` here because it would ignore explicit `cwd`/`home` compatibility arguments passed by existing tests and callers:
 
 ```python
 runtime = (
@@ -1471,7 +1560,7 @@ Import `os`, and import `Runtime` from `sv.runtime`. If `cli.py` already uses `s
 - Keep the early worker-count validation inside the existing `try` block and replace `configured_jobs()` with `configured_jobs(runtime.env)`. This is required so invalid injected `SV_JOBS` still returns exit code `1` instead of escaping as an exception.
 - In the top-level `except SvError as exc` block, print to `runtime.stderr` instead of `sys.stderr`.
 - In `main()` and `svx_main()`, keep `Runtime.from_process()` from Task 2 and pass `runtime=runtime` to `handle(...)` while still passing `cwd=runtime.cwd` and `home=runtime.home` for compatibility.
-- Keep downstream helper signatures unchanged unless a helper needs runtime immediately. When later migrating prompt or terminal-width helpers, use `runtime.can_prompt()`, `runtime.prompt()`, and `runtime.width()` rather than adding new direct `sys.stdin`/`sys.stdout`/`input()`/`shutil.get_terminal_size()` reads.
+- Keep downstream helper signatures unchanged unless a helper needs runtime immediately. Do not migrate first-run prompt input to `runtime.prompt()` in this task unless every call site is passed `runtime` and tests cover the changed path; preserve current first-run prompt semantics. When later migrating prompt or terminal-width helpers, use `runtime.can_prompt()`, `runtime.prompt()`, and `runtime.width()` rather than adding new direct `sys.stdin`/`sys.stdout`/`input()`/`shutil.get_terminal_size()` reads.
 
 - [ ] **Step 4: Use stores and adapters at service boundaries**
 
@@ -1493,7 +1582,7 @@ Before Step 5, run this audit and resolve or document every remaining direct bou
 rg "\b(add_repo|remove_repo|load_config|load_global_manifest|save_global_manifest|source_backends_for_repo|from sv\.table import browse_table|def default_process_runner)\b" src/sv/cli.py -n
 ```
 
-Allowed remaining matches are compatibility imports/functions with a comment explaining why they cannot route through the adapter in this task, or helper names that now call the adapter internally.
+Allowed remaining matches are compatibility imports/functions with a comment explaining why they cannot route through the adapter in this task, or helper names that now call the adapter internally. Remove stale direct imports after routing so `ruff` catches unused boundary dependencies.
 
 In `src/sv/project.py`:
 
@@ -1672,12 +1761,14 @@ Expected: exits `0`; installed `sv --help` runs; installed package version match
 
 - [ ] **Step 6: Commit any verification fixes**
 
-If verification required fixes in source, tests, docs, project config, or workflow files:
+If verification required fixes in source, tests, or docs that are already in this implementation plan's scope:
 
 ```bash
-git add src/sv tests docs pyproject.toml .github/workflows/tests.yml
+git add src/sv tests docs
 git commit -m "fix: complete adapter modularization verification"
 ```
+
+If verification appears to require `pyproject.toml`, workflow, packaging-policy, or other project-config changes, do not fold those changes into this verification task. Stop and write a separate follow-up plan or issue because adapter modularization should not silently change project policy.
 
 If no fixes were needed, do not create an empty commit.
 
