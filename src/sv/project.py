@@ -318,6 +318,24 @@ def _plan_add_all_skills(
             skill_name
         )
         target_is_planned = target in planned_targets
+        if target_is_planned:
+            existing_or_skipped[index] = AddSkillResult(
+                skill=skill_name,
+                target=target,
+                status="exists",
+                repo_id=entry.repo_id,
+                existing_repo_id=(
+                    existing_entry.repo_id if existing_entry is not None else None
+                ),
+                source_reference=_source_reference_for(entry),
+                existing_source_reference=(
+                    _source_reference_for_manifest(existing_entry)
+                    if existing_entry is not None
+                    else None
+                ),
+                target_kind=target_style.target_kind,
+            )
+            continue
         target_exists = target.exists() or target.is_symlink()
         if target_exists:
             _reject_symlinked_project_skill(target, target_style)
@@ -342,7 +360,7 @@ def _plan_add_all_skills(
                 entry, target_style
             )
             continue
-        if target_exists or target_is_planned:
+        if target_exists:
             existing_or_skipped[index] = AddSkillResult(
                 skill=skill_name,
                 target=target,

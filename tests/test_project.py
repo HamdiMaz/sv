@@ -477,6 +477,35 @@ def test_add_all_vault_skills_replaces_existing_targets_with_replace_temp(
     assert_no_partial_sv_dirs(vault_skills)
 
 
+def test_add_all_vault_skills_replace_existing_keeps_one_plan_for_duplicates(
+    tmp_path: Path,
+) -> None:
+    installed = make_source_skill(
+        tmp_path / "installed-source", "alpha", repo_id="Org/Installed"
+    )
+    first = make_source_skill(tmp_path / "source-a", "alpha", repo_id="Org/A")
+    second = make_source_skill(tmp_path / "source-b", "alpha", repo_id="Org/B")
+    vault_skills = tmp_path / "vault" / "skills"
+    add_vault_skill(installed, vault_skills)
+    (first.source_path / "notes.md").write_text("first replacement\n")
+    (second.source_path / "notes.md").write_text("second replacement\n")
+
+    result = add_all_vault_skills(
+        [first, second], vault_skills, replace_existing=True
+    )
+
+    assert [
+        (item.skill, item.status, item.repo_id, item.existing_repo_id)
+        for item in result.results
+    ] == [
+        ("alpha", "replaced", "Org/A", None),
+        ("alpha", "exists", "Org/B", "Org/A"),
+    ]
+    assert (vault_skills / "alpha" / "notes.md").read_text() == "first replacement\n"
+    assert load_manifest(vault_skills)["alpha"].repo_id == "Org/A"
+    assert_no_partial_sv_dirs(vault_skills)
+
+
 def test_add_all_project_skills_preserves_duplicate_name_result_rows(
     tmp_path: Path,
 ) -> None:
