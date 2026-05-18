@@ -48,7 +48,7 @@ _SOURCE_REPO_LOCKS: dict[Path, RLockType] = {}
 def _source_repo_lock_key(repo_path: Path) -> Path:
     try:
         return repo_path.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return repo_path.absolute()
 
 

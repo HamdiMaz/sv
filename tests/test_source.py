@@ -1613,6 +1613,22 @@ def test_source_backend_failure_formats_actionable_message():
 
 
 
+def test_source_repo_lock_key_falls_back_when_resolve_detects_symlink_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_path = tmp_path / "cache" / "repo"
+
+    def fail_resolve(self: Path) -> Path:
+        if self == repo_path:
+            raise RuntimeError("Symlink loop from '/tmp/cache/repo'")
+        return self.absolute()
+
+    monkeypatch.setattr(Path, "resolve", fail_resolve)
+
+    assert source_module._source_repo_lock_key(repo_path) == repo_path.absolute()
+
+
 def test_sparse_backend_materialization_serializes_same_repo_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
