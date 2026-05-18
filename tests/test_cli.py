@@ -1570,14 +1570,32 @@ def test_cli_prompt_for_initial_sources_handles_cancel_custom_repo_and_retries(
     monkeypatch.setattr("builtins.input", lambda _prompt: next(choices))
     calls: list[str] = []
 
-    def fake_add_repo(_paths, repo):
-        calls.append(repo)
-        if repo == "bad/repo":
-            raise SvError("bad source")
-        return cli_module.RepoChangeResult(status="added", repo=cli_module.RepoConfig(id=repo, url=f"https://github.com/{repo}.git"))
+    class FakeConfigStore:
+        def __init__(self, _paths):
+            pass
 
-    monkeypatch.setattr(cli_module, "add_repo", fake_add_repo)
-    monkeypatch.setattr(cli_module, "load_config", lambda _paths: cli_module.SvConfig(repos=(cli_module.RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git"),)))
+        def add_repo(self, repo):
+            calls.append(repo)
+            if repo == "bad/repo":
+                raise SvError("bad source")
+            return cli_module.RepoChangeResult(
+                status="added",
+                repo=cli_module.RepoConfig(
+                    id=repo, url=f"https://github.com/{repo}.git"
+                ),
+            )
+
+        def load(self):
+            return cli_module.SvConfig(
+                repos=(
+                    cli_module.RepoConfig(
+                        id="Org/Skills",
+                        url="https://github.com/Org/Skills.git",
+                    ),
+                )
+            )
+
+    monkeypatch.setattr(cli_module, "ConfigStore", FakeConfigStore)
 
     config = cli_module._prompt_for_initial_sources(paths)
 

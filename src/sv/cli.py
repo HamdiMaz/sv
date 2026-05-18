@@ -26,10 +26,7 @@ from sv.config import (
     RepoConfig,
     SvConfig,
     SvPaths,
-    add_repo,
-    load_config,
     recommended_sources,
-    remove_repo,
     repo_source_key,
 )
 from sv.errors import SvError
@@ -51,11 +48,7 @@ from sv.index import (
 from sv.manifest import (
     GlobalSourceState,
     ManifestEntry,
-    load_global_manifest,
-    load_manifest,
     project_manifest_path,
-    save_global_manifest,
-    save_manifest,
 )
 from sv.parallel import configured_jobs, map_ordered
 from sv.process import default_process_runner, default_runner
@@ -81,6 +74,7 @@ from sv.project import (
     validate_project_skills_for_run,
 )
 from sv.source_backends.factory import source_backends_for_repo
+from sv.stores import ConfigStore, GlobalManifestStore, ProjectManifestStore
 from sv.source_backends.git import ensure_source_repo, reject_symlinked_source_cache_path
 from sv.source_cache import (
     cache_summary,
@@ -772,7 +766,7 @@ def _load_config_for_source_command(paths: SvPaths) -> SvConfig:
     if not paths.config_file.exists():
         return _load_or_prompt_for_initial_sources(paths)
 
-    config = load_config(paths)
+    config = ConfigStore(paths).load()
     if config.repos or _config_explicitly_disables_sources(paths):
         return config
     return _load_or_prompt_for_initial_sources(paths)
@@ -833,12 +827,12 @@ def _prompt_for_initial_sources(paths: SvPaths) -> SvConfig:
             continue
 
         try:
-            result = add_repo(paths, repo)
+            result = ConfigStore(paths).add_repo(repo)
         except (SvError, ValueError) as exc:
             print(f"Could not add source repo: {exc}")
             continue
         _print_repo_change_result(result)
-        return load_config(paths)
+        return ConfigStore(paths).load()
 
 
 def _print_repo_change_result(result: RepoChangeResult) -> None:
@@ -1329,7 +1323,7 @@ def _record_global_source_refresh(
             health_status="ok",
             health_details=f"catalog contains {len(repo_entries)} skills",
         )
-    save_global_manifest(paths, states)
+    GlobalManifestStore(paths).save(states)
 
 
 def _catalog_entries_for_repo(
@@ -1432,7 +1426,7 @@ def _record_global_source_refresh_failure(
             health_status="error",
             health_details=error,
         )
-    save_global_manifest(paths, states)
+    GlobalManifestStore(paths).save(states)
 
 
 def _previous_state_for_same_source(
@@ -1455,7 +1449,7 @@ def _remove_global_source_state(paths: SvPaths, repo_id: str) -> None:
     if states is None or repo_id not in states:
         return
     del states[repo_id]
-    save_global_manifest(paths, states)
+    GlobalManifestStore(paths).save(states)
 
 
 def _load_global_manifest_for_source_state(
@@ -1464,7 +1458,7 @@ def _load_global_manifest_for_source_state(
     if _global_manifest_path_has_project_only_shape(paths):
         return None
     try:
-        return load_global_manifest(paths)
+        return GlobalManifestStore(paths).load()
     except SvError as exc:
         if _PROJECT_STATE_IN_GLOBAL_MANIFEST in str(exc):
             return None
@@ -1733,7 +1727,7 @@ def _ensure_init_manifest(target: Path) -> None:
                 f"Sv manifest path {_escape_output_path(path)} exists but is not a file."
             )
         return
-    save_manifest(target, {})
+    ProjectManifestStore(target).save({})
 
 
 def _ensure_init_git_repo(target: Path, git_runner) -> None:
@@ -1888,7 +1882,7 @@ def _handle_repo(
 
     if args.repo_command == "add":
         try:
-            result = add_repo(paths, args.repo, skills_paths=args.skills_paths)
+            result = ConfigStore(paths).add_repo(args.repo, skills_paths=args.skills_paths)
         except ValueError as exc:
             raise SvError(str(exc)) from exc
         _print_repo_change_result(result)
@@ -1906,7 +1900,7 @@ def _handle_repo(
         if args.repo_id is None:
             raise SvError("Specify a repo id or use -l.")
         try:
-            removed = remove_repo(paths, args.repo_id)
+            removed = ConfigStore(paths).remove_repo(args.repo_id)
         except ValueError as exc:
             raise SvError(str(exc)) from exc
         _remove_global_source_state(paths, removed.id)
@@ -2028,7 +2022,7 @@ def _handle_repo_remove_interactive(
     skill_selector: SkillSelector,
     yes: bool,
 ) -> int:
-    config = load_config(paths)
+    config = ConfigStore(paths).load()
     if not config.repos:
         _print_no_source_repos_configured()
         return 0
@@ -2053,7 +2047,7 @@ def _handle_repo_remove_interactive(
 
     for repo in selected_repos:
         try:
-            removed = remove_repo(paths, repo.id)
+            removed = ConfigStore(paths).remove_repo(repo.id)
         except ValueError as exc:
             raise SvError(str(exc)) from exc
         _remove_global_source_state(paths, removed.id)
@@ -2531,7 +2525,7 @@ def _vault_skill_replacement_warning(
 ) -> str | None:
     from sv.hashing import sha256_skill_directory
 
-    for entry in load_manifest(vault_skills_dir).values():
+    for entry in ProjectManifestStore(vault_skills_dir).load().values():
         if (
             entry.name == skill_name
             and entry.target_kind == "skill-vault"
@@ -2826,11 +2820,11 @@ def _confirm_prompt(prompt: str) -> bool:
 def _prune_unavailable_manifest_entry(
     project_skills_dir: Path, entry: ManifestEntry
 ) -> None:
-    manifest = load_manifest(project_skills_dir)
+    manifest = ProjectManifestStore(project_skills_dir).load()
     for key, existing_entry in list(manifest.items()):
         if _same_manifest_target(existing_entry, entry):
             del manifest[key]
-            save_manifest(project_skills_dir, manifest)
+            ProjectManifestStore(project_skills_dir).save(manifest)
             return
 
 
@@ -3065,7 +3059,7 @@ def _canonical_index_skills(
 
 
 def _handle_global_status(paths: SvPaths) -> int:
-    config = load_config(paths) if paths.config_file.exists() else SvConfig()
+    config = ConfigStore(paths).load() if paths.config_file.exists() else SvConfig()
     states = _load_global_manifest_for_source_state(paths) or {}
     repo_ids = sorted({repo.id for repo in config.repos} | set(states))
     if not repo_ids:
@@ -3160,7 +3154,7 @@ def _status_catalog_if_configured(
 ) -> list[SourceSkill] | None:
     if not paths.config_file.exists():
         return None
-    config = load_config(paths)
+    config = ConfigStore(paths).load()
     if not config.repos:
         return None
     return _catalog_for_source_command(
@@ -3198,7 +3192,7 @@ def _entries_require_source_status_refresh(
 
 def _project_status_entries(project_skills_dir: Path) -> list[ManifestEntry]:
     entries: list[ManifestEntry] = []
-    for entry in load_manifest(project_skills_dir).values():
+    for entry in ProjectManifestStore(project_skills_dir).load().values():
         if not _is_pi_project_manifest_entry(entry):
             continue
         target = project_skills_dir / entry.name
@@ -3227,7 +3221,7 @@ def _is_pi_project_manifest_entry(entry: ManifestEntry) -> bool:
 
 def _vault_status_entries(vault_skills_dir: Path) -> list[ManifestEntry]:
     entries: list[ManifestEntry] = []
-    for entry in load_manifest(vault_skills_dir).values():
+    for entry in ProjectManifestStore(vault_skills_dir).load().values():
         if not _is_vault_manifest_entry(entry):
             continue
         target = vault_skills_dir / entry.name

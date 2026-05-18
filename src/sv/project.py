@@ -11,13 +11,12 @@ from sv.config import repo_source_key
 from sv.errors import SvError
 from sv.manifest import (
     ManifestEntry,
-    load_manifest,
     remove_manifest_entry,
-    save_manifest,
     upsert_manifest_entry,
 )
 from sv.materialization import DEFAULT_MATERIALIZATION_ADAPTER
 from sv.parallel import map_ordered
+from sv.stores import ProjectManifestStore
 
 
 class ProjectSourceSkill(Protocol):
@@ -592,7 +591,7 @@ def _remove_skill(
             raise SvError(f"Pi skill '{skill_name}' was not found in this project.")
         raise SvError(f"Vault skill '{skill_name}' was not found in this skill-vault.")
 
-    original_manifest = load_manifest(project_skills_dir)
+    original_manifest = ProjectManifestStore(project_skills_dir).load()
     backup_target = target.with_name(f".{target.name}.sv-remove-backup")
     if backup_target.exists():
         try:
@@ -627,7 +626,7 @@ def _remove_skill(
         try:
             if not target.exists():
                 backup_target.rename(target)
-            save_manifest(project_skills_dir, original_manifest)
+            ProjectManifestStore(project_skills_dir).save(original_manifest)
         except (OSError, SvError) as rollback_exc:
             raise SvError(
                 f"Failed to remove {target_style.skill_label} '{skill_name}': cleanup failed "
@@ -1013,7 +1012,7 @@ def _refresh_skill_states(
     target_style: _TargetStyle,
 ) -> None:
     _ensure_safe_project_skills_dir(project_skills_dir, target_style)
-    entries = load_manifest(project_skills_dir)
+    entries = ProjectManifestStore(project_skills_dir).load()
     if not entries:
         return
 
@@ -1057,7 +1056,7 @@ def _refresh_skill_states(
             changed = True
 
     if changed:
-        save_manifest(project_skills_dir, updated_entries)
+        ProjectManifestStore(project_skills_dir).save(updated_entries)
 
 
 def _refresh_local_skill_states(
@@ -1067,7 +1066,7 @@ def _refresh_local_skill_states(
     from sv.hashing import sha256_skill_directory
 
     _ensure_safe_project_skills_dir(project_skills_dir, target_style)
-    entries = load_manifest(project_skills_dir)
+    entries = ProjectManifestStore(project_skills_dir).load()
     if not entries:
         return
 
@@ -1110,7 +1109,7 @@ def _refresh_local_skill_states(
             changed = True
 
     if changed:
-        save_manifest(project_skills_dir, updated_entries)
+        ProjectManifestStore(project_skills_dir).save(updated_entries)
 
 
 def _refreshed_manifest_entry_state(
@@ -1536,19 +1535,19 @@ def _upsert_manifest_entry_for_target(
     if target_style.target_kind == _PI_TARGET.target_kind:
         upsert_manifest_entry(project_skills_dir, entry)
         return
-    entries = load_manifest(project_skills_dir)
+    entries = ProjectManifestStore(project_skills_dir).load()
     for key, existing_entry in entries.items():
         if existing_entry.name == entry.name and _manifest_entry_matches_target(
             existing_entry, target_style
         ):
             entries[key] = entry
-            save_manifest(project_skills_dir, entries)
+            ProjectManifestStore(project_skills_dir).save(entries)
             return
     key = entry.name
     if key in entries:
         key = f"{entry.target_kind}:{entry.target_agent or ''}:{entry.target_path}:{entry.name}"
     entries[key] = entry
-    save_manifest(project_skills_dir, entries)
+    ProjectManifestStore(project_skills_dir).save(entries)
 
 
 def _load_manifest_for_target(
@@ -1556,7 +1555,7 @@ def _load_manifest_for_target(
 ) -> dict[str, ManifestEntry]:
     return {
         entry.name: entry
-        for entry in load_manifest(project_skills_dir).values()
+        for entry in ProjectManifestStore(project_skills_dir).load().values()
         if _manifest_entry_matches_target(entry, target_style)
     }
 
@@ -1567,13 +1566,13 @@ def _remove_manifest_entry_for_target(
     if target_style.target_kind == _PI_TARGET.target_kind:
         remove_manifest_entry(project_skills_dir, skill_name)
         return
-    entries = load_manifest(project_skills_dir)
+    entries = ProjectManifestStore(project_skills_dir).load()
     for key, existing_entry in list(entries.items()):
         if existing_entry.name == skill_name and _manifest_entry_matches_target(
             existing_entry, target_style
         ):
             del entries[key]
-            save_manifest(project_skills_dir, entries)
+            ProjectManifestStore(project_skills_dir).save(entries)
             return
 
 
