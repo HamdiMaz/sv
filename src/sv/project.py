@@ -22,6 +22,7 @@ from sv.materialization import (
     replace_with_materialized_skill_folder,
     validate_materialization_source_tree,
 )
+from sv.parallel import map_ordered
 
 
 class ProjectSourceSkill(Protocol):
@@ -120,6 +121,22 @@ class SyncResult:
 class _MaterializedSkillMetadata:
     content_hash: str
     skill_file_hash: str
+
+
+@dataclass(frozen=True)
+class _AddPlan:
+    index: int
+    entry: ProjectSourceSkill
+    skill_name: str
+    target: Path
+    replace_existing_target: bool = False
+    result: AddSkillResult | None = None
+
+
+@dataclass(frozen=True)
+class _PreparedAdd:
+    plan: _AddPlan
+    metadata: _MaterializedSkillMetadata
 
 
 def normalize_skill_name(skill: str) -> str:
@@ -252,8 +269,11 @@ def _add_skill(
 def add_all_project_skills(
     catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
 ) -> AddAllSkillsResult:
-    return AddAllSkillsResult(
-        results=[add_project_skill(entry, project_skills_dir) for entry in catalog]
+    return _add_all_skills_parallel(
+        catalog,
+        project_skills_dir,
+        _PI_TARGET,
+        replace_existing=False,
     )
 
 
@@ -262,14 +282,189 @@ def add_all_vault_skills(
     vault_skills_dir: Path,
     *,
     replace_existing: bool = False,
+    replace_existing_indexes: frozenset[int] = frozenset(),
 ) -> AddAllSkillsResult:
-    return AddAllSkillsResult(
-        results=[
-            add_vault_skill(
-                entry, vault_skills_dir, replace_existing=replace_existing
+    return _add_all_skills_parallel(
+        catalog,
+        vault_skills_dir,
+        _VAULT_TARGET,
+        replace_existing=replace_existing,
+        replace_existing_indexes=replace_existing_indexes,
+    )
+
+
+def _plan_add_all_skills(
+    catalog: Sequence[ProjectSourceSkill],
+    project_skills_dir: Path,
+    target_style: _TargetStyle,
+    *,
+    replace_existing: bool,
+    replace_existing_indexes: frozenset[int] = frozenset(),
+) -> tuple[dict[int, AddSkillResult], list[_AddPlan]]:
+    manifest = _load_manifest_for_target(project_skills_dir, target_style)
+    existing_or_skipped: dict[int, AddSkillResult] = {}
+    to_prepare: list[_AddPlan] = []
+    planned_targets: set[Path] = set()
+    planned_manifest_entries: dict[str, ManifestEntry] = {}
+
+    for index, entry in enumerate(catalog):
+        skill_name = normalize_skill_name(entry.name)
+        if entry.source_backend == "local-cache" and not entry.source_path.is_dir():
+            raise SvError(
+                f"Skill '{skill_name}' was not found in source skills directory."
             )
-            for entry in catalog
-        ]
+        target = project_skills_dir / skill_name
+        existing_entry = planned_manifest_entries.get(skill_name) or manifest.get(
+            skill_name
+        )
+        target_is_planned = target in planned_targets
+        target_exists = target.exists() or target.is_symlink()
+        if target_exists:
+            _reject_symlinked_project_skill(target, target_style)
+            if not target.is_dir():
+                raise SvError(
+                    f"Cannot add {target_style.skill_label} '{skill_name}': "
+                    f"non-directory path already exists at {target}."
+                )
+        should_replace = replace_existing or index in replace_existing_indexes
+        if target_exists and should_replace:
+            to_prepare.append(
+                _AddPlan(
+                    index=index,
+                    entry=entry,
+                    skill_name=skill_name,
+                    target=target,
+                    replace_existing_target=True,
+                )
+            )
+            planned_targets.add(target)
+            planned_manifest_entries[skill_name] = _manifest_entry_for(
+                entry, target_style
+            )
+            continue
+        if target_exists or target_is_planned:
+            existing_or_skipped[index] = AddSkillResult(
+                skill=skill_name,
+                target=target,
+                status="exists",
+                repo_id=entry.repo_id,
+                existing_repo_id=(
+                    existing_entry.repo_id if existing_entry is not None else None
+                ),
+                source_reference=_source_reference_for(entry),
+                existing_source_reference=(
+                    _source_reference_for_manifest(existing_entry)
+                    if existing_entry is not None
+                    else None
+                ),
+                target_kind=target_style.target_kind,
+            )
+            continue
+        to_prepare.append(
+            _AddPlan(index=index, entry=entry, skill_name=skill_name, target=target)
+        )
+        planned_targets.add(target)
+        planned_manifest_entries[skill_name] = _manifest_entry_for(entry, target_style)
+
+    return existing_or_skipped, to_prepare
+
+
+def _add_plan_temp_target(plan: _AddPlan) -> Path:
+    if plan.replace_existing_target:
+        return _sync_temp_target(plan.target)
+    return _add_temp_target(plan.target)
+
+
+def _prepare_add_plan(plan: _AddPlan, target_style: _TargetStyle) -> _PreparedAdd:
+    if plan.replace_existing_target:
+        metadata = _materialize_entry_for_replace(plan.entry, plan.target, target_style)
+    else:
+        metadata = _materialize_entry_for_add(plan.entry, plan.target, target_style)
+    return _PreparedAdd(plan=plan, metadata=metadata)
+
+
+def _cleanup_prepared_adds(prepared: Sequence[_PreparedAdd]) -> None:
+    for item in prepared:
+        remove_materialization_path(_add_plan_temp_target(item.plan), ignore_errors=True)
+
+
+def _add_all_skills_parallel(
+    catalog: Sequence[ProjectSourceSkill],
+    project_skills_dir: Path,
+    target_style: _TargetStyle,
+    *,
+    replace_existing: bool,
+    replace_existing_indexes: frozenset[int] = frozenset(),
+) -> AddAllSkillsResult:
+    _ensure_safe_project_skills_dir(project_skills_dir, target_style)
+    try:
+        project_skills_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SvError(
+            f"Failed to prepare {target_style.skills_dir_label} "
+            f"{project_skills_dir}: {exc}"
+        ) from exc
+
+    existing_or_skipped, to_prepare = _plan_add_all_skills(
+        catalog,
+        project_skills_dir,
+        target_style,
+        replace_existing=replace_existing,
+        replace_existing_indexes=replace_existing_indexes,
+    )
+
+    prepared: list[_PreparedAdd] = []
+    try:
+        prepared = map_ordered(
+            to_prepare, lambda plan: _prepare_add_plan(plan, target_style)
+        )
+    except Exception:
+        _cleanup_prepared_adds(prepared)
+        for plan in to_prepare:
+            remove_materialization_path(_add_plan_temp_target(plan), ignore_errors=True)
+        raise
+
+    ordered_results: list[AddSkillResult | None] = [None] * len(catalog)
+    for index, result in existing_or_skipped.items():
+        ordered_results[index] = result
+
+    for item in prepared:
+        plan = item.plan
+        manifest_entry = _manifest_entry_for(
+            plan.entry, target_style, metadata=item.metadata
+        )
+
+        def update_manifest(entry: ManifestEntry = manifest_entry) -> None:
+            _upsert_manifest_entry_for_target(project_skills_dir, entry, target_style)
+
+        if plan.replace_existing_target:
+            _replace_with_materialized_entry(
+                plan.target,
+                after_replace=update_manifest,
+                target_style=target_style,
+            )
+            status = "replaced"
+        else:
+            install_materialized_skill_folder(
+                _add_temp_target(plan.target),
+                plan.target,
+                error_message=(
+                    f"Failed to add {target_style.skill_label} '{plan.target.name}'"
+                ),
+                after_install=update_manifest,
+            )
+            status = "added"
+        ordered_results[plan.index] = AddSkillResult(
+            skill=plan.skill_name,
+            target=plan.target,
+            status=status,
+            repo_id=plan.entry.repo_id,
+            source_reference=_source_reference_for(plan.entry),
+            target_kind=target_style.target_kind,
+        )
+
+    return AddAllSkillsResult(
+        results=[result for result in ordered_results if result is not None]
     )
 
 

@@ -60,11 +60,11 @@ from sv.manifest import (
 )
 from sv.parallel import configured_jobs, map_ordered
 from sv.project import (
-    AddAllSkillsResult,
     AddSkillResult,
     RemoveSkillResult,
     SyncResult,
     add_all_project_skills,
+    add_all_vault_skills,
     add_project_skill,
     add_vault_skill,
     normalize_skill_name,
@@ -2445,16 +2445,20 @@ def _add_all_skills_to_context(
     replace_existing: bool = False,
 ):
     if context.is_skill_vault:
-        return AddAllSkillsResult(
-            results=[
-                _add_skill_to_context(
-                    entry,
-                    adapter,
-                    context,
-                    replace_existing=replace_existing,
-                )
-                for entry in catalog
-            ]
+        replace_indexes: set[int] = set()
+        for index, entry in enumerate(catalog):
+            should_replace = _resolve_vault_replacement(
+                entry,
+                context.vault_skills_dir,
+                replace_existing=replace_existing,
+            )
+            if should_replace:
+                replace_indexes.add(index)
+        return add_all_vault_skills(
+            catalog,
+            context.vault_skills_dir,
+            replace_existing=replace_existing,
+            replace_existing_indexes=frozenset(replace_indexes),
         )
     return add_all_project_skills(catalog, _project_skills_dir(adapter, context))
 

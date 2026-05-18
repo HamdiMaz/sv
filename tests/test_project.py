@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import shutil
+import threading
 
 import pytest
 
@@ -13,6 +14,7 @@ from sv.hashing import sha256_skill_directory
 from sv.manifest import ManifestEntry, load_manifest, save_manifest
 from sv.project import (
     add_all_project_skills,
+    add_all_vault_skills,
     add_project_skill,
     add_vault_skill,
     list_project_skills,
@@ -382,6 +384,130 @@ def test_add_all_project_skills_copies_all_source_skills(tmp_path: Path):
     ]
     assert (project_skills / "alpha" / "notes.md").read_text() == "alpha remote\n"
     assert (project_skills / "beta" / "notes.md").read_text() == "local beta\n"
+
+
+class BlockingProjectSourceSkill:
+    description = "Blocking skill."
+    repo_id = "Org/Skills"
+    repo_url = "https://github.com/Org/Skills.git"
+    repo_aliases: tuple[str, ...] = ()
+    source_backend = "blocking"
+
+    def __init__(
+        self,
+        name: str,
+        source_root: Path,
+        started: threading.Event,
+        peer_started: threading.Event,
+    ):
+        self.name = name
+        self.source_path = source_root / "skills" / name
+        self.source_relative_path = f"skills/{name}"
+        self.started = started
+        self.peer_started = peer_started
+        self.source_path.mkdir(parents=True)
+        (self.source_path / "SKILL.md").write_text(
+            "---\n"
+            f"name: {name}\n"
+            "description: Blocking skill.\n"
+            "---\n"
+        )
+
+    def materialize_to(self, destination: Path) -> None:
+        self.started.set()
+        assert self.peer_started.wait(2), "add-all materialization did not overlap"
+        shutil.copytree(self.source_path, destination)
+
+
+def test_add_all_project_skills_prepares_new_skills_in_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    source_root = tmp_path / "source"
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    catalog = [
+        BlockingProjectSourceSkill("alpha", source_root, alpha_started, beta_started),
+        BlockingProjectSourceSkill("beta", source_root, beta_started, alpha_started),
+    ]
+    result = add_all_project_skills(catalog, project_skills)
+    assert [(item.skill, item.status) for item in result.results] == [
+        ("alpha", "added"),
+        ("beta", "added"),
+    ]
+    assert sorted(path.name for path in project_skills.iterdir() if not path.name.startswith(".")) == ["alpha", "beta"]
+    assert sorted(load_manifest(project_skills)) == ["alpha", "beta"]
+
+
+class FailingPrepareProjectSourceSkill(BlockingProjectSourceSkill):
+    def materialize_to(self, destination: Path) -> None:
+        self.started.set()
+        assert self.peer_started.wait(2), "failing add-all materialization did not overlap"
+        raise SvError("simulated materialization failure")
+
+
+def test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    source_root = tmp_path / "source"
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    alpha = BlockingProjectSourceSkill("alpha", source_root, alpha_started, beta_started)
+    beta = FailingPrepareProjectSourceSkill("beta", source_root, beta_started, alpha_started)
+    with pytest.raises(SvError, match="Failed to add Pi skill 'beta'"):
+        add_all_project_skills([alpha, beta], project_skills)
+    assert not (project_skills / "alpha").exists()
+    assert not (project_skills / "beta").exists()
+    assert not list(project_skills.glob(".*.sv-add-tmp"))
+
+
+def test_add_all_vault_skills_replaces_existing_targets_with_replace_temp(
+    tmp_path: Path,
+) -> None:
+    alpha = make_source_skill(tmp_path / "source", "alpha")
+    vault_skills = tmp_path / "vault" / "skills"
+    add_vault_skill(alpha, vault_skills)
+    (alpha.source_path / "notes.md").write_text("alpha replacement\n")
+    result = add_all_vault_skills([alpha], vault_skills, replace_existing=True)
+    assert [(item.skill, item.status) for item in result.results] == [("alpha", "replaced")]
+    assert (vault_skills / "alpha" / "notes.md").read_text() == "alpha replacement\n"
+    assert_no_partial_sv_dirs(vault_skills)
+
+
+def test_add_all_project_skills_preserves_duplicate_name_result_rows(
+    tmp_path: Path,
+) -> None:
+    first = make_source_skill(tmp_path / "source-a", "alpha", repo_id="Org/A")
+    second = make_source_skill(tmp_path / "source-b", "alpha", repo_id="Org/B")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    result = add_all_project_skills([first, second], project_skills)
+    assert [(item.skill, item.status, item.repo_id, item.existing_repo_id) for item in result.results] == [
+        ("alpha", "added", "Org/A", None),
+        ("alpha", "exists", "Org/B", "Org/A"),
+    ]
+
+
+def test_add_all_vault_skills_honors_duplicate_name_replace_indexes(
+    tmp_path: Path,
+) -> None:
+    installed = make_source_skill(tmp_path / "installed-source", "alpha", repo_id="Org/Installed")
+    first = make_source_skill(tmp_path / "source-a", "alpha", repo_id="Org/A")
+    second = make_source_skill(tmp_path / "source-b", "alpha", repo_id="Org/B")
+    vault_skills = tmp_path / "vault" / "skills"
+    add_vault_skill(installed, vault_skills)
+    (second.source_path / "notes.md").write_text("second replacement\n")
+    result = add_all_vault_skills(
+        [first, second], vault_skills, replace_existing_indexes=frozenset({1})
+    )
+    assert [(item.skill, item.status, item.repo_id, item.existing_repo_id) for item in result.results] == [
+        ("alpha", "exists", "Org/A", "Org/Installed"),
+        ("alpha", "replaced", "Org/B", None),
+    ]
+    assert (vault_skills / "alpha" / "notes.md").read_text() == "second replacement\n"
+    assert_no_partial_sv_dirs(vault_skills)
 
 
 @pytest.mark.parametrize(
