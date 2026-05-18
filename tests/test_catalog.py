@@ -143,6 +143,31 @@ class PeerWaitingBackend:
         raise AssertionError("catalog discovery must not materialize folders")
 
 
+def test_build_source_catalog_from_backends_rejects_unsafe_alias_cache_paths_before_backend_work(
+    tmp_path: Path,
+) -> None:
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink support is required")
+    paths = SvPaths.from_home(tmp_path)
+    retained = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    alias = RepoConfig(id="Mirror/Skills", url="git@github.com:Org/Skills.git")
+    outside_mirror = tmp_path / "outside-mirror"
+    outside_mirror.mkdir()
+    paths.sources_dir.mkdir(parents=True)
+    os.symlink(outside_mirror, paths.sources_dir / "Mirror")
+    retained_backend_called = threading.Event()
+
+    with pytest.raises(SvError, match="Source cache path must not contain symlinks"):
+        build_source_catalog_from_backends(
+            [retained, alias],
+            paths,
+            {retained.id: (BackendCallSentinel(retained_backend_called),)},
+            jobs=2,
+        )
+
+    assert not retained_backend_called.is_set()
+
+
 def test_build_source_catalog_from_backends_rejects_unsafe_cache_paths_before_parallel_backend_work(
     tmp_path: Path,
 ) -> None:

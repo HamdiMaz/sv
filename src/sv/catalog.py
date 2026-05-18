@@ -370,9 +370,14 @@ def build_source_catalog_from_backends(
     still attempted in the configured fallback order.
     """
 
-    unique_repos, aliases_by_source = _unique_catalog_repos(repos)
-    for repo in unique_repos:
+    repo_list = list(repos)
+    unique_repos, aliases_by_source = _unique_catalog_repos(repo_list)
+    seen_repo_paths: set[Path] = set()
+    for repo in repo_list:
         repo_path = paths.source_repo_for(repo.id)
+        if repo_path in seen_repo_paths:
+            continue
+        seen_repo_paths.add(repo_path)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
 
     def worker(repo: RepoConfig) -> _RepoBackendCatalogResult:
