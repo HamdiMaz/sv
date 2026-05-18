@@ -1116,22 +1116,13 @@ def _catalog_for_source_command(
         repo = repos_by_id.get(entry.repo_id)
         if repo is None:
             return
-        try:
-            record_cached_skill_body_hash(
-                paths,
-                repo,
-                entry,
-                content_hash=content_hash,
-                skill_file_hash=skill_file_hash,
-            )
-        except SvError as exc:
-            if "symlink" in str(exc).casefold():
-                raise
-            print(
-                "warning: failed to update cached metadata for "
-                f"{entry.qualified_reference}: {exc}",
-                file=sys.stderr,
-            )
+        record_cached_skill_body_hash(
+            paths,
+            repo,
+            entry,
+            content_hash=content_hash,
+            skill_file_hash=skill_file_hash,
+        )
 
     return wrap_catalog_with_skill_body_cache(
         catalog,

@@ -26,11 +26,11 @@ from sv.materialization import (
 from sv.project import normalize_skill_name
 from sv.skills import parse_skill_file
 from sv import source_backends as source_backends_pkg
+from sv.terminal import escape_terminal_controls
+from sv.tomlutil import atomic_write_text, load_toml_document, toml_escape
 
 SourceBackend = source_backends_pkg.SourceBackend
 SourceBackendError = source_backends_pkg.SourceBackendError
-from sv.terminal import escape_terminal_controls
-from sv.tomlutil import atomic_write_text, load_toml_document, toml_escape
 
 DEFAULT_METADATA_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_SKILL_BODY_MAX_UNUSED_SECONDS = 30 * 24 * 60 * 60
@@ -136,6 +136,64 @@ class SkillBodyMetadata:
     created_at: str
     last_used_at: str
     use_count: int
+
+
+@dataclass(frozen=True)
+class CatalogCacheStore:
+    paths: SvPaths
+
+    def path_for(self, repo: RepoConfig) -> Path:
+        return catalog_cache_path(self.paths, repo)
+
+    def load(self, repo: RepoConfig) -> CachedCatalogDocument | None:
+        return load_cached_catalog(self.paths, repo)
+
+    def save(self, repo: RepoConfig, document: CachedCatalogDocument) -> None:
+        save_cached_catalog(self.paths, repo, document)
+
+
+@dataclass(frozen=True)
+class SkillBodyCacheStore:
+    paths: SvPaths
+
+    def path_for(self, content_hash: str) -> Path:
+        return skill_body_cache_path(self.paths, content_hash)
+
+    def try_materialize(
+        self,
+        *,
+        content_hash: str,
+        skill_name: str,
+        destination: Path,
+        now: datetime,
+        warn: Warn | None = None,
+    ) -> bool:
+        return try_materialize_from_skill_body_cache(
+            self.paths,
+            content_hash=content_hash,
+            skill_name=skill_name,
+            destination=destination,
+            now=now,
+            warn=warn,
+        )
+
+    def store(
+        self,
+        source_skill_dir: Path,
+        *,
+        skill_name: str,
+        content_hash: str,
+        source_reference: str,
+        now: datetime,
+    ) -> None:
+        store_skill_body_cache(
+            self.paths,
+            source_skill_dir,
+            skill_name=skill_name,
+            content_hash=content_hash,
+            source_reference=source_reference,
+            now=now,
+        )
 
 
 @dataclass(frozen=True)
@@ -806,13 +864,14 @@ def get_catalog_with_cache(
     refresh_catalog: RefreshCatalog,
     warn: Warn,
 ) -> list[SourceSkill]:
+    catalog_store = CatalogCacheStore(paths)
     documents: dict[str, CachedCatalogDocument] = {}
     cached_entries: list[SourceSkill] = []
     repos_to_refresh: list[RepoConfig] = []
 
     for repo in repos:
         try:
-            document = load_cached_catalog(paths, repo)
+            document = catalog_store.load(repo)
         except SvError as exc:
             if (
                 _cache_error_is_symlink_violation(exc)
@@ -879,7 +938,7 @@ def get_catalog_with_cache(
                     index_hash=index_hash,
                 )
                 try:
-                    save_cached_catalog(paths, repo, document)
+                    catalog_store.save(repo, document)
                 except SvError as exc:
                     if _cache_write_error_must_fail(exc):
                         raise
@@ -973,7 +1032,8 @@ def _record_cached_skill_body_hash_locked(
     if not is_sha256_digest(skill_file_hash):
         raise SvError("skill_file_hash must be a sha256 digest.")
 
-    document = load_cached_catalog(paths, repo)
+    catalog_store = CatalogCacheStore(paths)
+    document = catalog_store.load(repo)
     if document is None:
         return
     updated_entries: list[CachedCatalogEntry] = []
@@ -1001,8 +1061,8 @@ def _record_cached_skill_body_hash_locked(
         entries=tuple(updated_entries),
         catalog_hash="sha256:" + ("0" * 64),
     )
-    save_cached_catalog(
-        paths, repo, replace(unhashed, catalog_hash=_cached_catalog_hash(unhashed))
+    catalog_store.save(
+        repo, replace(unhashed, catalog_hash=_cached_catalog_hash(unhashed))
     )
 
 
@@ -1016,10 +1076,11 @@ def wrap_catalog_with_skill_body_cache(
     refresh_entry_on_body_miss: RefreshEntryOnBodyMiss | None = None,
     warn: Warn | None = None,
 ) -> list[SourceSkill]:
+    body_store = SkillBodyCacheStore(paths)
     return [
         _wrap_source_skill(
             entry,
-            paths,
+            body_store,
             now=now,
             after_store=after_store,
             allow_source_fallback=allow_source_fallback,
@@ -1032,7 +1093,7 @@ def wrap_catalog_with_skill_body_cache(
 
 def _wrap_source_skill(
     entry: SourceSkill,
-    paths: SvPaths,
+    body_store: SkillBodyCacheStore,
     *,
     now: Now,
     after_store: AfterStore,
@@ -1046,8 +1107,7 @@ def _wrap_source_skill(
         current_time = now()
         if (
             entry.source_content_hash is not None
-            and try_materialize_from_skill_body_cache(
-                paths,
+            and body_store.try_materialize(
                 content_hash=entry.source_content_hash,
                 skill_name=entry.name,
                 destination=destination,
@@ -1070,6 +1130,17 @@ def _wrap_source_skill(
 
         if entry.source_backend.startswith("cache:"):
             with _source_fallback_lock(entry):
+                if (
+                    entry.source_content_hash is not None
+                    and body_store.try_materialize(
+                        content_hash=entry.source_content_hash,
+                        skill_name=entry.name,
+                        destination=destination,
+                        now=current_time,
+                        warn=warn,
+                    )
+                ):
+                    return
                 if refresh_entry_on_body_miss is None:
                     raise SvError(
                         f"Cached skill body for {entry.qualified_reference} was not found and no source refresh was provided."
@@ -1081,7 +1152,7 @@ def _wrap_source_skill(
                     )
                 _wrap_source_skill(
                     refreshed,
-                    paths,
+                    body_store,
                     now=now,
                     after_store=after_store,
                     allow_source_fallback=True,
@@ -1103,8 +1174,7 @@ def _wrap_source_skill(
                     f"Source skill {entry.qualified_reference} hash did not match expected {entry.source_content_hash}; got {actual_hash}."
                 )
             try:
-                store_skill_body_cache(
-                    paths,
+                body_store.store(
                     destination,
                     skill_name=entry.name,
                     content_hash=actual_hash,

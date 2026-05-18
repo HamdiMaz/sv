@@ -10,6 +10,7 @@ from sv.catalog import SourceSkill
 from sv import cli as cli_module
 from sv.cli import _choose_skill, build_parser, handle
 from sv.config import SvPaths, load_config
+from sv.errors import SvError
 from sv.hashing import sha256_skill_directory
 from sv.manifest import load_manifest
 from sv.source import default_runner
@@ -1187,6 +1188,27 @@ def test_invalid_skill_is_not_listed_or_added_by_all(tmp_path: Path, capsys):
 
     assert handle(parse(["add", "--all"]), cwd=project, home=home) == 0
     assert not (project / ".pi" / "skills" / "invalid").exists()
+
+
+def test_add_fails_closed_when_cached_metadata_writeback_is_unsafe(
+    tmp_path: Path, run_sv, monkeypatch: pytest.MonkeyPatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    def fail_writeback(*_args, **_kwargs) -> None:
+        raise SvError("unsupported path in cached metadata writeback")
+
+    monkeypatch.setattr(cli_module, "record_cached_skill_body_hash", fail_writeback)
+
+    result = run_sv(["add", "alpha"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "unsupported path in cached metadata writeback" in result.stderr
+    assert not (project / ".pi" / "skills" / "alpha").exists()
 
 
 def test_add_uses_cached_metadata_and_cached_skill_body_when_source_unavailable(

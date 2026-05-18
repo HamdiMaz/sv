@@ -25,8 +25,10 @@ from sv.source_cache import (
     CacheMode,
     CachePolicy,
     CacheRefreshResult,
+    CatalogCacheStore,
     CachedCatalogEntry,
     CachedCatalogDocument,
+    SkillBodyCacheStore,
     DEFAULT_METADATA_TTL_SECONDS,
     DEFAULT_SKILL_BODY_MAX_BYTES,
     DEFAULT_SKILL_BODY_MAX_UNUSED_SECONDS,
@@ -3381,6 +3383,86 @@ def test_cached_body_miss_source_fallback_serializes_same_repo_materialization(
     assert (tmp_path / "beta-dest" / "notes.md").read_text() == "beta fallback\n"
 
 
+def test_cached_metadata_materializer_rechecks_body_cache_after_waiting_for_source_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha", "fallback\n")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    cached_entry = replace(
+        _source_skill(repo, paths, "alpha"),
+        source_backend="cache:api",
+        source_content_hash=content_hash,
+    )
+    refreshed_entry = replace(
+        cached_entry,
+        source_backend="fake-remote",
+        _materializer=lambda destination: shutil.copytree(source_skill, destination),
+    )
+    refresh_calls: list[SourceSkill] = []
+    first_materializer_started = threading.Event()
+    release_first_materializer = threading.Event()
+    second_waiting_for_lock = threading.Event()
+
+    class InstrumentedLock:
+        def __init__(self) -> None:
+            self._lock = threading.RLock()
+
+        def __enter__(self) -> None:
+            if not self._lock.acquire(blocking=False):
+                second_waiting_for_lock.set()
+                self._lock.acquire()
+
+        def __exit__(self, *args: object) -> None:
+            self._lock.release()
+
+    lock = InstrumentedLock()
+    monkeypatch.setattr(source_cache, "_source_fallback_lock", lambda entry: lock)
+
+    def refresh(entry: SourceSkill) -> SourceSkill:
+        refresh_calls.append(entry)
+
+        def materialize(destination: Path) -> None:
+            first_materializer_started.set()
+            assert release_first_materializer.wait(2), "first materializer was not released"
+            shutil.copytree(source_skill, destination)
+
+        return replace(refreshed_entry, _materializer=materialize)
+
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [cached_entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        after_store=lambda *_args: None,
+        refresh_entry_on_body_miss=refresh,
+    )[0]
+    errors: list[BaseException] = []
+
+    def run_materialize(destination: Path) -> None:
+        try:
+            wrapped.materialize_to(destination)
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    first = threading.Thread(target=run_materialize, args=(tmp_path / "first-dest",))
+    second = threading.Thread(target=run_materialize, args=(tmp_path / "second-dest",))
+    first.start()
+    assert first_materializer_started.wait(2), "first source fallback did not start"
+    second.start()
+    assert second_waiting_for_lock.wait(2), "second materialization did not wait for fallback lock"
+    release_first_materializer.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert refresh_calls == [cached_entry]
+    assert (tmp_path / "first-dest" / "notes.md").read_text() == "fallback\n"
+    assert (tmp_path / "second-dest" / "notes.md").read_text() == "fallback\n"
+
+
 def test_attach_source_materializers_serializes_same_repo_cached_entries(
     tmp_path: Path,
 ) -> None:
@@ -3471,3 +3553,59 @@ def test_attach_source_materializers_serializes_same_repo_cached_entries(
     assert max_active == 1
     assert (tmp_path / "alpha-attached" / "notes.md").read_text() == "alpha fallback\n"
     assert (tmp_path / "beta-attached" / "notes.md").read_text() == "beta fallback\n"
+
+
+def test_catalog_cache_store_exposes_existing_cache_path(tmp_path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Repo", url="https://github.com/Org/Repo.git")
+
+    assert CatalogCacheStore(paths).path_for(repo) == catalog_cache_path(
+        paths,
+        repo,
+    )
+
+
+def test_catalog_cache_store_round_trips_document(tmp_path):
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = _catalog_document("2026-05-18T12:00:00Z")
+    store = CatalogCacheStore(paths)
+
+    store.save(repo, document)
+
+    assert store.load(repo) == document
+
+
+def test_skill_body_cache_store_exposes_existing_body_path(tmp_path):
+    paths = SvPaths.from_home(tmp_path)
+    content_hash = "sha256:" + "a" * 64
+
+    assert SkillBodyCacheStore(paths).path_for(content_hash) == skill_body_cache_path(
+        paths,
+        content_hash,
+    )
+
+
+def test_skill_body_cache_store_stores_and_materializes_body(tmp_path):
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store = SkillBodyCacheStore(paths)
+    now = datetime(2026, 5, 18, 12, 0, tzinfo=UTC)
+
+    store.store(
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=now,
+    )
+    destination = tmp_path / "materialized"
+
+    assert store.try_materialize(
+        content_hash=content_hash,
+        skill_name="alpha",
+        destination=destination,
+        now=now,
+    ) is True
+    assert (destination / "SKILL.md").is_file()
