@@ -26,7 +26,7 @@
 - Different repos may refresh in parallel. Backends for the same repo do not run in parallel.
 - Candidate `SKILL.md` reads within one repo remain sequential in the first implementation pass unless they are part of read-only index scanning. This avoids thread-safety surprises with backend instances.
 - The same sparse Git repo cache path may not be mutated by two threads at once. Lock by `repo_path.resolve()` where possible, and by the raw `Path` if resolving fails.
-- Skill-body cache writes, body-cache pruning, and cached catalog hash writeback are serialized with one process-local `RLock`. This prevents lost cached metadata updates when bulk materialization discovers multiple body hashes from the same repo.
+- Skill-body cache writes, body-cache hit touch/prune maintenance, catalog cache writes, and cached catalog hash writeback are serialized with one process-local `RLock`. This prevents lost cached metadata updates and same-process atomic-temp collisions when bulk materialization discovers multiple body hashes from the same repo.
 - Project, vault, and global source-state manifest writes remain serial. No worker writes `.sv/manifest.toml`, `.pi/skills/.sv-manifest.toml`, or global source refresh state.
 - Final target mutation remains serial. No worker renames a prepared temp tree into `.pi/skills/<skill>` or `skills/<skill>`.
 - Bulk add/sync/update workers may create and validate hidden temp directories such as `.alpha.sv-add-tmp` or `.alpha.sv-sync-tmp`. Commit steps consume those temps in stable input order.
@@ -56,7 +56,7 @@
   - Parallelize `ensure_source_repos` across independent repos.
 - Modify `src/sv/source_cache.py`
   - Add one process-local cache write lock.
-  - Serialize skill-body cache writes/prunes and cached catalog body-hash writeback.
+  - Serialize skill-body cache writes/prunes, body-cache hit materialization/touch, catalog cache writes, and cached catalog body-hash writeback.
   - Serialize cached-entry source materialization by repo when source fallback is used.
 - Modify `src/sv/project.py`
   - Add plan/prepare dataclasses for add/sync/update.
@@ -701,7 +701,7 @@ uv run pytest \
   -q --no-cov
 ```
 
-Expected: `ensure_source_repos` does not accept `jobs`, and the CLI test fails until source refresh calls `configured_jobs` through the parallel helper.
+Expected: `ensure_source_repos` does not accept `jobs`. The CLI invalid-`SV_JOBS` test may already pass after Task 2 because lightweight source discovery uses `map_ordered`; keep it as a regression test for the CLI error contract.
 
 - [ ] **Step 4: Parallelize `ensure_source_repos`**
 
@@ -744,7 +744,7 @@ Replace the loop body with ordered parallel work:
 
 - [ ] **Step 5: Parallelize CLI non-lightweight refresh path**
 
-In `src/sv/cli.py`, the helper `_ensure_source_repos_for_refresh` currently loops over repos. Replace that loop with `map_ordered`, but keep global source-state manifest writes in the parent after workers join. Workers must not call `_record_global_source_refresh_failure`.
+In `src/sv/cli.py`, the helper `_ensure_source_repos_for_refresh` currently loops over repos. Replace that loop with `map_ordered`, but keep global source-state manifest writes in the caller after workers join. Workers must not call `_record_global_source_refresh_failure`, and the helper must not record failures itself; otherwise the outer `except SvError` path can overwrite a per-repo failure with an all-repos failure.
 
 Add import:
 
@@ -752,9 +752,16 @@ Add import:
 from sv.parallel import map_ordered
 ```
 
-Replace `_ensure_source_repos_for_refresh` body after the function signature with:
+Change `_ensure_source_repos_for_refresh` to return the first deterministic repo failure instead of raising source-refresh failures directly:
 
 ```python
+def _ensure_source_repos_for_refresh(
+    repos: Sequence[RepoConfig],
+    paths: SvPaths,
+    git_runner,
+    *,
+    update: bool,
+) -> tuple[RepoConfig, str] | None:
     def worker(repo: RepoConfig) -> tuple[RepoConfig, str | None]:
         repo_path = paths.source_repo_for(repo.id)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
@@ -772,14 +779,33 @@ Replace `_ensure_source_repos_for_refresh` body after the function signature wit
 
     results = map_ordered(list(repos), worker)
     for repo, error in results:
-        if error is None:
-            continue
-        if record_global_source_state:
-            _record_global_source_refresh_failure(paths, (repo,), error, started_at)
-        raise SvError(error)
+        if error is not None:
+            return repo, error
+    return None
 ```
 
-This keeps failure reporting deterministic, records global source-state failures serially, and lets invalid `SV_JOBS` errors bubble through the existing `handle` exception block.
+Update the non-lightweight call site in `_update_sources_and_catalog_cache_refresh_from_repos` to record the returned failure serially, set `source_state_recorded = True`, and then raise. This prevents the outer exception handler from writing a second, broader failure record:
+
+```python
+            failure = _ensure_source_repos_for_refresh(
+                repos,
+                paths,
+                git_runner,
+                update=update,
+            )
+            if failure is not None:
+                failed_repo, error = failure
+                if record_global_source_state:
+                    _record_global_source_refresh_failure(
+                        paths, (failed_repo,), error, started_at
+                    )
+                    source_state_recorded = True
+                raise SvError(error)
+            catalog = build_source_catalog(repos, paths)
+            refreshed_repo_ids = frozenset(repo.id for repo in repos)
+```
+
+This keeps failure reporting deterministic and lets invalid `SV_JOBS` errors bubble through the existing `handle` exception block without double-recording source state.
 
 - [ ] **Step 6: Run focused tests**
 
@@ -826,7 +852,9 @@ def test_sparse_backend_materialization_serializes_same_repo_cache(
     active = 0
     max_active = 0
     active_lock = threading.Lock()
-    entered_once = threading.Event()
+    first_inside = threading.Event()
+    second_thread_started = threading.Event()
+    second_inside = threading.Event()
     release = threading.Event()
 
     def fake_prepare(*args, **kwargs):
@@ -837,7 +865,10 @@ def test_sparse_backend_materialization_serializes_same_repo_cache(
         with active_lock:
             active += 1
             max_active = max(max_active, active)
-            entered_once.set()
+            if destination.name == "a":
+                first_inside.set()
+            else:
+                second_inside.set()
         assert release.wait(2), "test did not release materialization"
         with active_lock:
             active -= 1
@@ -854,6 +885,8 @@ def test_sparse_backend_materialization_serializes_same_repo_cache(
 
     def run_backend(backend, destination):
         try:
+            if destination.name == "b":
+                second_thread_started.set()
             backend.materialize_folder("skills/alpha", destination)
         except BaseException as exc:  # noqa: BLE001 - test captures worker failures
             errors.append(exc)
@@ -861,13 +894,16 @@ def test_sparse_backend_materialization_serializes_same_repo_cache(
     thread_a = threading.Thread(target=run_backend, args=(first, tmp_path / "a"))
     thread_b = threading.Thread(target=run_backend, args=(second, tmp_path / "b"))
     thread_a.start()
-    assert entered_once.wait(2), "first materialization did not start"
+    assert first_inside.wait(2), "first materialization did not start"
     thread_b.start()
+    assert second_thread_started.wait(2), "second materialization thread did not start"
+    assert not second_inside.wait(0.25), "second materialization entered while first held same-repo lock"
     release.set()
     thread_a.join(2)
     thread_b.join(2)
 
     assert errors == []
+    assert second_inside.is_set(), "second materialization never ran after first released"
     assert max_active == 1
 ```
 
@@ -1078,20 +1114,31 @@ Keep the existing `_ensure_sparse_git_repo_after_git_check` logic unchanged insi
 
 - [ ] **Step 6: Add cache write lock**
 
-In `src/sv/source_cache.py`, import `threading` and add this near constants:
+In `src/sv/source_cache.py`, import `threading` and `RLockType`, then add this near constants:
 
 ```python
+from _thread import RLock as RLockType
 import threading
 
 _CACHE_WRITE_LOCK = threading.RLock()
 ```
 
-Serialize every skill-body cache metadata write, body-cache install/delete, prune, and cached catalog hash writeback with `with _CACHE_WRITE_LOCK:`:
+Serialize every skill-body cache metadata write, body-cache install/delete, prune, catalog cache write, and cached catalog hash writeback with `with _CACHE_WRITE_LOCK:`:
 
 ```python
+def save_cached_catalog(...):
+    with _CACHE_WRITE_LOCK:
+        return _save_cached_catalog_locked(...)
+
+
 def store_skill_body_cache(...):
     with _CACHE_WRITE_LOCK:
         return _store_skill_body_cache_locked(...)
+
+
+def try_materialize_from_skill_body_cache(...):
+    with _CACHE_WRITE_LOCK:
+        return _try_materialize_from_skill_body_cache_locked(...)
 
 
 def record_cached_skill_body_hash(...):
@@ -1109,9 +1156,35 @@ def clean_cache(...):
         return _clean_cache_locked(...)
 ```
 
-Use private locked helpers for those functions. Move each existing function body into its helper without changing behavior. Because the lock is an `RLock`, `store_skill_body_cache()` can still call `_prune_after_body_cache_write()`, and `clean_cache()` can still call `prune_skill_body_cache()`.
+Use private locked helpers for those functions. Move each existing function body into its helper without changing behavior. Because the lock is an `RLock`, `store_skill_body_cache()` can still call `_prune_after_body_cache_write()`, `try_materialize_from_skill_body_cache()` can still touch and prune after a hit, and `clean_cache()` can still call `prune_skill_body_cache()`.
 
-Also wrap `_touch_skill_body_cache()` with `_CACHE_WRITE_LOCK`, because `try_materialize_from_skill_body_cache()` updates body-cache metadata and then prunes after a cache hit. This prevents lost `use_count`/`last_used_at` updates and prune/delete races outside the store path.
+Locking `save_cached_catalog()` is required because same-process concurrent refresh-on-body-miss paths can otherwise write the same catalog cache file through the same atomic temp name. Locking the full `try_materialize_from_skill_body_cache()` body is required because checking validity, copying from the body cache, touching metadata, and pruning must not race with another worker pruning or replacing the same body-cache entry.
+
+Also keep `_touch_skill_body_cache()` itself protected by `_CACHE_WRITE_LOCK` for any internal callers. This prevents lost `use_count`/`last_used_at` updates and prune/delete races outside the store path. Add or update source-cache tests so concurrent cached body misses for two skills in the same repo do not collide on catalog cache writes.
+
+Add a second lock family in `source_cache.py` for cached source fallback materialization by repo/source identity:
+
+```python
+_SOURCE_FALLBACK_LOCKS_GUARD = threading.Lock()
+_SOURCE_FALLBACK_LOCKS: dict[tuple[str, str], RLockType] = {}
+
+
+def _source_fallback_lock(entry: SourceSkill) -> RLockType:
+    key = (entry.repo_id, repo_source_key(entry.repo_url))
+    with _SOURCE_FALLBACK_LOCKS_GUARD:
+        lock = _SOURCE_FALLBACK_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _SOURCE_FALLBACK_LOCKS[key] = lock
+        return lock
+```
+
+Use this lock around the source-fallback branches that run after a cached body miss:
+
+- In `attach_source_materializers()`, wrap the backend fallback loop for one cached entry with `with _source_fallback_lock(cached_entry):`.
+- In `_wrap_source_skill()`, when `entry.source_backend.startswith("cache:")`, wrap `refresh_entry_on_body_miss(entry)` and the refreshed entry's `materialize_to(destination)` call with `with _source_fallback_lock(entry):`.
+
+This keeps same-repo cached body misses from concurrently refreshing/writing catalog metadata or mutating sparse source cache paths through independent fallback backend instances.
 
 - [ ] **Step 7: Attach materializer locks for in-memory backend instances**
 
@@ -1309,6 +1382,22 @@ def test_add_all_vault_skills_replaces_existing_targets_with_replace_temp(
     assert_no_partial_sv_dirs(vault_skills)
 ```
 
+Append this duplicate-result regression test to `tests/test_project.py` so bulk planning keeps one output row per catalog item instead of collapsing by skill name:
+
+```python
+def test_add_all_project_skills_preserves_duplicate_name_result_rows(tmp_path: Path) -> None:
+    first = make_source_skill(tmp_path / "source-a", "alpha", repo_id="Org/A")
+    second = make_source_skill(tmp_path / "source-b", "alpha", repo_id="Org/B")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+
+    result = add_all_project_skills([first, second], project_skills)
+
+    assert [(item.skill, item.status, item.repo_id, item.existing_repo_id) for item in result.results] == [
+        ("alpha", "added", "Org/A", None),
+        ("alpha", "exists", "Org/B", "Org/A"),
+    ]
+```
+
 - [ ] **Step 3: Run the new tests and verify they fail**
 
 Run:
@@ -1318,10 +1407,11 @@ uv run pytest \
   tests/test_project.py::test_add_all_project_skills_prepares_new_skills_in_parallel \
   tests/test_project.py::test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails \
   tests/test_project.py::test_add_all_vault_skills_replaces_existing_targets_with_replace_temp \
+  tests/test_project.py::test_add_all_project_skills_preserves_duplicate_name_result_rows \
   -q --no-cov
 ```
 
-Expected: first test fails because add-all is serial; second may fail because sequential add can commit `alpha` before `beta` fails; third fails until bulk replacement prepares into the sync temp and reports `replaced`.
+Expected: first test fails because add-all is serial; second may fail because sequential add can commit `alpha` before `beta` fails; third fails until bulk replacement prepares into the sync temp and reports `replaced`; fourth protects per-catalog result ordering for duplicate names.
 
 - [ ] **Step 4: Add add-all plan dataclasses**
 
@@ -1336,6 +1426,7 @@ Add these dataclasses after `_MaterializedSkillMetadata`:
 ```python
 @dataclass(frozen=True)
 class _AddPlan:
+    index: int
     entry: ProjectSourceSkill
     skill_name: str
     target: Path
@@ -1366,7 +1457,7 @@ def _plan_add_all_skills(
     existing_or_skipped: list[_AddPlan] = []
     to_prepare: list[_AddPlan] = []
     planned_targets: dict[str, ProjectSourceSkill] = {}
-    for entry in catalog:
+    for index, entry in enumerate(catalog):
         skill_name = normalize_skill_name(entry.name)
         if entry.source_backend == "local-cache" and not entry.source_path.is_dir():
             raise SvError(f"Skill '{skill_name}' was not found in source skills directory.")
@@ -1376,6 +1467,7 @@ def _plan_add_all_skills(
         if planned_entry is not None:
             existing_or_skipped.append(
                 _AddPlan(
+                    index=index,
                     entry=entry,
                     skill_name=skill_name,
                     target=target,
@@ -1404,6 +1496,7 @@ def _plan_add_all_skills(
             if not should_replace:
                 existing_or_skipped.append(
                     _AddPlan(
+                        index=index,
                         entry=entry,
                         skill_name=skill_name,
                         target=target,
@@ -1428,6 +1521,7 @@ def _plan_add_all_skills(
                 continue
         to_prepare.append(
             _AddPlan(
+                index=index,
                 entry=entry,
                 skill_name=skill_name,
                 target=target,
@@ -1501,11 +1595,10 @@ def _add_all_skills_parallel(
             remove_materialization_path(_add_plan_temp_target(plan), ignore_errors=True)
         raise
 
-    results_by_skill: dict[str, AddSkillResult] = {
-        plan.skill_name: plan.result
-        for plan in existing_or_skipped
-        if plan.result is not None
-    }
+    ordered_results: list[AddSkillResult | None] = [None] * len(catalog)
+    for plan in existing_or_skipped:
+        if plan.result is not None:
+            ordered_results[plan.index] = plan.result
 
     try:
         for item in prepared:
@@ -1542,7 +1635,7 @@ def _add_all_skills_parallel(
                     after_install=update_manifest,
                 )
                 status = "added"
-            results_by_skill[plan.skill_name] = AddSkillResult(
+            ordered_results[plan.index] = AddSkillResult(
                 skill=plan.skill_name,
                 target=plan.target,
                 status=status,
@@ -1555,12 +1648,12 @@ def _add_all_skills_parallel(
             remove_materialization_path(_add_plan_temp_target(item.plan), ignore_errors=True)
         raise
 
-    ordered_results = [
-        results_by_skill[normalize_skill_name(entry.name)]
-        for entry in catalog
-        if normalize_skill_name(entry.name) in results_by_skill
-    ]
-    return AddAllSkillsResult(results=ordered_results)
+    results: list[AddSkillResult] = []
+    for result in ordered_results:
+        if result is None:
+            raise AssertionError("missing add-all result after planning and commit")
+        results.append(result)
+    return AddAllSkillsResult(results=results)
 ```
 
 If `ManifestEntry` is not imported in `project.py` scope, it already is imported near the top from `sv.manifest`; use that existing import.
@@ -1636,6 +1729,7 @@ uv run pytest \
   tests/test_project.py::test_add_all_project_skills_prepares_new_skills_in_parallel \
   tests/test_project.py::test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails \
   tests/test_project.py::test_add_all_vault_skills_replaces_existing_targets_with_replace_temp \
+  tests/test_project.py::test_add_all_project_skills_preserves_duplicate_name_result_rows \
   tests/test_project.py \
   tests/test_cli_add_contracts.py \
   tests/test_vault_mode_targets.py \
@@ -1731,6 +1825,40 @@ def test_update_project_skills_prepares_changed_replacements_in_parallel(
     assert (project_skills / "beta" / "notes.md").read_text() == "beta update\n"
 ```
 
+Append this regression test to `tests/test_project.py` to protect source-hash-unavailable update behavior:
+
+```python
+def test_update_project_skills_keeps_unhashed_materialized_source_unchanged(
+    tmp_path: Path,
+) -> None:
+    source_entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(source_entry, project_skills)
+
+    def materialize(destination: Path) -> None:
+        shutil.copytree(source_entry.source_path, destination)
+
+    remote_entry = SourceSkill(
+        name="managed",
+        description="Managed skill.",
+        repo_id=source_entry.repo_id,
+        repo_url=source_entry.repo_url,
+        repo_path=tmp_path / "missing-source-cache",
+        source_path=tmp_path / "missing-source-cache" / "skills" / "managed",
+        source_relative_path="skills/managed",
+        source_backend="fake-remote",
+        _materializer=materialize,
+    )
+
+    result = update_project_skills([remote_entry], project_skills)
+
+    assert result.updated == []
+    assert [(skip.skill, skip.reason) for skip in result.skipped] == [
+        ("managed", "unchanged")
+    ]
+    assert_no_partial_sv_dirs(project_skills)
+```
+
 Ensure these functions are imported in `tests/test_project.py`:
 
 ```python
@@ -1767,6 +1895,12 @@ class _ReplacementPlan:
 class _PreparedReplacement:
     plan: _ReplacementPlan
     metadata: _MaterializedSkillMetadata
+
+
+@dataclass(frozen=True)
+class _ReplacementWork:
+    plan: _ReplacementPlan
+    prepared: _PreparedReplacement | None = None
 ```
 
 - [ ] **Step 5: Add replacement prepare/commit helpers**
@@ -1781,6 +1915,29 @@ def _prepare_replacement_plan(plan: _ReplacementPlan) -> _PreparedReplacement:
         plan.target_style,
     )
     return _PreparedReplacement(plan=plan, metadata=metadata)
+
+
+def _cleanup_replacement_work(work: Sequence[_ReplacementWork]) -> None:
+    for item in work:
+        remove_materialization_path(_sync_temp_target(item.plan.target), ignore_errors=True)
+
+
+def _prepare_replacement_work_ordered(
+    work: Sequence[_ReplacementWork],
+) -> list[_PreparedReplacement]:
+    plans_to_prepare = [item.plan for item in work if item.prepared is None]
+    try:
+        prepared_iter = iter(map_ordered(plans_to_prepare, _prepare_replacement_plan))
+        prepared_replacements: list[_PreparedReplacement] = []
+        for item in work:
+            if item.prepared is not None:
+                prepared_replacements.append(item.prepared)
+            else:
+                prepared_replacements.append(next(prepared_iter))
+        return prepared_replacements
+    except Exception:
+        _cleanup_replacement_work(work)
+        raise
 
 
 def _commit_prepared_replacement(prepared: _PreparedReplacement) -> None:
@@ -1805,16 +1962,17 @@ def _commit_prepared_replacement(prepared: _PreparedReplacement) -> None:
     )
 
 
-def _prepare_replacements_ordered(
-    plans: Sequence[_ReplacementPlan],
-) -> list[_PreparedReplacement]:
-    prepared: list[_PreparedReplacement] = []
+def _commit_prepared_replacements(
+    prepared_replacements: Sequence[_PreparedReplacement],
+) -> None:
     try:
-        prepared = map_ordered(plans, _prepare_replacement_plan)
-        return prepared
+        for prepared in prepared_replacements:
+            _commit_prepared_replacement(prepared)
     except Exception:
-        for plan in plans:
-            remove_materialization_path(_sync_temp_target(plan.target), ignore_errors=True)
+        for prepared in prepared_replacements:
+            remove_materialization_path(
+                _sync_temp_target(prepared.plan.target), ignore_errors=True
+            )
         raise
 ```
 
@@ -1825,7 +1983,7 @@ In `_sync_skills`, keep all existing skip/source-missing logic. Change only the 
 Before the local skills loop, add:
 
 ```python
-    replacement_plans: list[_ReplacementPlan] = []
+    replacement_work: list[_ReplacementWork] = []
 ```
 
 Replace:
@@ -1841,12 +1999,14 @@ Replace:
 with:
 
 ```python
-            replacement_plans.append(
-                _ReplacementPlan(
-                    entry=entry,
-                    target=local_skill,
-                    project_skills_dir=project_skills_dir,
-                    target_style=target_style,
+            replacement_work.append(
+                _ReplacementWork(
+                    _ReplacementPlan(
+                        entry=entry,
+                        target=local_skill,
+                        project_skills_dir=project_skills_dir,
+                        target_style=target_style,
+                    )
                 )
             )
             updated.append(local_skill.name)
@@ -1856,9 +2016,8 @@ with:
 After the local skills loop and before returning `SyncResult`, add:
 
 ```python
-    prepared_replacements = _prepare_replacements_ordered(replacement_plans)
-    for prepared in prepared_replacements:
-        _commit_prepared_replacement(prepared)
+    prepared_replacements = _prepare_replacement_work_ordered(replacement_work)
+    _commit_prepared_replacements(prepared_replacements)
 ```
 
 This preserves the `updated` list order because it is still appended during deterministic local skill iteration.
@@ -1868,7 +2027,7 @@ This preserves the `updated` list order because it is still appended during dete
 In `_update_skills`, add before the manifest loop:
 
 ```python
-    replacement_plans: list[_ReplacementPlan] = []
+    replacement_work: list[_ReplacementWork] = []
 ```
 
 For the branch:
@@ -1886,58 +2045,61 @@ replace it with:
 
 ```python
         if source_hash is not None:
-            replacement_plans.append(
-                _ReplacementPlan(
-                    entry=source_entry,
-                    target=target,
-                    project_skills_dir=project_skills_dir,
-                    target_style=target_style,
+            replacement_work.append(
+                _ReplacementWork(
+                    _ReplacementPlan(
+                        entry=source_entry,
+                        target=target,
+                        project_skills_dir=project_skills_dir,
+                        target_style=target_style,
+                    )
                 )
             )
             updated.append(skill_name)
             continue
 ```
 
-For the final branch that materializes and commits immediately, replace from:
+For the final branch where `source_hash is None`, keep the existing materialize-and-compare step because it is the only way to know whether the source actually changed. Only queue a commit when the materialized content differs from the installed baseline. Replace only the old inline manifest-entry/`_replace_with_materialized_entry(...)` commit portion after the `metadata.content_hash == baseline_hash` unchanged branch with this queued prepared replacement:
 
 ```python
-        metadata = _materialize_entry_for_replace(source_entry, target, target_style)
-```
-
-through the `_replace_with_materialized_entry(...)` call with this two-phase code:
-
-```python
-        replacement_plans.append(
-            _ReplacementPlan(
-                entry=source_entry,
-                target=target,
-                project_skills_dir=project_skills_dir,
-                target_style=target_style,
+        replacement_plan = _ReplacementPlan(
+            entry=source_entry,
+            target=target,
+            project_skills_dir=project_skills_dir,
+            target_style=target_style,
+        )
+        replacement_work.append(
+            _ReplacementWork(
+                replacement_plan,
+                _PreparedReplacement(replacement_plan, metadata),
             )
         )
         updated.append(skill_name)
 ```
 
+Because this final branch prepares a temp tree during the manifest loop, wrap the manifest loop in `try/except Exception` and call `_cleanup_replacement_work(replacement_work)` before re-raising if a later serial compare materialization fails.
+
 After the manifest loop and before returning `SyncResult`, add:
 
 ```python
-    prepared_replacements = _prepare_replacements_ordered(replacement_plans)
-    for prepared in prepared_replacements:
-        _commit_prepared_replacement(prepared)
+    prepared_replacements = _prepare_replacement_work_ordered(replacement_work)
+    _commit_prepared_replacements(prepared_replacements)
 ```
 
-This commits every prepared replacement through the same manifest path and avoids stale metadata variables from the old inline branch.
+This commits every prepared replacement through the same manifest path, preserves manifest-order commits, preserves unchanged-source behavior when source hashes are unavailable, and avoids stale metadata variables from the old inline branch.
 
 - [ ] **Step 8: Keep compare-only materialization behavior correct**
 
-The branches in `_update_skills` that materialize only to discover `source_hash` and then discard unchanged temps must remain serial until they are refactored into a distinct compare plan. Keep these existing blocks unchanged:
+The branches in `_update_skills` that materialize only to discover `source_hash` and then discard unchanged temps must remain serial until they are refactored into a distinct compare plan. Keep these existing unchanged-source blocks intact:
 
 ```python
 metadata = _materialize_entry_for_replace(source_entry, target, target_style)
 remove_materialization_path(_sync_temp_target(target), ignore_errors=True)
 ```
 
-This avoids changing unchanged-source behavior while still parallelizing actual replacements. A separate compare-plan refactor can be done after this plan if profiling shows it matters.
+For the final `source_hash is None` branch, do not replace the materialize/compare logic with a blind replacement plan. It must still check `metadata.content_hash == baseline_hash` and report `unchanged` without committing when the materialized source matches the installed baseline. Only the changed case should enqueue an already prepared `_PreparedReplacement` for the serial commit phase.
+
+This avoids changing unchanged-source behavior while still parallelizing actual replacements with known source hashes. A separate compare-plan refactor can be done after this plan if profiling shows it matters.
 
 - [ ] **Step 9: Run sync/update tests**
 
@@ -1947,6 +2109,7 @@ Run:
 uv run pytest \
   tests/test_project.py::test_sync_project_skills_prepares_replacements_in_parallel \
   tests/test_project.py::test_update_project_skills_prepares_changed_replacements_in_parallel \
+  tests/test_project.py::test_update_project_skills_keeps_unhashed_materialized_source_unchanged \
   tests/test_project.py \
   tests/test_cli_sync_contracts.py \
   tests/test_cli_update_contracts.py \
@@ -2293,7 +2456,7 @@ Add this paragraph to `docs/usage.md` near source refresh/add/sync guidance:
 
 Add this troubleshooting entry to `docs/troubleshooting.md`:
 
-```markdown
+````markdown
 ## I want to disable parallel execution
 
 Set `SV_JOBS=1` before the command:
@@ -2304,19 +2467,19 @@ SV_JOBS=1 sv update
 ```
 
 `SV_JOBS` accepts integers from 1 through 64. Values outside that range, empty values, or non-integers fail with `SV_JOBS must be an integer between 1 and 64.`
-```
+````
 
 - [ ] **Step 6: Update testing docs**
 
 Add this note to `docs/testing.md` under Fast local test loops:
 
-```markdown
+````markdown
 When investigating ordering-sensitive failures, rerun the focused test with `SV_JOBS=1` to disable sv's internal worker pools:
 
 ```bash
 SV_JOBS=1 uv run pytest tests/test_project.py -q --no-cov
 ```
-```
+````
 
 - [ ] **Step 7: Run docs tests**
 
@@ -2427,7 +2590,7 @@ Expected: `sv --help` prints command help and version assertion passes.
 
 - [ ] **Step 8: Manual behavior spot checks**
 
-Run these from temporary repos created by tests or a local scratch directory:
+Run these from a local scratch project with a configured test source repo and at least one installed skill. Do not run them against an arbitrary developer project unless you intend to mutate that project. A scratch setup can reuse the same local Git source shape created by the integration tests.
 
 ```bash
 SV_JOBS=1 uv run sv list --refresh
@@ -2484,7 +2647,7 @@ Skip this commit if no files changed after Task 8.
 - [ ] No worker writes project/vault manifests.
 - [ ] No worker renames temp trees into final skill targets.
 - [ ] Same sparse Git cache path is locked across metadata checkout and materialization cleanup.
-- [ ] Cache body writes, prune maintenance, and cached catalog hash writeback are serialized.
+- [ ] Cache body writes, body-cache hit touch/prune maintenance, catalog cache writes, and cached catalog hash writeback are serialized.
 - [ ] Bulk add/sync/update output order is unchanged from the current sorted/input order.
 - [ ] Status and index save one final TOML document after parallel hashing completes.
 - [ ] Security symlink checks still happen before file traversal, copying, deletion, or manifest writes.
