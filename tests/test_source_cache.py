@@ -13,6 +13,7 @@ import pytest
 from sv.catalog import SourceSkill
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
+from sv.hashing import sha256_skill_directory
 from sv.source_cache import (
     CacheMode,
     CachePolicy,
@@ -27,6 +28,10 @@ from sv.source_cache import (
     load_cached_catalog,
     save_cached_catalog,
     get_catalog_with_cache,
+    load_skill_body_metadata,
+    skill_body_cache_path,
+    store_skill_body_cache,
+    try_materialize_from_skill_body_cache,
     _cached_catalog_hash,
     _utc_timestamp,
 )
@@ -82,6 +87,17 @@ def _catalog_document(refreshed_at: str) -> CachedCatalogDocument:
 
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
+
+
+def _write_skill_tree(root: Path, name: str, body: str = "body\n") -> Path:
+    skill = root / name
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Cached skill.\n---\n",
+        encoding="utf-8",
+    )
+    (skill / "notes.md").write_text(body, encoding="utf-8")
+    return skill
 
 
 def _source_skill(repo: RepoConfig, paths: SvPaths, name: str) -> SourceSkill:
@@ -405,9 +421,7 @@ def test_get_catalog_with_cache_saves_explicit_successful_empty_refresh(
 
     def refresh(repos: Sequence[RepoConfig]) -> CacheRefreshResult:
         assert list(repos) == [repo]
-        return CacheRefreshResult(
-            entries=(), refreshed_repo_ids=frozenset({repo.id})
-        )
+        return CacheRefreshResult(entries=(), refreshed_repo_ids=frozenset({repo.id}))
 
     catalog = get_catalog_with_cache(
         [repo],
@@ -461,7 +475,9 @@ def test_get_catalog_with_cache_persists_refresh_backend_and_index_hash(
     paths = SvPaths.from_home(tmp_path)
     repo = _repo()
     refreshed_entry = _source_skill(repo, paths, "indexed-skill")
-    index_hash = "sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c"
+    index_hash = (
+        "sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c"
+    )
 
     def refresh(repos: Sequence[RepoConfig]) -> CacheRefreshResult:
         assert list(repos) == [repo]
@@ -637,3 +653,284 @@ def test_get_catalog_with_cache_fails_closed_for_symlinked_catalog_cache(
             refresh_catalog=refresh,
             warn=lambda message: None,
         )
+
+
+def test_skill_body_cache_stores_and_materializes_valid_skill(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    destination = tmp_path / "dest" / "alpha"
+
+    materialized = try_materialize_from_skill_body_cache(
+        paths,
+        content_hash=content_hash,
+        skill_name="alpha",
+        destination=destination,
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+    )
+
+    assert materialized is True
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "body\n"
+    metadata = load_skill_body_metadata(paths, content_hash)
+    assert metadata.use_count == 2
+    assert metadata.last_used_at == "2026-05-18T13:00:00Z"
+
+
+def test_skill_body_cache_miss_returns_false(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    destination = tmp_path / "dest" / "alpha"
+    content_hash = "sha256:" + ("1" * 64)
+
+    assert (
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=destination,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        )
+        is False
+    )
+    assert not destination.exists()
+
+
+def test_store_skill_body_cache_refuses_symlinked_tmp_dir(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    attacker_dir = tmp_path / "attacker"
+    attacker_dir.mkdir()
+    paths.cache_dir.mkdir(parents=True)
+    paths.cache_tmp_dir.symlink_to(attacker_dir, target_is_directory=True)
+
+    with pytest.raises(SvError, match="symlinked"):
+        store_skill_body_cache(
+            paths,
+            source_skill,
+            skill_name="alpha",
+            content_hash=content_hash,
+            source_reference="Org/Skills:skills/alpha",
+            now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+        )
+
+    assert list(attacker_dir.iterdir()) == []
+
+
+def test_store_skill_body_cache_refuses_symlinked_body_root(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    attacker_dir = tmp_path / "attacker"
+    attacker_dir.mkdir()
+    paths.skill_body_cache_dir.mkdir(parents=True)
+    (paths.skill_body_cache_dir / "sha256").symlink_to(
+        attacker_dir, target_is_directory=True
+    )
+
+    with pytest.raises(SvError, match="symlinked"):
+        store_skill_body_cache(
+            paths,
+            source_skill,
+            skill_name="alpha",
+            content_hash=content_hash,
+            source_reference="Org/Skills:skills/alpha",
+            now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+        )
+
+    assert list(attacker_dir.iterdir()) == []
+
+
+def test_skill_body_cache_metadata_hash_mismatch_is_treated_as_miss(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    metadata_path = skill_body_cache_path(paths, content_hash) / "metadata.toml"
+    metadata_path.write_text(
+        metadata_path.read_text(encoding="utf-8").replace(
+            content_hash, "sha256:" + ("2" * 64)
+        ),
+        encoding="utf-8",
+    )
+    destination = tmp_path / "dest" / "alpha"
+
+    assert (
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=destination,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        )
+        is False
+    )
+    assert not destination.exists()
+    assert not skill_body_cache_path(paths, content_hash).exists()
+
+
+def test_skill_body_cache_corrupt_metadata_is_treated_as_miss(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    (skill_body_cache_path(paths, content_hash) / "metadata.toml").write_text(
+        "not = [valid", encoding="utf-8"
+    )
+    destination = tmp_path / "dest" / "alpha"
+
+    assert (
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=destination,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        )
+        is False
+    )
+    assert not destination.exists()
+    assert not skill_body_cache_path(paths, content_hash).exists()
+
+
+def test_skill_body_cache_symlinked_metadata_fails_closed(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    metadata_path = skill_body_cache_path(paths, content_hash) / "metadata.toml"
+    metadata_path.unlink()
+    metadata_path.symlink_to(tmp_path / "attacker-metadata.toml")
+
+    with pytest.raises(SvError, match="symlinked"):
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=tmp_path / "dest" / "alpha",
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        )
+
+    assert skill_body_cache_path(paths, content_hash).exists()
+
+
+def test_skill_body_cache_symlinked_body_file_fails_closed(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    notes_path = skill_body_cache_path(paths, content_hash) / "skill" / "notes.md"
+    notes_path.unlink()
+    notes_path.symlink_to(tmp_path / "attacker-notes.md")
+
+    with pytest.raises(SvError, match="symlink"):
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=tmp_path / "dest" / "alpha",
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        )
+
+    assert skill_body_cache_path(paths, content_hash).exists()
+
+
+def test_skill_body_cache_corrupt_body_is_treated_as_miss(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    (skill_body_cache_path(paths, content_hash) / "skill" / "notes.md").write_text(
+        "tampered\n", encoding="utf-8"
+    )
+    destination = tmp_path / "dest" / "alpha"
+
+    assert (
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=destination,
+            now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+        )
+        is False
+    )
+    assert not destination.exists()
+    assert not skill_body_cache_path(paths, content_hash).exists()
+
+
+def test_store_skill_body_cache_replaces_corrupt_existing_metadata(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    (skill_body_cache_path(paths, content_hash) / "metadata.toml").write_text(
+        "not = [valid", encoding="utf-8"
+    )
+
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 13, tzinfo=UTC),
+    )
+
+    metadata = load_skill_body_metadata(paths, content_hash)
+    assert metadata.last_used_at == "2026-05-18T13:00:00Z"
+    assert metadata.use_count == 1

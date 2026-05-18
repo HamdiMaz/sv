@@ -8,12 +8,20 @@ from pathlib import Path
 from typing import Any, cast
 import hashlib
 import stat
+import uuid
 
 from sv.catalog import SourceSkill, normalize_source_relative_path
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
-from sv.hashformat import is_sha256_digest
+from sv.hashformat import SHA256_PREFIX, is_sha256_digest
+from sv.hashing import sha256_skill_directory
+from sv.materialization import (
+    copy_skill_folder_to_temp,
+    remove_materialization_path,
+    validate_materialization_source_tree,
+)
 from sv.project import normalize_skill_name
+from sv.skills import parse_skill_file
 from sv.terminal import escape_terminal_controls
 from sv.tomlutil import atomic_write_text, load_toml_document, toml_escape
 
@@ -86,6 +94,295 @@ class CachedCatalogDocument:
     catalog_hash: str
     index_hash: str | None = None
     entries: tuple[CachedCatalogEntry, ...] = ()
+
+
+@dataclass(frozen=True)
+class SkillBodyMetadata:
+    content_hash: str
+    skill_name: str
+    source_reference: str
+    size_bytes: int
+    created_at: str
+    last_used_at: str
+    use_count: int
+
+
+def skill_body_cache_path(paths: SvPaths, content_hash: str) -> Path:
+    if not is_sha256_digest(content_hash):
+        raise SvError("Skill body cache content hash must be a sha256 digest.")
+    digest = content_hash.removeprefix(SHA256_PREFIX)
+    return paths.skill_body_cache_dir / "sha256" / digest
+
+
+def _skill_body_folder(paths: SvPaths, content_hash: str) -> Path:
+    return skill_body_cache_path(paths, content_hash) / "skill"
+
+
+def _skill_body_metadata_path(paths: SvPaths, content_hash: str) -> Path:
+    return skill_body_cache_path(paths, content_hash) / "metadata.toml"
+
+
+def load_skill_body_metadata(paths: SvPaths, content_hash: str) -> SkillBodyMetadata:
+    path = _skill_body_metadata_path(paths, content_hash)
+    _reject_symlinked_cache_dir(path.parent)
+    if path.is_symlink():
+        raise SvError(
+            f"Refusing to read symlinked skill body cache metadata at {path}."
+        )
+    data = load_toml_document(path, "sv skill body cache metadata")
+    metadata = _parse_skill_body_metadata(data, path)
+    if metadata.content_hash != content_hash:
+        raise SvError(
+            f"Invalid skill body cache metadata at {path}: content_hash does not match requested hash."
+        )
+    return metadata
+
+
+def store_skill_body_cache(
+    paths: SvPaths,
+    source_skill_dir: Path,
+    *,
+    skill_name: str,
+    content_hash: str,
+    source_reference: str,
+    now: datetime,
+) -> None:
+    skill_name = normalize_skill_name(skill_name)
+    if not is_sha256_digest(content_hash):
+        raise SvError("Skill body cache content hash must be a sha256 digest.")
+    validate_materialization_source_tree(source_skill_dir)
+    parse_skill_file(source_skill_dir / "SKILL.md", expected_folder=skill_name)
+    if (
+        sha256_skill_directory(source_skill_dir, expected_name=skill_name)
+        != content_hash
+    ):
+        raise SvError("Skill body cache content hash mismatch for source skill.")
+
+    cache_root = skill_body_cache_path(paths, content_hash)
+    _ensure_private_cache_dir(paths.cache_tmp_dir)
+    _ensure_private_cache_dir(cache_root.parent)
+    _reject_symlinked_cache_dir(cache_root)
+
+    if cache_root.exists():
+        if _cached_skill_body_is_valid(paths, content_hash, skill_name):
+            _touch_skill_body_cache(paths, content_hash, now)
+            return
+        remove_materialization_path(cache_root, ignore_errors=True)
+
+    temp_root = _unique_skill_body_temp_root(paths, content_hash)
+    try:
+        temp_root.mkdir(mode=0o700)
+        copied = copy_skill_folder_to_temp(
+            source_skill_dir,
+            temp_root / "skill",
+            error_message="Failed to stage skill body cache",
+        )
+        parse_skill_file(copied / "SKILL.md", expected_folder=skill_name)
+        if sha256_skill_directory(copied, expected_name=skill_name) != content_hash:
+            raise SvError("Skill body cache copied content hash mismatch.")
+        timestamp = _utc_timestamp(now)
+        metadata = SkillBodyMetadata(
+            content_hash=content_hash,
+            skill_name=skill_name,
+            source_reference=source_reference,
+            size_bytes=_directory_size(copied),
+            created_at=timestamp,
+            last_used_at=timestamp,
+            use_count=1,
+        )
+        _save_skill_body_metadata_at(temp_root / "metadata.toml", metadata)
+        if sha256_skill_directory(copied, expected_name=skill_name) != content_hash:
+            raise SvError("Skill body cache staged content hash mismatch.")
+        _reject_symlinked_cache_dir(cache_root)
+        temp_root.replace(cache_root)
+    except Exception:
+        remove_materialization_path(temp_root, ignore_errors=True)
+        if cache_root.exists() and not cache_root.is_symlink():
+            try:
+                if not _cached_skill_body_is_valid(paths, content_hash, skill_name):
+                    remove_materialization_path(cache_root, ignore_errors=True)
+            except SvError:
+                pass
+        raise
+
+
+def try_materialize_from_skill_body_cache(
+    paths: SvPaths,
+    *,
+    content_hash: str,
+    skill_name: str,
+    destination: Path,
+    now: datetime,
+) -> bool:
+    skill_name = normalize_skill_name(skill_name)
+    if not _cached_skill_body_is_valid(paths, content_hash, skill_name):
+        return False
+    if destination.exists() or destination.is_symlink():
+        remove_materialization_path(destination)
+    try:
+        copy_skill_folder_to_temp(
+            _skill_body_folder(paths, content_hash),
+            destination,
+            error_message="Failed to materialize skill from body cache",
+        )
+        if (
+            sha256_skill_directory(destination, expected_name=skill_name)
+            != content_hash
+        ):
+            remove_materialization_path(
+                skill_body_cache_path(paths, content_hash), ignore_errors=True
+            )
+            remove_materialization_path(destination, ignore_errors=True)
+            return False
+        try:
+            _touch_skill_body_cache(paths, content_hash, now)
+        except SvError as exc:
+            remove_materialization_path(destination, ignore_errors=True)
+            if _cache_error_is_symlink_violation(exc):
+                raise
+            remove_materialization_path(
+                skill_body_cache_path(paths, content_hash), ignore_errors=True
+            )
+            return False
+    except SvError:
+        remove_materialization_path(destination, ignore_errors=True)
+        raise
+    return True
+
+
+def _parse_skill_body_metadata(data: dict[str, Any], path: Path) -> SkillBodyMetadata:
+    if not isinstance(data, dict):
+        raise SvError(
+            f"Invalid skill body cache metadata at {path}: document must be a table."
+        )
+    version = data.get("schema_version")
+    if version != CACHE_SCHEMA_VERSION or isinstance(version, bool):
+        raise SvError(
+            f"Invalid skill body cache metadata at {path}: schema_version must be {CACHE_SCHEMA_VERSION}."
+        )
+    created_at = _required_string(data, "created_at", path)
+    last_used_at = _required_string(data, "last_used_at", path)
+    _parse_utc(created_at, path, "created_at")
+    _parse_utc(last_used_at, path, "last_used_at")
+    skill_name = normalize_skill_name(_required_string(data, "skill_name", path))
+    return SkillBodyMetadata(
+        content_hash=_required_hash(data, "content_hash", path),
+        skill_name=skill_name,
+        source_reference=_required_string(data, "source_reference", path),
+        size_bytes=_required_int(data, "size_bytes", path),
+        created_at=created_at,
+        last_used_at=last_used_at,
+        use_count=_required_int(data, "use_count", path),
+    )
+
+
+def _required_int(data: Mapping[str, Any], field: str, path: Path) -> int:
+    value = data.get(field)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise SvError(
+            f"Invalid skill body cache metadata at {path}: {field} must be a non-negative integer."
+        )
+    return value
+
+
+def _save_skill_body_metadata_at(path: Path, metadata: SkillBodyMetadata) -> None:
+    text = (
+        "\n".join(
+            [
+                f"schema_version = {CACHE_SCHEMA_VERSION}",
+                f'content_hash = "{toml_escape(metadata.content_hash)}"',
+                f'skill_name = "{toml_escape(metadata.skill_name)}"',
+                f'source_reference = "{toml_escape(metadata.source_reference)}"',
+                f"size_bytes = {metadata.size_bytes}",
+                f'created_at = "{toml_escape(metadata.created_at)}"',
+                f'last_used_at = "{toml_escape(metadata.last_used_at)}"',
+                f"use_count = {metadata.use_count}",
+            ]
+        )
+        + "\n"
+    )
+    atomic_write_text(
+        path,
+        text,
+        document_name="sv skill body cache metadata",
+        temp_path_description="skill body cache metadata temporary file",
+        create_parent=False,
+    )
+
+
+def _save_skill_body_metadata(paths: SvPaths, metadata: SkillBodyMetadata) -> None:
+    _save_skill_body_metadata_at(
+        _skill_body_metadata_path(paths, metadata.content_hash), metadata
+    )
+
+
+def _touch_skill_body_cache(paths: SvPaths, content_hash: str, now: datetime) -> None:
+    metadata = load_skill_body_metadata(paths, content_hash)
+    _save_skill_body_metadata(
+        paths,
+        replace(
+            metadata,
+            last_used_at=_utc_timestamp(now),
+            use_count=metadata.use_count + 1,
+        ),
+    )
+
+
+def _cached_skill_body_is_valid(
+    paths: SvPaths, content_hash: str, skill_name: str
+) -> bool:
+    cache_root = skill_body_cache_path(paths, content_hash)
+    if cache_root.is_symlink():
+        raise SvError(f"Refusing to use symlinked skill body cache at {cache_root}.")
+    if not cache_root.exists():
+        return False
+    try:
+        _reject_symlinked_cache_dir(cache_root)
+        metadata = load_skill_body_metadata(paths, content_hash)
+        if metadata.skill_name != skill_name:
+            raise SvError(
+                f"Invalid skill body cache metadata at {cache_root}: skill_name does not match requested skill."
+            )
+        folder = _skill_body_folder(paths, content_hash)
+        validate_materialization_source_tree(folder)
+        parse_skill_file(folder / "SKILL.md", expected_folder=skill_name)
+        if sha256_skill_directory(folder, expected_name=skill_name) != content_hash:
+            raise SvError(
+                f"Invalid skill body cache at {cache_root}: hash did not match."
+            )
+    except SvError as exc:
+        if _cache_error_is_symlink_violation(exc):
+            raise
+        remove_materialization_path(cache_root, ignore_errors=True)
+        return False
+    return True
+
+
+def _unique_skill_body_temp_root(paths: SvPaths, content_hash: str) -> Path:
+    digest = content_hash.removeprefix(SHA256_PREFIX)
+    for _ in range(100):
+        candidate = paths.cache_tmp_dir / f"skill-{digest}-{uuid.uuid4().hex}"
+        if candidate.exists() or candidate.is_symlink():
+            continue
+        return candidate
+    raise SvError("Failed to allocate unique skill body cache temporary directory.")
+
+
+def _directory_size(path: Path) -> int:
+    total = 0
+    try:
+        for entry in path.rglob("*"):
+            if entry.is_symlink():
+                raise SvError(
+                    f"Skill body cache source must not contain symlinks; contains a symlink at {entry}."
+                )
+            if entry.is_file():
+                total += entry.stat().st_size
+    except OSError as exc:
+        raise SvError(
+            f"Failed to inspect skill body cache directory {path}: {exc}"
+        ) from exc
+    return total
 
 
 def _cache_file_key(repo: RepoConfig) -> str:
