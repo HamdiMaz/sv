@@ -440,6 +440,56 @@ def test_add_all_project_skills_prepares_new_skills_in_parallel(
     assert sorted(load_manifest(project_skills)) == ["alpha", "beta"]
 
 
+def test_sync_project_skills_prepares_replacements_in_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    source_root = tmp_path / "source"
+    project_skills.mkdir(parents=True)
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    alpha = BlockingProjectSourceSkill("alpha", source_root, alpha_started, beta_started)
+    beta = BlockingProjectSourceSkill("beta", source_root, beta_started, alpha_started)
+    add_all_project_skills([alpha, beta], project_skills)
+    alpha.started = threading.Event()
+    beta.started = threading.Event()
+    alpha.peer_started = beta.started
+    beta.peer_started = alpha.started
+    (alpha.source_path / "notes.md").write_text("alpha v2\n")
+    (beta.source_path / "notes.md").write_text("beta v2\n")
+    result = sync_project_skills([alpha, beta], project_skills)
+    assert result.updated == ["alpha", "beta"]
+    assert result.skipped == []
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert (project_skills / "beta" / "notes.md").read_text() == "beta v2\n"
+
+
+def test_update_project_skills_prepares_changed_replacements_in_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SV_JOBS", "2")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    source_root = tmp_path / "source"
+    project_skills.mkdir(parents=True)
+    alpha_started = threading.Event()
+    beta_started = threading.Event()
+    alpha = BlockingProjectSourceSkill("alpha", source_root, alpha_started, beta_started)
+    beta = BlockingProjectSourceSkill("beta", source_root, beta_started, alpha_started)
+    add_all_project_skills([alpha, beta], project_skills)
+    alpha.started = threading.Event()
+    beta.started = threading.Event()
+    alpha.peer_started = beta.started
+    beta.peer_started = alpha.started
+    (alpha.source_path / "notes.md").write_text("alpha update\n")
+    (beta.source_path / "notes.md").write_text("beta update\n")
+    result = update_project_skills([alpha, beta], project_skills)
+    assert result.updated == ["alpha", "beta"]
+    assert [skip.reason for skip in result.skipped] == []
+    assert (project_skills / "alpha" / "notes.md").read_text() == "alpha update\n"
+    assert (project_skills / "beta" / "notes.md").read_text() == "beta update\n"
+
+
 class FailingPrepareProjectSourceSkill(BlockingProjectSourceSkill):
     def materialize_to(self, destination: Path) -> None:
         self.started.set()
@@ -1035,6 +1085,36 @@ def test_update_project_skills_skips_hash_unchanged_source_without_materializing
         ("managed", "unchanged")
     ]
     assert (project_skills / "managed" / "notes.md").read_text() == "managed remote\n"
+
+
+def test_update_project_skills_keeps_unhashed_materialized_source_unchanged(
+    tmp_path: Path,
+) -> None:
+    source_entry = make_source_skill(tmp_path / "source", "managed")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    add_project_skill(source_entry, project_skills)
+
+    def materialize(destination: Path) -> None:
+        shutil.copytree(source_entry.source_path, destination)
+
+    remote_entry = SourceSkill(
+        name="managed",
+        description="Managed skill.",
+        repo_id=source_entry.repo_id,
+        repo_url=source_entry.repo_url,
+        repo_path=tmp_path / "missing-source-cache",
+        source_path=tmp_path / "missing-source-cache" / "skills" / "managed",
+        source_relative_path="skills/managed",
+        source_backend="fake-remote",
+        _materializer=materialize,
+    )
+
+    result = update_project_skills([remote_entry], project_skills)
+    assert result.updated == []
+    assert [(skip.skill, skip.reason) for skip in result.skipped] == [
+        ("managed", "unchanged")
+    ]
+    assert_no_partial_sv_dirs(project_skills)
 
 
 def test_sync_project_skills_updates_manifest_tracked_origin(tmp_path: Path):

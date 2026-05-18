@@ -139,6 +139,33 @@ class _PreparedAdd:
     metadata: _MaterializedSkillMetadata
 
 
+@dataclass(frozen=True)
+class _ReplacementPlan:
+    entry: ProjectSourceSkill
+    target: Path
+    project_skills_dir: Path
+    target_style: _TargetStyle
+
+
+@dataclass(frozen=True)
+class _PreparedReplacement:
+    plan: _ReplacementPlan
+    metadata: _MaterializedSkillMetadata
+
+
+@dataclass(frozen=True)
+class _ReplacementWork:
+    plan: _ReplacementPlan
+    prepared: _PreparedReplacement | None = None
+
+
+@dataclass(frozen=True)
+class _ManifestUpdatePlan:
+    project_skills_dir: Path
+    entry: ManifestEntry
+    target_style: _TargetStyle
+
+
 def normalize_skill_name(skill: str) -> str:
     """Return a safe single-folder skill name for source and project paths."""
     name = skill.strip()
@@ -687,6 +714,8 @@ def _sync_skills(
     updated: list[str] = []
     backfilled: list[str] = []
     skipped: list[SyncSkip] = []
+    replacement_work: list[_ReplacementWork] = []
+    manifest_updates: list[_ManifestUpdatePlan] = []
 
     try:
         local_skills = sorted(project_skills_dir.iterdir(), key=lambda path: path.name)
@@ -731,8 +760,8 @@ def _sync_skills(
                     local_skill,
                     None,
                 )
-                _upsert_manifest_entry_for_target(
-                    project_skills_dir, refreshed, target_style
+                manifest_updates.append(
+                    _ManifestUpdatePlan(project_skills_dir, refreshed, target_style)
                 )
                 skipped.append(
                     SyncSkip(
@@ -742,8 +771,10 @@ def _sync_skills(
                     )
                 )
                 continue
-            _replace_tree_and_update_manifest(
-                entry, local_skill, project_skills_dir, target_style
+            replacement_work.append(
+                _ReplacementWork(
+                    _ReplacementPlan(entry, local_skill, project_skills_dir, target_style)
+                )
             )
             updated.append(local_skill.name)
             continue
@@ -765,6 +796,9 @@ def _sync_skills(
             )
         else:
             skipped.append(SyncSkip(skill=local_skill.name, reason="local-only"))
+
+    prepared_replacements = _prepare_replacement_work_ordered(replacement_work)
+    _commit_manifest_updates_and_replacements(manifest_updates, prepared_replacements)
 
     return SyncResult(
         updated=updated,
@@ -793,153 +827,157 @@ def _update_skills(
     manifest = _load_manifest_for_target(project_skills_dir, target_style)
     updated: list[str] = []
     skipped: list[SyncSkip] = []
+    replacement_work: list[_ReplacementWork] = []
+    manifest_updates: list[_ManifestUpdatePlan] = []
 
-    for skill_name, manifest_entry in sorted(manifest.items()):
-        target = project_skills_dir / skill_name
-        _reject_symlinked_project_skill(target, target_style)
-        _validate_project_skill_dir_name(target, target_style)
-        if not target.is_dir():
-            continue
+    try:
+        for skill_name, manifest_entry in sorted(manifest.items()):
+            target = project_skills_dir / skill_name
+            _reject_symlinked_project_skill(target, target_style)
+            _validate_project_skill_dir_name(target, target_style)
+            if not target.is_dir():
+                continue
 
-        source_entry = _catalog_entry_for_manifest(catalog, manifest_entry)
-        refreshed = _refreshed_manifest_entry_state(
-            manifest_entry,
-            target,
-            source_entry,
-        )
-        if source_entry is None:
-            _upsert_manifest_entry_for_target(
-                project_skills_dir, refreshed, target_style
+            source_entry = _catalog_entry_for_manifest(catalog, manifest_entry)
+            refreshed = _refreshed_manifest_entry_state(
+                manifest_entry,
+                target,
+                source_entry,
             )
-            skipped.append(
-                SyncSkip(
-                    skill=skill_name,
-                    reason="source-missing",
-                    repo_ids=(manifest_entry.repo_id,),
+            if source_entry is None:
+                manifest_updates.append(
+                    _ManifestUpdatePlan(project_skills_dir, refreshed, target_style)
                 )
-            )
-            continue
-
-        installed_hash = manifest_entry.installed_content_hash
-        local_hash = refreshed.local_content_hash
-        source_hash = _available_source_content_hash(source_entry)
-        source_skill_file_hash = refreshed.source_skill_file_hash
-        baseline_hash = installed_hash
-        if (
-            baseline_hash is None
-            and manifest_entry.source_content_hash is not None
-            and local_hash == manifest_entry.source_content_hash
-        ):
-            baseline_hash = manifest_entry.source_content_hash
-
-        if baseline_hash is None:
-            if source_hash is None:
-                metadata = _materialize_entry_for_replace(
-                    source_entry, target, target_style
+                skipped.append(
+                    SyncSkip(
+                        skill=skill_name,
+                        reason="source-missing",
+                        repo_ids=(manifest_entry.repo_id,),
+                    )
                 )
-                remove_materialization_path(_sync_temp_target(target), ignore_errors=True)
-                source_hash = metadata.content_hash
-                source_skill_file_hash = metadata.skill_file_hash
-            if local_hash == source_hash:
+                continue
+
+            installed_hash = manifest_entry.installed_content_hash
+            local_hash = refreshed.local_content_hash
+            source_hash = _available_source_content_hash(source_entry)
+            source_skill_file_hash = refreshed.source_skill_file_hash
+            baseline_hash = installed_hash
+            if (
+                baseline_hash is None
+                and manifest_entry.source_content_hash is not None
+                and local_hash == manifest_entry.source_content_hash
+            ):
+                baseline_hash = manifest_entry.source_content_hash
+
+            if baseline_hash is None:
+                if source_hash is None:
+                    metadata = _materialize_entry_for_replace(
+                        source_entry, target, target_style
+                    )
+                    remove_materialization_path(
+                        _sync_temp_target(target), ignore_errors=True
+                    )
+                    source_hash = metadata.content_hash
+                    source_skill_file_hash = metadata.skill_file_hash
+                if local_hash == source_hash:
+                    refreshed = replace(
+                        refreshed,
+                        source_content_hash=source_hash,
+                        source_skill_file_hash=source_skill_file_hash,
+                        installed_content_hash=source_hash,
+                        local_content_hash=local_hash,
+                        orphan=False,
+                        modified=False,
+                        update_available=False,
+                    )
+                    manifest_updates.append(
+                        _ManifestUpdatePlan(project_skills_dir, refreshed, target_style)
+                    )
+                    skipped.append(SyncSkip(skill=skill_name, reason="unchanged"))
+                    continue
                 refreshed = replace(
                     refreshed,
                     source_content_hash=source_hash,
                     source_skill_file_hash=source_skill_file_hash,
-                    installed_content_hash=source_hash,
+                    modified=True,
+                    update_available=source_hash != local_hash,
+                )
+                manifest_updates.append(
+                    _ManifestUpdatePlan(project_skills_dir, refreshed, target_style)
+                )
+                skipped.append(SyncSkip(skill=skill_name, reason="modified"))
+                continue
+
+            if local_hash != baseline_hash:
+                if source_hash is None:
+                    metadata = _materialize_entry_for_replace(
+                        source_entry, target, target_style
+                    )
+                    remove_materialization_path(
+                        _sync_temp_target(target), ignore_errors=True
+                    )
+                    source_hash = metadata.content_hash
+                    source_skill_file_hash = metadata.skill_file_hash
+                refreshed = replace(
+                    refreshed,
+                    source_content_hash=source_hash,
+                    source_skill_file_hash=source_skill_file_hash,
+                    update_available=source_hash != baseline_hash,
+                )
+                manifest_updates.append(
+                    _ManifestUpdatePlan(project_skills_dir, refreshed, target_style)
+                )
+                skipped.append(SyncSkip(skill=skill_name, reason="modified"))
+                continue
+            if source_hash is not None and source_hash == baseline_hash:
+                refreshed = replace(
+                    refreshed,
+                    installed_content_hash=baseline_hash,
+                    modified=False,
+                    update_available=False,
+                )
+                manifest_updates.append(
+                    _ManifestUpdatePlan(project_skills_dir, refreshed, target_style)
+                )
+                skipped.append(SyncSkip(skill=skill_name, reason="unchanged"))
+                continue
+
+            replacement_plan = _ReplacementPlan(
+                source_entry, target, project_skills_dir, target_style
+            )
+            if source_hash is not None:
+                replacement_work.append(_ReplacementWork(replacement_plan))
+                updated.append(skill_name)
+                continue
+
+            metadata = _materialize_entry_for_replace(source_entry, target, target_style)
+            if metadata.content_hash == baseline_hash:
+                remove_materialization_path(_sync_temp_target(target), ignore_errors=True)
+                refreshed = replace(
+                    refreshed,
+                    source_content_hash=metadata.content_hash,
+                    source_skill_file_hash=metadata.skill_file_hash,
+                    installed_content_hash=baseline_hash,
                     local_content_hash=local_hash,
                     orphan=False,
                     modified=False,
                     update_available=False,
                 )
-                _upsert_manifest_entry_for_target(
-                    project_skills_dir, refreshed, target_style
+                manifest_updates.append(
+                    _ManifestUpdatePlan(project_skills_dir, refreshed, target_style)
                 )
                 skipped.append(SyncSkip(skill=skill_name, reason="unchanged"))
                 continue
-            refreshed = replace(
-                refreshed,
-                source_content_hash=source_hash,
-                source_skill_file_hash=source_skill_file_hash,
-                modified=True,
-                update_available=source_hash != local_hash,
-            )
-            _upsert_manifest_entry_for_target(
-                project_skills_dir, refreshed, target_style
-            )
-            skipped.append(SyncSkip(skill=skill_name, reason="modified"))
-            continue
 
-        if local_hash != baseline_hash:
-            if source_hash is None:
-                metadata = _materialize_entry_for_replace(
-                    source_entry, target, target_style
-                )
-                remove_materialization_path(_sync_temp_target(target), ignore_errors=True)
-                source_hash = metadata.content_hash
-                source_skill_file_hash = metadata.skill_file_hash
-            refreshed = replace(
-                refreshed,
-                source_content_hash=source_hash,
-                source_skill_file_hash=source_skill_file_hash,
-                update_available=source_hash != baseline_hash,
-            )
-            _upsert_manifest_entry_for_target(
-                project_skills_dir, refreshed, target_style
-            )
-            skipped.append(SyncSkip(skill=skill_name, reason="modified"))
-            continue
-        if source_hash is not None and source_hash == baseline_hash:
-            refreshed = replace(
-                refreshed,
-                installed_content_hash=baseline_hash,
-                modified=False,
-                update_available=False,
-            )
-            _upsert_manifest_entry_for_target(
-                project_skills_dir, refreshed, target_style
-            )
-            skipped.append(SyncSkip(skill=skill_name, reason="unchanged"))
-            continue
-
-        if source_hash is not None:
-            _replace_tree_and_update_manifest(
-                source_entry, target, project_skills_dir, target_style
-            )
+            prepared = _PreparedReplacement(replacement_plan, metadata)
+            replacement_work.append(_ReplacementWork(replacement_plan, prepared))
             updated.append(skill_name)
-            continue
+    except Exception:
+        _cleanup_replacement_work(replacement_work)
+        raise
 
-        metadata = _materialize_entry_for_replace(source_entry, target, target_style)
-        if metadata.content_hash == baseline_hash:
-            remove_materialization_path(_sync_temp_target(target), ignore_errors=True)
-            refreshed = replace(
-                refreshed,
-                source_content_hash=metadata.content_hash,
-                source_skill_file_hash=metadata.skill_file_hash,
-                installed_content_hash=baseline_hash,
-                local_content_hash=local_hash,
-                orphan=False,
-                modified=False,
-                update_available=False,
-            )
-            _upsert_manifest_entry_for_target(
-                project_skills_dir, refreshed, target_style
-            )
-            skipped.append(SyncSkip(skill=skill_name, reason="unchanged"))
-            continue
-
-        manifest_replacement = _manifest_entry_for(
-            source_entry, target_style, metadata=metadata
-        )
-
-        def update_manifest() -> None:
-            _upsert_manifest_entry_for_target(
-                project_skills_dir, manifest_replacement, target_style
-            )
-
-        _replace_with_materialized_entry(
-            target, after_replace=update_manifest, target_style=target_style
-        )
-        updated.append(skill_name)
+    prepared_replacements = _prepare_replacement_work_ordered(replacement_work)
+    _commit_manifest_updates_and_replacements(manifest_updates, prepared_replacements)
 
     return SyncResult(
         updated=updated,
@@ -1295,7 +1333,92 @@ def _replace_tree_and_update_manifest(
             project_skills_dir, manifest_entry, target_style
         )
 
-    _replace_with_materialized_entry(target, after_replace=update_manifest, target_style=target_style)
+    _replace_with_materialized_entry(
+        target, after_replace=update_manifest, target_style=target_style
+    )
+
+
+def _prepare_replacement_plan(plan: _ReplacementPlan) -> _PreparedReplacement:
+    metadata = _materialize_entry_for_replace(plan.entry, plan.target, plan.target_style)
+    return _PreparedReplacement(plan=plan, metadata=metadata)
+
+
+def _cleanup_replacement_work(work: Sequence[_ReplacementWork]) -> None:
+    for item in work:
+        remove_materialization_path(_sync_temp_target(item.plan.target), ignore_errors=True)
+
+
+def _prepare_replacement_work_ordered(
+    work: Sequence[_ReplacementWork],
+) -> list[_PreparedReplacement]:
+    plans_to_prepare = [item.plan for item in work if item.prepared is None]
+    try:
+        prepared_iter = iter(map_ordered(plans_to_prepare, _prepare_replacement_plan))
+        prepared_replacements: list[_PreparedReplacement] = []
+        for item in work:
+            if item.prepared is not None:
+                prepared_replacements.append(item.prepared)
+            else:
+                prepared_replacements.append(next(prepared_iter))
+        return prepared_replacements
+    except Exception:
+        _cleanup_replacement_work(work)
+        raise
+
+
+def _commit_prepared_replacement(prepared: _PreparedReplacement) -> None:
+    plan = prepared.plan
+    manifest_entry = _manifest_entry_for(
+        plan.entry, plan.target_style, metadata=prepared.metadata
+    )
+
+    def update_manifest() -> None:
+        _upsert_manifest_entry_for_target(
+            plan.project_skills_dir, manifest_entry, plan.target_style
+        )
+
+    _replace_with_materialized_entry(
+        plan.target, after_replace=update_manifest, target_style=plan.target_style
+    )
+
+
+def _cleanup_prepared_replacements(
+    prepared_replacements: Sequence[_PreparedReplacement],
+) -> None:
+    for prepared in prepared_replacements:
+        remove_materialization_path(
+            _sync_temp_target(prepared.plan.target), ignore_errors=True
+        )
+
+
+def _commit_prepared_replacements(
+    prepared_replacements: Sequence[_PreparedReplacement],
+) -> None:
+    try:
+        for prepared in prepared_replacements:
+            _commit_prepared_replacement(prepared)
+    except Exception:
+        _cleanup_prepared_replacements(prepared_replacements)
+        raise
+
+
+def _commit_manifest_updates(updates: Sequence[_ManifestUpdatePlan]) -> None:
+    for update in updates:
+        _upsert_manifest_entry_for_target(
+            update.project_skills_dir, update.entry, update.target_style
+        )
+
+
+def _commit_manifest_updates_and_replacements(
+    updates: Sequence[_ManifestUpdatePlan],
+    prepared_replacements: Sequence[_PreparedReplacement],
+) -> None:
+    try:
+        _commit_manifest_updates(updates)
+        _commit_prepared_replacements(prepared_replacements)
+    except Exception:
+        _cleanup_prepared_replacements(prepared_replacements)
+        raise
 
 
 def _materialize_entry_for_replace(
