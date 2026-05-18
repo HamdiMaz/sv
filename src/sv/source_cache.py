@@ -137,6 +137,7 @@ def save_cached_catalog(
             text,
             document_name=_CATALOG_CACHE_DOCUMENT,
             temp_path_description="catalog cache temporary file",
+            create_parent=False,
         )
     except SvError as exc:
         if _cache_write_error_must_fail(exc):
@@ -372,13 +373,37 @@ def _toml_string(value: str) -> str:
 
 def _ensure_private_cache_dir(path: Path) -> None:
     _reject_symlinked_cache_dir(path)
+    chain = _cache_directory_chain(path)
+    _ensure_private_cache_parent(chain[0].parent)
+    for directory in chain:
+        _reject_symlinked_cache_dir(directory)
+        try:
+            directory.mkdir(mode=0o700, exist_ok=True)
+        except OSError as exc:
+            raise SvError(
+                f"Failed to create sv catalog cache directory {directory}: {exc}"
+            ) from exc
+        _restrict_private_cache_dir(directory)
+    _reject_symlinked_cache_dir(path)
+
+
+def _ensure_private_cache_parent(path: Path) -> None:
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if path.is_symlink():
+            raise SvError(
+                f"Refusing to use symlinked sv catalog cache directory at {path}."
+            )
+        path.mkdir(mode=0o700, exist_ok=True)
+        if path.is_symlink():
+            raise SvError(
+                f"Refusing to use symlinked sv catalog cache directory at {path}."
+            )
+    except SvError:
+        raise
     except OSError as exc:
         raise SvError(
             f"Failed to create sv catalog cache directory {path}: {exc}"
         ) from exc
-    _repair_existing_private_cache_dirs(path)
 
 
 def _repair_existing_private_cache_dirs(path: Path) -> None:
@@ -386,19 +411,31 @@ def _repair_existing_private_cache_dirs(path: Path) -> None:
     for directory in _cache_directory_chain(path):
         if not directory.exists():
             continue
-        try:
-            directory.chmod(0o700)
-            mode = stat.S_IMODE(directory.stat().st_mode)
-        except OSError as exc:
-            raise SvError(
-                f"Failed to restrict sv catalog cache directory {directory}: {exc}"
-            ) from exc
-        if mode != 0o700:
-            raise SvError(
-                f"Failed to restrict sv catalog cache directory {directory}: "
-                f"mode is {mode:#o}."
-            )
+        _restrict_private_cache_dir(directory)
     _reject_symlinked_cache_dir(path)
+
+
+def _restrict_private_cache_dir(directory: Path) -> None:
+    if directory.is_symlink():
+        raise SvError(
+            f"Refusing to use symlinked sv catalog cache directory at {directory}."
+        )
+    try:
+        directory.chmod(0o700)
+        mode = stat.S_IMODE(directory.stat().st_mode)
+    except OSError as exc:
+        raise SvError(
+            f"Failed to restrict sv catalog cache directory {directory}: {exc}"
+        ) from exc
+    if mode != 0o700:
+        raise SvError(
+            f"Failed to restrict sv catalog cache directory {directory}: "
+            f"mode is {mode:#o}."
+        )
+    if directory.is_symlink():
+        raise SvError(
+            f"Refusing to use symlinked sv catalog cache directory at {directory}."
+        )
 
 
 def _cache_directory_chain(path: Path) -> Sequence[Path]:

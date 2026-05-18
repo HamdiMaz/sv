@@ -105,6 +105,38 @@ def test_catalog_cache_save_makes_cache_directory_chain_owner_private(
     assert _mode(paths.catalog_cache_dir) == 0o700
 
 
+def test_catalog_cache_save_creates_cache_directories_without_parents_true(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    document = _catalog_document("2026-05-18T12:00:00Z")
+    original_mkdir = Path.mkdir
+    mkdir_calls: list[tuple[Path, int, bool]] = []
+    expected_cache_dirs = (
+        paths.sv_home / "cache",
+        paths.cache_dir,
+        paths.catalog_cache_dir,
+    )
+
+    def guarded_mkdir(
+        self: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
+        if self in expected_cache_dirs:
+            mkdir_calls.append((self, mode, parents))
+            assert not parents, f"cache directory {self} used parents=True"
+        original_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", guarded_mkdir)
+
+    save_cached_catalog(paths, _repo(), document)
+
+    assert mkdir_calls == [(path, 0o700, False) for path in expected_cache_dirs]
+    assert [_mode(path) for path in expected_cache_dirs] == [0o700, 0o700, 0o700]
+
+
 def test_catalog_cache_load_repairs_existing_cache_directory_permissions(
     tmp_path: Path,
 ) -> None:

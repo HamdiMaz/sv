@@ -139,12 +139,14 @@ def atomic_write_text(
     document_name: str,
     temp_name: str | None = None,
     temp_path_description: str | None = None,
+    create_parent: bool = True,
 ) -> None:
     """Atomically write UTF-8 text through a same-directory temp file."""
     temp_path = path.with_name(temp_name or f".{path.name}.{os.getpid()}.tmp")
     try:
         _reject_symlinked_toml_path_or_ancestors(path, document_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if create_parent:
+            path.parent.mkdir(parents=True, exist_ok=True)
         _reject_symlinked_toml_path_or_ancestors(path, document_name)
         if temp_path.is_symlink():
             temp_description = temp_path_description or document_name
