@@ -15,6 +15,7 @@ from tests.helpers import parse_sv
             [
                 "project-local AI agent skills.",
                 "source repos",
+                "cache",
             ],
         ),
         (
@@ -43,6 +44,14 @@ from tests.helpers import parse_sv
             [
                 "Show sv-managed skill status",
                 "project, skill-vault, or global source context",
+            ],
+        ),
+        (
+            ["cache", "--help"],
+            [
+                "Inspect or clean the global sv cache",
+                "status",
+                "clean",
             ],
         ),
         (

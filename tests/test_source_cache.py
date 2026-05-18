@@ -17,6 +17,8 @@ from sv.hashing import sha256_file, sha256_skill_directory
 from sv.source import FakeSourceBackend
 from sv.source_cache import (
     attach_source_materializers,
+    cache_summary,
+    clean_cache,
     CacheMode,
     CachePolicy,
     CacheRefreshResult,
@@ -61,6 +63,29 @@ def test_default_cache_policy_matches_product_defaults() -> None:
     assert policy.allow_stale_on_error is True
     assert DEFAULT_SKILL_BODY_MAX_UNUSED_SECONDS == 30 * 24 * 60 * 60
     assert DEFAULT_SKILL_BODY_MAX_BYTES == 256 * 1024 * 1024
+
+
+def test_cache_summary_counts_catalogs_and_skill_bodies(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    save_cached_catalog(paths, _repo(), _catalog_document("2026-05-18T12:00:00Z"))
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+    )
+
+    summary = cache_summary(paths, now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC))
+    cleaned = clean_cache(paths, now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC))
+
+    assert summary.catalog_files == 1
+    assert summary.skill_bodies == 1
+    assert summary.skill_body_bytes > 0
+    assert cleaned == summary
 
 
 def _repo() -> RepoConfig:

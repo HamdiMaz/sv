@@ -86,6 +86,8 @@ from sv.source import (
     source_backends_for_repo,
 )
 from sv.source_cache import (
+    cache_summary,
+    clean_cache,
     CacheMode,
     CachePolicy,
     CacheRefreshResult,
@@ -327,6 +329,19 @@ def build_parser() -> argparse.ArgumentParser:
         "pi_args", nargs=argparse.REMAINDER, help="Arguments forwarded to pi after --."
     )
 
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="Inspect or clean the global sv cache.",
+        description="Inspect or clean the global sv cache.",
+    )
+    cache_subparsers = cache_parser.add_subparsers(
+        dest="cache_command", required=True
+    )
+    cache_subparsers.add_parser("status", help="Show global cache usage.")
+    cache_subparsers.add_parser(
+        "clean", help="Prune expired and over-budget cached skill bodies."
+    )
+
     repo_parser = subparsers.add_parser(
         "repo",
         help="Manage global skill source repos.",
@@ -406,6 +421,9 @@ def handle(
     record_global_source_state = _should_record_global_source_state(cwd, home)
 
     try:
+        if args.command == "cache":
+            return _handle_cache(args, paths)
+
         if args.command == "repo":
             return _handle_repo(
                 args,
@@ -1801,6 +1819,43 @@ def _scan_repo_for_configured_index(
         include_paths=(*scan_config.include_paths, *include_paths),
         exclude_paths=(*scan_config.exclude_paths, *exclude_paths),
     )
+
+
+def _handle_cache(args: argparse.Namespace, paths: SvPaths) -> int:
+    if args.cache_command == "status":
+        summary = cache_summary(paths)
+        print("Global sv cache")
+        print(
+            format_table(
+                ["Catalog files", "Skill bodies", "Skill body bytes"],
+                [
+                    [
+                        str(summary.catalog_files),
+                        str(summary.skill_bodies),
+                        str(summary.skill_body_bytes),
+                    ]
+                ],
+                max_widths={
+                    "Catalog files": 16,
+                    "Skill bodies": 16,
+                    "Skill body bytes": 18,
+                },
+                min_widths={
+                    "Catalog files": 13,
+                    "Skill bodies": 12,
+                    "Skill body bytes": 16,
+                },
+                max_table_width=_table_width(),
+            )
+        )
+        return 0
+    if args.cache_command == "clean":
+        summary = clean_cache(paths, now=datetime.now(UTC))
+        print(
+            f"Cleaned global sv cache. Skill bodies: {summary.skill_bodies}; bytes: {summary.skill_body_bytes}."
+        )
+        return 0
+    raise SvError(f"Unknown cache command: {args.cache_command}")
 
 
 def _handle_repo(

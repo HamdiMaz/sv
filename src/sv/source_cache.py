@@ -71,6 +71,13 @@ class CacheRefreshResult:
     refreshed_repo_ids: frozenset[str] | None = None
 
 
+@dataclass(frozen=True)
+class CacheSummary:
+    catalog_files: int
+    skill_bodies: int
+    skill_body_bytes: int
+
+
 CacheRefreshValue = CacheRefreshResult | Sequence[SourceSkill]
 RefreshCatalog = Callable[[Sequence[RepoConfig]], CacheRefreshValue]
 Warn = Callable[[str], None]
@@ -311,6 +318,35 @@ def prune_skill_body_cache(
             total -= entry.metadata.size_bytes
 
     _write_prune_marker(paths, now=now)
+
+
+def cache_summary(paths: SvPaths, *, now: datetime | None = None) -> CacheSummary:
+    current_time = datetime.now(UTC) if now is None else now
+    catalog_files = 0
+    _reject_symlinked_cache_dir(paths.catalog_cache_dir.parent)
+    if paths.catalog_cache_dir.is_symlink():
+        raise SvError(
+            f"Refusing to inspect symlinked sv catalog cache directory at {paths.catalog_cache_dir}."
+        )
+    if paths.catalog_cache_dir.is_dir():
+        for path in paths.catalog_cache_dir.glob("*.toml"):
+            if path.is_symlink():
+                raise SvError(
+                    f"Refusing to inspect symlinked sv catalog cache file at {path}."
+                )
+            if path.is_file():
+                catalog_files += 1
+    skill_entries = _skill_body_cache_entries(paths, now=current_time)
+    return CacheSummary(
+        catalog_files=catalog_files,
+        skill_bodies=len(skill_entries),
+        skill_body_bytes=sum(entry.metadata.size_bytes for entry in skill_entries),
+    )
+
+
+def clean_cache(paths: SvPaths, *, now: datetime) -> CacheSummary:
+    prune_skill_body_cache(paths, now=now, force=True)
+    return cache_summary(paths, now=now)
 
 
 def _skill_body_cache_entries(
