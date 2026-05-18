@@ -14,13 +14,13 @@ from sv.parallel import map_ordered
 from sv.project import normalize_skill_name
 from sv.terminal import escape_terminal_controls
 from sv.skills import InvalidSkillError, parse_skill_file, parse_skill_text
-from sv.source import (
-    LocalGitSourceBackend,
-    SourceBackend,
-    SourceBackendError,
-    SourceBackendFailure,
-    reject_symlinked_source_cache_path,
-)
+from sv import source_backends as source_backends_pkg
+
+SourceBackend = source_backends_pkg.SourceBackend
+SourceBackendError = source_backends_pkg.SourceBackendError
+SourceBackendFailure = source_backends_pkg.SourceBackendFailure
+LocalGitSourceBackend = source_backends_pkg.LocalGitSourceBackend
+reject_symlinked_source_cache_path = source_backends_pkg.reject_symlinked_source_cache_path
 
 
 @dataclass(frozen=True)

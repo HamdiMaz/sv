@@ -58,7 +58,7 @@ from sv.manifest import (
     save_manifest,
 )
 from sv.parallel import configured_jobs, map_ordered
-from sv.process import default_process_runner
+from sv.process import default_process_runner, default_runner
 from sv.project import (
     AddSkillResult,
     RemoveSkillResult,
@@ -80,12 +80,8 @@ from sv.project import (
     update_vault_skills,
     validate_project_skills_for_run,
 )
-from sv.source import (
-    default_runner,
-    ensure_source_repo,
-    reject_symlinked_source_cache_path,
-    source_backends_for_repo,
-)
+from sv.source_backends.factory import source_backends_for_repo
+from sv.source_backends.git import ensure_source_repo, reject_symlinked_source_cache_path
 from sv.source_cache import (
     cache_summary,
     clean_cache,

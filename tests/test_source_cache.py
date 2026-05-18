@@ -17,7 +17,7 @@ from sv.catalog import SourceSkill
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 from sv.hashing import sha256_file, sha256_skill_directory
-from sv.source import FakeSourceBackend, SourceBackendError
+from sv.source_backends.base import FakeSourceBackend, SourceBackendError
 from sv.source_cache import (
     attach_source_materializers,
     cache_summary,

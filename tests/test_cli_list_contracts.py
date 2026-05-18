@@ -9,7 +9,7 @@ import sv.cli as cli_module
 from sv.cli import build_parser, handle
 from sv.config import RepoConfig, SvPaths, derive_repo_id, load_config
 from sv.errors import SvError
-import sv.source as source_module
+import sv.source_backends.github as github_module
 from sv.source import default_runner
 from tests.helpers import (
     assert_no_raw_control_characters,
@@ -308,7 +308,7 @@ def test_list_and_add_coalesce_equivalent_repo_aliases(
     def fail_https_api(url, headers):
         raise OSError("offline")
 
-    monkeypatch.setattr(source_module, "_default_github_http_get", fail_https_api)
+    monkeypatch.setattr(github_module, "_default_github_http_get", fail_https_api)
 
     def git_runner(args, cwd=None):
         if args == ["git", "--version"]:

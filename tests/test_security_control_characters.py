@@ -19,7 +19,7 @@ from sv.cli import (
 )
 from sv.config import RepoChangeResult, RepoConfig, SvConfig, SvPaths
 from sv.manifest import ManifestEntry, save_manifest
-import sv.source as source_module
+import sv.source_backends.github as github_module
 from sv.project import AddSkillResult, RemoveSkillResult, SyncResult, SyncSkip
 from sv.selector import SelectionState, _render
 from tests.helpers import assert_no_raw_control_characters
@@ -351,7 +351,7 @@ def test_source_git_errors_escape_stderr_control_characters(
     def fail_https_api(url, headers):
         raise OSError("offline")
 
-    monkeypatch.setattr(source_module, "_default_github_http_get", fail_https_api)
+    monkeypatch.setattr(github_module, "_default_github_http_get", fail_https_api)
 
     def git_runner(args, cwd=None):
         if args == ["git", "--version"]:
@@ -396,7 +396,7 @@ def test_source_git_errors_escape_stdout_control_characters(
     def fail_https_api(url, headers):
         raise OSError("offline")
 
-    monkeypatch.setattr(source_module, "_default_github_http_get", fail_https_api)
+    monkeypatch.setattr(github_module, "_default_github_http_get", fail_https_api)
 
     def git_runner(args, cwd=None):
         if args == ["git", "--version"]:

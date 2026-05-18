@@ -1,19 +1,3 @@
-from __future__ import annotations
-
-# Compatibility façade for the source backend modules. New implementation code
-# should import backend types/helpers from sv.source_backends.* directly.
-from sv.process import (
-    DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
-    Runner,
-    default_runner,
-    _ALLOWED_GIT_PROTOCOLS,
-    _COMMAND_TIMEOUT_EXIT_CODE,
-    _missing_git_guidance,
-    _noninteractive_subprocess_env,
-    _ssh_batch_mode_command,
-    _timeout_error_message,
-    _timeout_stream_text,
-)
 from sv.source_backends.base import (
     FakeSourceBackend,
     SourceBackend,
@@ -41,7 +25,6 @@ from sv.source_backends.git import (
 )
 
 __all__ = [
-    "DEFAULT_SUBPROCESS_TIMEOUT_SECONDS",
     "FakeSourceBackend",
     "GitBloblessSparseBackend",
     "GitHubGhApiBackend",
@@ -52,22 +35,13 @@ __all__ = [
     "GitSparseSourceBackend",
     "GitTreelessPartialBackend",
     "LocalGitSourceBackend",
-    "Runner",
     "SourceBackend",
     "SourceBackendError",
     "SourceBackendFailure",
-    "default_runner",
     "ensure_source_repo",
     "ensure_source_repos",
     "list_source_skills",
     "parse_github_repo_ref",
     "reject_symlinked_source_cache_path",
     "source_backends_for_repo",
-    "_ALLOWED_GIT_PROTOCOLS",
-    "_COMMAND_TIMEOUT_EXIT_CODE",
-    "_missing_git_guidance",
-    "_noninteractive_subprocess_env",
-    "_ssh_batch_mode_command",
-    "_timeout_error_message",
-    "_timeout_stream_text",
 ]

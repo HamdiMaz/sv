@@ -16,6 +16,7 @@ import sv.materialization as materialization_module
 import sv.project as project_module
 import sv.selector as selector_module
 import sv.source as source_module
+import sv.source_backends.git as git_module
 import sv.table as table_module
 import sv.tomlutil as tomlutil_module
 from sv.catalog import SourceCatalogResult, SourceSkill
@@ -264,14 +265,14 @@ def test_fake_source_backend_read_and_materialize_error_edges(tmp_path: Path):
 def test_source_cleanup_helpers_remove_failed_file_and_report_cleanup_errors(tmp_path: Path, monkeypatch):
     repo_file = tmp_path / "repo-file"
     repo_file.write_text("partial")
-    source_module._remove_failed_lightweight_checkout(repo_file)
+    git_module._remove_failed_lightweight_checkout(repo_file)
     assert not repo_file.exists()
 
     repo_dir = tmp_path / "repo-dir"
     repo_dir.mkdir()
-    monkeypatch.setattr(source_module.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(OSError("busy")))
+    monkeypatch.setattr(git_module.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(OSError("busy")))
     with pytest.raises(SvError, match="incomplete lightweight"):
-        source_module._remove_failed_lightweight_checkout(repo_dir)
+        git_module._remove_failed_lightweight_checkout(repo_dir)
 
 
 def test_tomlutil_load_and_schema_version_edge_cases(tmp_path: Path):
@@ -865,7 +866,7 @@ def test_source_git_sparse_local_metadata_and_cleanup_error_branches(tmp_path: P
     monkeypatch.setattr(Path, "is_file", lambda self: self == target)
     monkeypatch.setattr(Path, "unlink", lambda self: (_ for _ in ()).throw(OSError("unlink denied")))
     with pytest.raises(SvError, match="selected source cache folder"):
-        source_module._remove_backend_cache_folder(repo, "custom")
+        git_module._remove_backend_cache_folder(repo, "custom")
 
 
 def test_cli_failure_reports_and_mixed_refresh_state(tmp_path: Path):

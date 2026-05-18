@@ -9,7 +9,9 @@ from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 from sv import materialization as materialization_module
 import sv.process as process_module
-import sv.source as source_module
+import sv.source_backends.base as base_module
+import sv.source_backends.github as github_module
+import sv.source_backends.git as git_module
 from sv.source import (
     GitBloblessSparseBackend,
     GitHubGhApiBackend,
@@ -109,7 +111,7 @@ def test_parse_github_repo_ref_rejects_cleartext_github_urls():
     ],
 )
 def test_github_failure_hints_cover_actionable_edge_messages(detail, expected):
-    hint = source_module._gh_failure_hint(detail)
+    hint = github_module._gh_failure_hint(detail)
 
     assert hint is not None
     assert expected in hint
@@ -117,28 +119,28 @@ def test_github_failure_hints_cover_actionable_edge_messages(detail, expected):
 
 def test_github_header_lookup_is_case_insensitive_and_handles_missing_names():
     assert (
-        source_module._header_value(
+        github_module._header_value(
             {"X-RateLimit-Remaining": "0"}, "x-ratelimit-remaining"
         )
         == "0"
     )
-    assert source_module._header_value({"content-type": "application/json"}, "etag") is None
+    assert github_module._header_value({"content-type": "application/json"}, "etag") is None
 
 
 def test_github_item_helpers_reject_malformed_directory_items():
-    assert source_module._github_item_type(object()) is None
-    assert source_module._github_item_type({"type": 123}) is None
+    assert github_module._github_item_type(object()) is None
+    assert github_module._github_item_type({"type": 123}) is None
 
     with pytest.raises(SourceBackendError, match="missing a name"):
-        source_module._github_item_name(object(), "listing")
+        github_module._github_item_name(object(), "listing")
     with pytest.raises(SourceBackendError, match="missing a name"):
-        source_module._github_item_name({"name": 123}, "listing")
+        github_module._github_item_name({"name": 123}, "listing")
     with pytest.raises(SourceBackendError, match="missing a path"):
-        source_module._github_item_path(object(), "listing")
+        github_module._github_item_path(object(), "listing")
     with pytest.raises(SourceBackendError, match="missing a path"):
-        source_module._github_item_path({"path": 123}, "listing")
+        github_module._github_item_path({"path": 123}, "listing")
     with pytest.raises(SourceBackendError, match="control characters"):
-        source_module._github_item_path({"path": "bad\x1fname"}, "listing")
+        github_module._github_item_path({"path": "bad\x1fname"}, "listing")
 
 
 def test_normalize_backend_relative_path_rejects_unsafe_edge_cases():
@@ -154,7 +156,7 @@ def test_normalize_backend_relative_path_rejects_unsafe_edge_cases():
         "skills/rtl\u202eoverride/SKILL.md",
     ):
         with pytest.raises(SvError):
-            source_module._normalize_backend_relative_path(value)
+            base_module._normalize_backend_relative_path(value)
 
 
 def test_source_backends_for_repo_selects_lightweight_backends_in_plan_order(
@@ -213,11 +215,11 @@ def test_local_source_repo_path_detects_file_urls_and_rejects_remote_file_hosts(
     source.mkdir()
     monkeypatch.chdir(tmp_path)
 
-    assert source_module._local_source_repo_path(source.as_uri()) == source.resolve()
-    assert source_module._local_source_repo_path("file://example.com/tmp/repo") is None
-    assert source_module._local_source_repo_path("file://") is None
-    assert source_module._local_source_repo_path("ssh://git@github.com/Org/Skills.git") is None
-    assert source_module._local_source_repo_path("missing-source") is None
+    assert git_module._local_source_repo_path(source.as_uri()) == source.resolve()
+    assert git_module._local_source_repo_path("file://example.com/tmp/repo") is None
+    assert git_module._local_source_repo_path("file://") is None
+    assert git_module._local_source_repo_path("ssh://git@github.com/Org/Skills.git") is None
+    assert git_module._local_source_repo_path("missing-source") is None
 
 
 def test_local_git_source_backend_materializes_and_reports_invalid_roots(
@@ -264,7 +266,7 @@ def test_local_git_source_backend_rejects_symlink_created_during_materialization
         )
         (destination_path / "outside-link.txt").symlink_to(outside)
 
-    monkeypatch.setattr(source_module.shutil, "copytree", copy_with_symlink)
+    monkeypatch.setattr(git_module.shutil, "copytree", copy_with_symlink)
 
     with pytest.raises(SvError, match="contains a symlink"):
         LocalGitSourceBackend(repo_path).materialize_folder("skills/alpha", destination)
@@ -284,7 +286,7 @@ def test_local_git_source_backend_rejects_source_symlink_added_after_validation(
     outside = tmp_path / "outside.txt"
     outside.write_text("outside\n")
     destination = tmp_path / "materialized"
-    real_validate = source_module.validate_materialization_source_tree
+    real_validate = git_module.validate_materialization_source_tree
     validation_calls = 0
 
     def add_source_symlink_after_first_validation(path: Path) -> None:
@@ -295,7 +297,7 @@ def test_local_git_source_backend_rejects_source_symlink_added_after_validation(
             (skill_dir / "outside-link.txt").symlink_to(outside)
 
     monkeypatch.setattr(
-        source_module,
+        git_module,
         "validate_materialization_source_tree",
         add_source_symlink_after_first_validation,
     )
@@ -487,7 +489,7 @@ def test_github_gh_api_backend_reads_index_candidates_and_materializes_folder(
 def test_github_gh_api_backend_rejects_oversized_materialization_and_cleans_temp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
     runner = FakeRunner(
         [
             completed(
@@ -510,7 +512,7 @@ def test_github_gh_api_backend_rejects_oversized_materialization_and_cleans_temp
 def test_github_gh_api_backend_rejects_advertised_oversized_file_before_reading(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
     runner = FakeRunner(
         [
             completed(
@@ -535,12 +537,12 @@ def test_github_gh_api_backend_rejects_advertised_oversized_file_before_reading(
 def test_github_gh_api_backend_rejects_encoded_content_before_decoding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
 
     def fail_decode(*_args, **_kwargs):
         raise AssertionError("oversized content should be rejected before base64 decode")
 
-    monkeypatch.setattr(source_module.base64, "b64decode", fail_decode)
+    monkeypatch.setattr(github_module.base64, "b64decode", fail_decode)
     runner = FakeRunner(
         [
             completed(
@@ -559,7 +561,7 @@ def test_github_gh_api_backend_rejects_encoded_content_before_decoding(
 def test_github_gh_api_backend_limits_materialization_directory_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_MATERIALIZATION_ENTRIES", 0)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_MATERIALIZATION_ENTRIES", 0)
     runner = FakeRunner(
         [
             completed(
@@ -609,7 +611,7 @@ def test_github_gh_api_backend_cleans_stale_temp_file_and_replaces_existing_dire
 def test_github_gh_api_backend_rejects_materialization_depth_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_MATERIALIZATION_DEPTH", 0)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_MATERIALIZATION_DEPTH", 0)
     runner = FakeRunner(
         [
             completed(
@@ -627,7 +629,7 @@ def test_github_gh_api_backend_rejects_materialization_depth_limit(
 def test_github_gh_api_backend_rejects_materialization_file_count_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_MATERIALIZATION_FILES", 0)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_MATERIALIZATION_FILES", 0)
     runner = FakeRunner(
         [
             completed(
@@ -645,8 +647,8 @@ def test_github_gh_api_backend_rejects_materialization_file_count_limit(
 def test_github_gh_api_backend_rejects_oversized_decoded_content_after_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
-    monkeypatch.setattr(source_module, "_max_base64_decoded_size", lambda _encoded: 0)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_MATERIALIZATION_BYTES", 4)
+    monkeypatch.setattr(github_module, "_max_base64_decoded_size", lambda _encoded: 0)
     runner = FakeRunner(
         [
             completed(
@@ -665,7 +667,7 @@ def test_github_gh_api_backend_rejects_oversized_decoded_content_after_read(
 def test_github_gh_api_backend_limits_metadata_file_size(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(source_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
+    monkeypatch.setattr(base_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
     runner = FakeRunner([completed(["gh", "api"], stdout="bGFyZ2UK")])
     backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
 
@@ -676,7 +678,7 @@ def test_github_gh_api_backend_limits_metadata_file_size(
 def test_github_gh_api_backend_limits_index_file_size(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(source_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
+    monkeypatch.setattr(base_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
     runner = FakeRunner(
         [completed(["gh", "api"], stdout="c2NoZW1hX3ZlcnNpb24gPSAxCg==")]
     )
@@ -689,7 +691,7 @@ def test_github_gh_api_backend_limits_index_file_size(
 def test_github_gh_api_backend_limits_raw_api_output(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
     runner = FakeRunner([completed(["gh", "api"], stdout="[]\n")])
     backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
 
@@ -705,7 +707,7 @@ def test_github_gh_api_backend_default_runner_captures_output_without_memory_buf
         kwargs["stdout"].write(b"b2s=\n")
         return completed(args)
 
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(github_module.subprocess, "run", fake_run)
     backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
 
     assert backend.read_file("skills/alpha/SKILL.md") == b"ok"
@@ -714,13 +716,13 @@ def test_github_gh_api_backend_default_runner_captures_output_without_memory_buf
 def test_github_gh_api_backend_default_runner_rejects_oversized_output_file(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
 
     def fake_run(args, **kwargs):
         kwargs["stdout"].write(b"[]\n")
         return completed(args)
 
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(github_module.subprocess, "run", fake_run)
     backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
 
     with pytest.raises(SourceBackendError, match="exceeded size limit"):
@@ -730,13 +732,13 @@ def test_github_gh_api_backend_default_runner_rejects_oversized_output_file(
 def test_github_gh_api_backend_default_runner_limits_error_output(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_API_ERROR_BYTES", 2)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_API_ERROR_BYTES", 2)
 
     def fake_run(args, **kwargs):
         kwargs["stderr"].write(b"err")
         return completed(args, returncode=1)
 
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(github_module.subprocess, "run", fake_run)
     backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
 
     with pytest.raises(SourceBackendError, match="error output exceeded size limit"):
@@ -749,7 +751,7 @@ def test_github_gh_api_backend_default_runner_reports_timeouts(
     def fake_run(_args, **_kwargs):
         raise subprocess.TimeoutExpired(cmd=["gh", "api"], timeout=1)
 
-    monkeypatch.setattr(source_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(github_module.subprocess, "run", fake_run)
     backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"))
 
     with pytest.raises(SourceBackendError, match="command timed out"):
@@ -758,7 +760,7 @@ def test_github_gh_api_backend_default_runner_reports_timeouts(
 
 def test_read_limited_process_output_file_reports_read_errors(tmp_path: Path):
     with pytest.raises(SourceBackendError, match="Failed to read test output"):
-        source_module._read_limited_process_output_file(
+        github_module._read_limited_process_output_file(
             tmp_path / "missing", 4, "test output", "reading test output"
         )
 
@@ -766,7 +768,7 @@ def test_read_limited_process_output_file_reports_read_errors(tmp_path: Path):
 def test_github_api_helpers_limit_listing_size_item_size_and_response_body(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(source_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
+    monkeypatch.setattr(github_module, "_MAX_GITHUB_API_RESPONSE_BYTES", 2)
     backend = GitHubGhApiBackend(
         GitHubRepoRef(owner="Org", repo="Skills"),
         runner=FakeRunner([completed(["gh", "api"], stdout="[{}]")]),
@@ -775,22 +777,22 @@ def test_github_api_helpers_limit_listing_size_item_size_and_response_body(
         backend.list_candidate_skill_files()
 
     with pytest.raises(SourceBackendError, match="invalid size"):
-        source_module._github_item_size({"size": -1}, "checking item")
-    assert source_module._github_item_size(object(), "checking item") is None
-    assert source_module._max_base64_decoded_size("") == 0
+        github_module._github_item_size({"size": -1}, "checking item")
+    assert github_module._github_item_size(object(), "checking item") is None
+    assert github_module._max_base64_decoded_size("") == 0
 
     class LargeBody:
         def read(self, size: int) -> bytes:
             return b"x" * size
 
     with pytest.raises(SourceBackendError, match="exceeded size limit"):
-        source_module._read_limited_response_body(LargeBody())
+        github_module._read_limited_response_body(LargeBody())
 
     class SmallBody:
         def read(self, _size: int) -> bytes:
             return b"ok"
 
-    assert source_module._read_limited_response_body(SmallBody()) == b"ok"
+    assert github_module._read_limited_response_body(SmallBody()) == b"ok"
 
 
 def test_github_gh_api_backend_rejects_unknown_materialization_content_type(
@@ -1290,7 +1292,7 @@ def test_git_local_backend_limits_metadata_file_size(
     skill_file.parent.mkdir(parents=True)
     skill_file.write_text("large\n")
     backend = GitLocalSourceBackend(repo_path)
-    monkeypatch.setattr(source_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
+    monkeypatch.setattr(base_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
 
     with pytest.raises(SourceBackendError, match="source metadata size limit"):
         backend.read_file("skills/alpha/SKILL.md")
@@ -1304,7 +1306,7 @@ def test_git_local_backend_limits_index_file_size(
     index_file.parent.mkdir(parents=True)
     index_file.write_text("schema_version = 1\n")
     backend = GitLocalSourceBackend(repo_path)
-    monkeypatch.setattr(source_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
+    monkeypatch.setattr(base_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
 
     with pytest.raises(SourceBackendError, match="source index size limit"):
         backend.read_index()
@@ -1332,8 +1334,8 @@ def test_git_local_backend_reports_metadata_read_os_errors(
 
 
 def test_fake_source_backend_limits_metadata_reads(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(source_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
-    monkeypatch.setattr(source_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
+    monkeypatch.setattr(base_module, "_MAX_SOURCE_SKILL_FILE_BYTES", 4, raising=False)
+    monkeypatch.setattr(base_module, "_MAX_SOURCE_INDEX_BYTES", 4, raising=False)
     skill_backend = FakeSourceBackend({"skills/alpha/SKILL.md": "large\n"})
     index_backend = FakeSourceBackend({".sv/index.toml": "schema_version = 1\n"})
 
@@ -1637,7 +1639,7 @@ def test_source_repo_lock_key_falls_back_when_resolve_detects_symlink_loop(
 
     monkeypatch.setattr(Path, "resolve", fail_resolve)
 
-    assert source_module._source_repo_lock_key(repo_path) == repo_path.absolute()
+    assert git_module._source_repo_lock_key(repo_path) == repo_path.absolute()
 
 
 def test_sparse_backend_materialization_serializes_same_repo_cache(
@@ -1671,9 +1673,9 @@ def test_sparse_backend_materialization_serializes_same_repo_cache(
         destination.mkdir(parents=True, exist_ok=True)
         (destination / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha.\n---\n")
 
-    monkeypatch.setattr(source_module, "_ensure_sparse_git_repo", fake_prepare)
-    monkeypatch.setattr(source_module, "_remove_backend_cache_folder", lambda *args, **kwargs: None)
-    monkeypatch.setattr(source_module.GitLocalSourceBackend, "materialize_folder", fake_copy)
+    monkeypatch.setattr(git_module, "_ensure_sparse_git_repo", fake_prepare)
+    monkeypatch.setattr(git_module, "_remove_backend_cache_folder", lambda *args, **kwargs: None)
+    monkeypatch.setattr(git_module.GitLocalSourceBackend, "materialize_folder", fake_copy)
 
     first = GitTreelessPartialBackend("https://example.com/repo.git", repo_path, runner=FakeRunner([]))
     second = GitTreelessPartialBackend("https://example.com/repo.git", repo_path, runner=FakeRunner([]))
@@ -2577,7 +2579,7 @@ def test_ensure_source_repos_prepares_independent_repos_in_parallel(
         assert started[peer_id].wait(2), "independent source repo preparation did not overlap"
         repo_path.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(source_module, "ensure_source_repo", fake_ensure_source_repo)
+    monkeypatch.setattr(git_module, "ensure_source_repo", fake_ensure_source_repo)
 
     ensured = ensure_source_repos(repos, paths, runner=FakeRunner([]), update=True, jobs=2)
 
@@ -2588,55 +2590,55 @@ def test_ensure_source_repos_prepares_independent_repos_in_parallel(
 
 
 def test_source_utility_helpers_cover_error_details_and_path_matching(tmp_path: Path):
-    assert source_module._github_contents_endpoint(GitHubRepoRef("Org", "Repo"), "") == "/repos/Org/Repo/contents"
-    assert source_module._github_contents_endpoint(GitHubRepoRef("Org Space", "Repo"), "skills/a b/SKILL.md") == "/repos/Org%20Space/Repo/contents/skills/a%20b/SKILL.md"
+    assert github_module._github_contents_endpoint(GitHubRepoRef("Org", "Repo"), "") == "/repos/Org/Repo/contents"
+    assert github_module._github_contents_endpoint(GitHubRepoRef("Org Space", "Repo"), "skills/a b/SKILL.md") == "/repos/Org%20Space/Repo/contents/skills/a%20b/SKILL.md"
 
     response = GitHubHttpResponse(403, b'{"message": "API rate limit exceeded"}', {"X-RateLimit-Remaining": "0"})
-    assert "Forbidden" in source_module._github_https_error_detail(response)
-    rate_hint = source_module._github_https_failure_hint(response.status, response.headers, "rate limit")
-    auth_hint = source_module._github_https_failure_hint(401, {}, "authentication required")
-    not_found_hint = source_module._github_https_failure_hint(404, {}, "not found")
+    assert "Forbidden" in github_module._github_https_error_detail(response)
+    rate_hint = github_module._github_https_failure_hint(response.status, response.headers, "rate limit")
+    auth_hint = github_module._github_https_failure_hint(401, {}, "authentication required")
+    not_found_hint = github_module._github_https_failure_hint(404, {}, "not found")
     assert rate_hint is not None and "API limits" in rate_hint
     assert auth_hint is not None and "private repos" in auth_hint
     assert not_found_hint is not None and "private repo" in not_found_hint
-    assert source_module._github_https_failure_hint(500, {}, "server error") is None
-    assert source_module._github_https_headers({"GH_TOKEN": "  token  "})["Authorization"] == "Bearer token"
-    assert source_module._github_https_headers({"GITHUB_TOKEN": "fallback"})["Authorization"] == "Bearer fallback"
-    assert source_module._github_https_error_message(b"not json") == "not json"
-    assert source_module._github_https_error_message(b"\xff") == ""
-    assert source_module._http_status_phrase(599) == ""
+    assert github_module._github_https_failure_hint(500, {}, "server error") is None
+    assert github_module._github_https_headers({"GH_TOKEN": "  token  "})["Authorization"] == "Bearer token"
+    assert github_module._github_https_headers({"GITHUB_TOKEN": "fallback"})["Authorization"] == "Bearer fallback"
+    assert github_module._github_https_error_message(b"not json") == "not json"
+    assert github_module._github_https_error_message(b"\xff") == ""
+    assert github_module._http_status_phrase(599) == ""
 
-    assert source_module._github_item_name({"name": "alpha\n"}, "op") == "alpha\\x0a"
-    assert source_module._github_item_path({"path": "skills/alpha"}, "op") == "skills/alpha"
-    assert source_module._github_item_type({"type": "dir"}) == "dir"
-    assert source_module._github_item_type({"type": 1}) is None
+    assert github_module._github_item_name({"name": "alpha\n"}, "op") == "alpha\\x0a"
+    assert github_module._github_item_path({"path": "skills/alpha"}, "op") == "skills/alpha"
+    assert github_module._github_item_type({"type": "dir"}) == "dir"
+    assert github_module._github_item_type({"type": 1}) is None
     with pytest.raises(SourceBackendError, match="missing a name"):
-        source_module._github_item_name([], "op")
+        github_module._github_item_name([], "op")
     with pytest.raises(SourceBackendError, match="missing a path"):
-        source_module._github_item_path({"path": 1}, "op")
+        github_module._github_item_path({"path": 1}, "op")
     with pytest.raises(SourceBackendError, match="unsafe path components"):
-        source_module._github_item_path({"path": "../secret"}, "op")
+        github_module._github_item_path({"path": "../secret"}, "op")
 
-    assert source_module._is_direct_child_path("team/skills/alpha", "team/skills")
-    assert not source_module._is_direct_child_path("team/skills/nested/alpha", "team/skills")
-    assert source_module._is_path_inside("team/skills/alpha/SKILL.md", "team/skills/alpha")
-    assert not source_module._is_path_inside("team/skills", "team/skills")
-    assert source_module._looks_like_not_found("HTTP 404")
-    gh_rate_hint = source_module._gh_failure_hint("rate limit")
-    gh_not_found_hint = source_module._gh_failure_hint("not found")
-    gh_auth_hint = source_module._gh_failure_hint("HTTP 401")
+    assert base_module._is_direct_child_path("team/skills/alpha", "team/skills")
+    assert not base_module._is_direct_child_path("team/skills/nested/alpha", "team/skills")
+    assert base_module._is_path_inside("team/skills/alpha/SKILL.md", "team/skills/alpha")
+    assert not base_module._is_path_inside("team/skills", "team/skills")
+    assert base_module._looks_like_not_found("HTTP 404")
+    gh_rate_hint = github_module._gh_failure_hint("rate limit")
+    gh_not_found_hint = github_module._gh_failure_hint("not found")
+    gh_auth_hint = github_module._gh_failure_hint("HTTP 401")
     assert gh_rate_hint is not None and "api limits" in gh_rate_hint.lower()
     assert gh_not_found_hint is not None and "private" in gh_not_found_hint.lower()
     assert gh_auth_hint is not None and "auth" in gh_auth_hint.lower()
-    assert source_module._gh_failure_hint("server exploded") is None
+    assert github_module._gh_failure_hint("server exploded") is None
 
-    assert source_module._is_default_candidate_skill_file("skills/alpha/SKILL.md")
-    assert source_module._is_default_candidate_skill_file("team/skills/alpha/SKILL.md")
-    assert not source_module._is_default_candidate_skill_file("skills/.hidden/SKILL.md")
-    assert source_module._is_direct_child_skill_file("custom/alpha/SKILL.md", "custom")
-    assert not source_module._is_direct_child_skill_file("custom/.hidden/SKILL.md", "custom")
-    assert source_module._same_source_repo("https://github.com/Org/Repo.git", "Org/Repo")
-    assert not source_module._same_source_repo("::bad::", "Org/Repo")
+    assert base_module._is_default_candidate_skill_file("skills/alpha/SKILL.md")
+    assert base_module._is_default_candidate_skill_file("team/skills/alpha/SKILL.md")
+    assert not base_module._is_default_candidate_skill_file("skills/.hidden/SKILL.md")
+    assert base_module._is_direct_child_skill_file("custom/alpha/SKILL.md", "custom")
+    assert not base_module._is_direct_child_skill_file("custom/.hidden/SKILL.md", "custom")
+    assert git_module._same_source_repo("https://github.com/Org/Repo.git", "Org/Repo")
+    assert not git_module._same_source_repo("::bad::", "Org/Repo")
 
 
 @pytest.mark.parametrize(
@@ -2651,15 +2653,15 @@ def test_source_utility_helpers_cover_error_details_and_path_matching(tmp_path: 
 )
 def test_normalize_sparse_checkout_patterns_rejects_unsafe_patterns(pattern: str, message: str):
     with pytest.raises(SvError, match=message):
-        source_module._normalize_sparse_checkout_patterns([pattern])
+        git_module._normalize_sparse_checkout_patterns([pattern])
 
 
 def test_sparse_pattern_helpers_dedupe_and_normalize_configured_roots():
-    assert source_module._sparse_file_pattern(".sv/index.toml") == "/.sv/index.toml"
-    assert source_module._sparse_folder_pattern("skills/alpha") == "/skills/alpha/**"
-    patterns = source_module._metadata_sparse_patterns(["custom", "custom"])
+    assert git_module._sparse_file_pattern(".sv/index.toml") == "/.sv/index.toml"
+    assert git_module._sparse_folder_pattern("skills/alpha") == "/skills/alpha/**"
+    patterns = git_module._metadata_sparse_patterns(["custom", "custom"])
     assert patterns.count("/custom/*/SKILL.md") == 1
-    assert source_module._normalize_sparse_checkout_patterns(["/skills/*/SKILL.md", "/skills/*/SKILL.md"]) == ["/skills/*/SKILL.md"]
+    assert git_module._normalize_sparse_checkout_patterns(["/skills/*/SKILL.md", "/skills/*/SKILL.md"]) == ["/skills/*/SKILL.md"]
 
 
 def test_remove_backend_cache_folder_removes_files_directories_and_rejects_symlink(tmp_path: Path):
@@ -2668,13 +2670,13 @@ def test_remove_backend_cache_folder_removes_files_directories_and_rejects_symli
     file_path = repo / "skills" / "alpha.txt"
     file_path.parent.mkdir()
     file_path.write_text("alpha\n")
-    source_module._remove_backend_cache_folder(repo, "skills/alpha.txt")
+    git_module._remove_backend_cache_folder(repo, "skills/alpha.txt")
     assert not file_path.exists()
 
     dir_path = repo / "skills" / "beta"
     dir_path.mkdir()
     (dir_path / "SKILL.md").write_text("beta\n")
-    source_module._remove_backend_cache_folder(repo, "skills/beta")
+    git_module._remove_backend_cache_folder(repo, "skills/beta")
     assert not dir_path.exists()
 
     outside = tmp_path / "outside"
@@ -2682,7 +2684,7 @@ def test_remove_backend_cache_folder_removes_files_directories_and_rejects_symli
     link = repo / "skills" / "linked"
     link.symlink_to(outside, target_is_directory=True)
     with pytest.raises(SvError, match="must not be a symlink"):
-        source_module._remove_backend_cache_folder(repo, "skills/linked")
+        git_module._remove_backend_cache_folder(repo, "skills/linked")
 
 
 def test_run_git_reports_missing_git_os_errors_empty_failures_and_success(tmp_path: Path):
@@ -2690,15 +2692,15 @@ def test_run_git_reports_missing_git_os_errors_empty_failures_and_success(tmp_pa
         raise FileNotFoundError("git")
 
     with pytest.raises(SvError, match="Git is required"):
-        source_module._run_git(["status"], tmp_path, missing, "Checking git")
+        git_module._run_git(["status"], tmp_path, missing, "Checking git")
 
     def os_error(_args, _cwd):
         raise OSError("bad\nerror")
 
     with pytest.raises(SvError, match=r"bad\\x0aerror"):
-        source_module._run_git(["status"], tmp_path, os_error, "Checking git")
+        git_module._run_git(["status"], tmp_path, os_error, "Checking git")
 
     with pytest.raises(SvError, match="exit code 2"):
-        source_module._run_git(["status"], tmp_path, lambda args, cwd: completed(args, 2), "Checking git")
+        git_module._run_git(["status"], tmp_path, lambda args, cwd: completed(args, 2), "Checking git")
 
-    assert source_module._run_git(["status"], tmp_path, lambda args, cwd: completed(args, 0, " ok\n"), "Checking git") == "ok"
+    assert git_module._run_git(["status"], tmp_path, lambda args, cwd: completed(args, 0, " ok\n"), "Checking git") == "ok"

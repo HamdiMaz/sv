@@ -13,7 +13,7 @@ from sv.catalog import (
 )
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
-from sv.source import SourceBackendError, FakeSourceBackend
+from sv.source_backends.base import FakeSourceBackend, SourceBackendError
 
 
 def make_skill(repo_path: Path, name: str, description: str) -> None:

@@ -25,7 +25,10 @@ from sv.materialization import (
 )
 from sv.project import normalize_skill_name
 from sv.skills import parse_skill_file
-from sv.source import SourceBackend, SourceBackendError
+from sv import source_backends as source_backends_pkg
+
+SourceBackend = source_backends_pkg.SourceBackend
+SourceBackendError = source_backends_pkg.SourceBackendError
 from sv.terminal import escape_terminal_controls
 from sv.tomlutil import atomic_write_text, load_toml_document, toml_escape
 
