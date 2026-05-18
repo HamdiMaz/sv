@@ -446,40 +446,44 @@ def _add_all_skills_parallel(
     for index, result in existing_or_skipped.items():
         ordered_results[index] = result
 
-    for item in prepared:
-        plan = item.plan
-        manifest_entry = _manifest_entry_for(
-            plan.entry, target_style, metadata=item.metadata
-        )
-
-        def update_manifest(entry: ManifestEntry = manifest_entry) -> None:
-            _upsert_manifest_entry_for_target(project_skills_dir, entry, target_style)
-
-        if plan.replace_existing_target:
-            _replace_with_materialized_entry(
-                plan.target,
-                after_replace=update_manifest,
-                target_style=target_style,
+    try:
+        for item in prepared:
+            plan = item.plan
+            manifest_entry = _manifest_entry_for(
+                plan.entry, target_style, metadata=item.metadata
             )
-            status = "replaced"
-        else:
-            install_materialized_skill_folder(
-                _add_temp_target(plan.target),
-                plan.target,
-                error_message=(
-                    f"Failed to add {target_style.skill_label} '{plan.target.name}'"
-                ),
-                after_install=update_manifest,
+
+            def update_manifest(entry: ManifestEntry = manifest_entry) -> None:
+                _upsert_manifest_entry_for_target(project_skills_dir, entry, target_style)
+
+            if plan.replace_existing_target:
+                _replace_with_materialized_entry(
+                    plan.target,
+                    after_replace=update_manifest,
+                    target_style=target_style,
+                )
+                status = "replaced"
+            else:
+                install_materialized_skill_folder(
+                    _add_temp_target(plan.target),
+                    plan.target,
+                    error_message=(
+                        f"Failed to add {target_style.skill_label} '{plan.target.name}'"
+                    ),
+                    after_install=update_manifest,
+                )
+                status = "added"
+            ordered_results[plan.index] = AddSkillResult(
+                skill=plan.skill_name,
+                target=plan.target,
+                status=status,
+                repo_id=plan.entry.repo_id,
+                source_reference=_source_reference_for(plan.entry),
+                target_kind=target_style.target_kind,
             )
-            status = "added"
-        ordered_results[plan.index] = AddSkillResult(
-            skill=plan.skill_name,
-            target=plan.target,
-            status=status,
-            repo_id=plan.entry.repo_id,
-            source_reference=_source_reference_for(plan.entry),
-            target_kind=target_style.target_kind,
-        )
+    except Exception:
+        _cleanup_prepared_adds(prepared)
+        raise
 
     return AddAllSkillsResult(
         results=[result for result in ordered_results if result is not None]

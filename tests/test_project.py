@@ -464,6 +464,28 @@ def test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails(
     assert not list(project_skills.glob(".*.sv-add-tmp"))
 
 
+def test_add_all_project_skills_cleans_prepared_temps_when_serial_commit_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alpha = make_source_skill(tmp_path / "source", "alpha")
+    beta = make_source_skill(tmp_path / "source", "beta")
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+
+    def fail_manifest_update(project_skills_dir, entry, target_style):
+        raise SvError("manifest write failed")
+
+    monkeypatch.setattr(
+        project_module, "_upsert_manifest_entry_for_target", fail_manifest_update
+    )
+
+    with pytest.raises(SvError, match="manifest write failed"):
+        add_all_project_skills([alpha, beta], project_skills)
+
+    assert not (project_skills / ".alpha.sv-add-tmp").exists()
+    assert not (project_skills / ".beta.sv-add-tmp").exists()
+    assert_no_partial_sv_dirs(project_skills)
+
+
 def test_add_all_vault_skills_replaces_existing_targets_with_replace_temp(
     tmp_path: Path,
 ) -> None:
