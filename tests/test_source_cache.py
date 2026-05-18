@@ -89,6 +89,29 @@ def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
     assert load_cached_catalog(paths, _repo()) == document
 
 
+def test_catalog_cache_round_trips_empty_catalog(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    document_without_hash = CachedCatalogDocument(
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        source_key="github:org/skills",
+        skills_paths=(),
+        backend="github-https-api",
+        refreshed_at="2026-05-18T12:00:00Z",
+        catalog_hash="sha256:" + ("0" * 64),
+        index_hash="sha256:a51a6c19a1ffc7416827e89adf20749d23ad42452c396cf7e627409f2896922c",
+        entries=(),
+    )
+    document = replace(
+        document_without_hash,
+        catalog_hash=_cached_catalog_hash(document_without_hash),
+    )
+
+    save_cached_catalog(paths, _repo(), document)
+
+    assert load_cached_catalog(paths, _repo()) == document
+
+
 def test_catalog_cache_save_makes_cache_directory_chain_owner_private(
     tmp_path: Path,
 ) -> None:

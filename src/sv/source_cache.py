@@ -318,6 +318,8 @@ def _format_cached_catalog_document(document: CachedCatalogDocument) -> str:
     ]
     if document.index_hash is not None:
         lines.append(f'index_hash = "{toml_escape(document.index_hash)}"')
+    if not document.entries:
+        lines.append("skills = []")
     for entry in document.entries:
         lines.extend(
             [
