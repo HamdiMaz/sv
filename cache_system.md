@@ -15,11 +15,15 @@
 - Metadata cache TTL: **24 hours**.
 - Skill body cache retention: **30 days unused** and **256 MiB max total skill-body bytes**.
 - Refresh model: **lazy and synchronous**. No background process, daemon, thread, or scheduled job.
-- Expired metadata refresh failure: print a warning and use stale metadata when cached metadata exists.
+- Expired metadata refresh failure policy is command-specific:
+  - `list`, `search`, `add`, and `add --all` warn and use stale metadata when cached metadata exists.
+  - `sync`, `update`, and source-aware `status` are refresh-first by default and fail closed on refresh errors so existing update/status semantics stay current.
 - Skill bodies are content-addressed by source content hash; indexed sources provide the hash up front, and non-index sources learn it after the first successful materialization and write it back to cached metadata.
-- Cached skill folders are validated by hash before use.
+- Cached skill folders are validated by hash before use. Existing body-cache entries are reused only when both metadata and the cached `skill/` tree validate against the requested content hash.
 - Cache pruning runs lazily after cache writes, at most once per day.
-- Commands that read source metadata use the same cache policy path: `list`, `search`, `add`, `add --all`, `sync`, `update`, and source-aware `status`.
+- Commands that read source metadata still route through the same cache manager path, but with different default policies:
+  - `list`, `search`, `add`, and `add --all`: normal 24-hour TTL policy.
+  - `sync`, `update`, and source-aware `status`: force-refresh policy by default.
 - User overrides:
   - `--refresh`: force source metadata refresh before command work.
   - `--cached`: use cached metadata only and avoid network/Git refreshes. Commands that need to materialize a skill body in `--cached` mode must hit the body cache; otherwise they fail with guidance to rerun without `--cached` once.
@@ -171,12 +175,15 @@ class CachePolicy:
         return cls()
 
     @classmethod
-    def force_refresh(cls) -> "CachePolicy":
-        return cls(mode=CacheMode.FORCE_REFRESH)
+    def force_refresh(cls, *, allow_stale_on_error: bool = True) -> "CachePolicy":
+        return cls(
+            mode=CacheMode.FORCE_REFRESH,
+            allow_stale_on_error=allow_stale_on_error,
+        )
 
     @classmethod
     def cache_only(cls) -> "CachePolicy":
-        return cls(mode=CacheMode.CACHE_ONLY)
+        return cls(mode=CacheMode.CACHE_ONLY, allow_stale_on_error=False)
 ```
 
 - [ ] **Step 5: Run the focused tests**
@@ -210,6 +217,7 @@ Append these tests to `tests/test_source_cache.py`:
 
 ```python
 from datetime import UTC, datetime, timedelta
+import os
 
 import pytest
 
@@ -276,7 +284,7 @@ def test_catalog_cache_write_refuses_symlinked_temp_file(tmp_path: Path) -> None
     repo = _repo()
     path = catalog_cache_path(paths, repo)
     path.parent.mkdir(parents=True)
-    temp_path = path.with_name(f".{path.name}.tmp")
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     target = tmp_path / "attacker-target.toml"
     temp_path.symlink_to(target)
 
@@ -312,6 +320,7 @@ from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
 from sv.hashformat import is_sha256_digest
 from sv.project import normalize_skill_name
+from sv.terminal import escape_terminal_controls
 from sv.tomlutil import atomic_write_text, load_toml_document, toml_escape
 
 _MAX_CATALOG_CACHE_BYTES = 1 * 1024 * 1024
@@ -435,7 +444,7 @@ def _parse_cached_catalog_entry(item: object, path: Path, index: int) -> CachedC
         raise SvError(f"Failed to read sv catalog cache at {path}: invalid source_path in entry {index}: {exc}") from exc
     return CachedCatalogEntry(
         name=name,
-        description=_required_string(item, "description", path),
+        description=escape_terminal_controls(_required_string(item, "description", path)),
         source_path=source_path,
         content_hash=_optional_hash(item, "content_hash", path),
         skill_file_hash=_optional_hash(item, "skill_file_hash", path),
@@ -499,7 +508,6 @@ def save_cached_catalog(paths: SvPaths, repo: RepoConfig, document: CachedCatalo
         path,
         _format_cached_catalog_document(document),
         document_name="sv catalog cache",
-        temp_name=f".{path.name}.tmp",
         temp_path_description="sv catalog cache temp file",
     )
 
@@ -669,6 +677,25 @@ def test_get_catalog_with_cache_warns_and_uses_stale_metadata_when_refresh_fails
 
     assert [entry.name for entry in catalog] == ["find-docs"]
     assert warnings == ["warning: using stale cached metadata for Org/Skills; refresh failed: network unavailable"]
+
+
+def test_get_catalog_with_cache_can_fail_closed_when_refresh_fails(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    save_cached_catalog(paths, repo, _catalog_document("2026-05-17T11:00:00Z"))
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        raise SvError("network unavailable")
+
+    with pytest.raises(SvError, match="network unavailable"):
+        get_catalog_with_cache(
+            [repo],
+            paths,
+            policy=CachePolicy.force_refresh(allow_stale_on_error=False),
+            now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+            refresh_catalog=refresh,
+            warn=lambda message: None,
+        )
 
 
 def test_get_catalog_with_cache_cache_only_fails_without_cached_metadata(tmp_path: Path) -> None:
@@ -1040,27 +1067,38 @@ def test_store_skill_body_cache_refuses_symlinked_tmp_dir(tmp_path: Path) -> Non
     assert list(attacker_target.iterdir()) == []
 
 
-def test_store_skill_body_cache_refuses_symlinked_temp_root(tmp_path: Path) -> None:
+def test_skill_body_cache_metadata_hash_mismatch_is_treated_as_miss(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     source_skill = _write_skill_tree(tmp_path / "source", "alpha")
     content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
-    paths.cache_tmp_dir.mkdir(parents=True)
-    temp_root = paths.cache_tmp_dir / f"skill-{content_hash.removeprefix('sha256:')}"
-    attacker_target = tmp_path / "attacker-temp-root"
-    attacker_target.mkdir()
-    temp_root.symlink_to(attacker_target, target_is_directory=True)
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+    )
+    metadata_path = skill_body_cache_path(paths, content_hash) / "metadata.toml"
+    text = metadata_path.read_text(encoding="utf-8")
+    wrong_hash = (
+        "sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d"
+    )
+    metadata_path.write_text(
+        text.replace(content_hash, wrong_hash),
+        encoding="utf-8",
+    )
+    destination = tmp_path / "destination" / "alpha"
 
-    with pytest.raises(SvError, match="symlinked skill body cache temp path"):
-        store_skill_body_cache(
-            paths,
-            source_skill,
-            skill_name="alpha",
-            content_hash=content_hash,
-            source_reference="Org/Skills:skills/alpha",
-            now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
-        )
-
-    assert list(attacker_target.iterdir()) == []
+    assert try_materialize_from_skill_body_cache(
+        paths,
+        content_hash=content_hash,
+        skill_name="alpha",
+        destination=destination,
+        now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC),
+    ) is False
+    assert not destination.exists()
+    assert not skill_body_cache_path(paths, content_hash).exists()
 
 
 def test_skill_body_cache_corrupt_metadata_is_treated_as_miss(tmp_path: Path) -> None:
@@ -1077,6 +1115,34 @@ def test_skill_body_cache_corrupt_metadata_is_treated_as_miss(tmp_path: Path) ->
     )
     metadata_path = skill_body_cache_path(paths, content_hash) / "metadata.toml"
     metadata_path.write_text("not = [valid", encoding="utf-8")
+    destination = tmp_path / "destination" / "alpha"
+
+    assert try_materialize_from_skill_body_cache(
+        paths,
+        content_hash=content_hash,
+        skill_name="alpha",
+        destination=destination,
+        now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC),
+    ) is False
+    assert not destination.exists()
+    assert not skill_body_cache_path(paths, content_hash).exists()
+
+
+def test_skill_body_cache_corrupt_body_is_treated_as_miss(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        source_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:skills/alpha",
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+    )
+    (skill_body_cache_path(paths, content_hash) / "skill" / "notes.md").write_text(
+        "tampered\n", encoding="utf-8"
+    )
     destination = tmp_path / "destination" / "alpha"
 
     assert try_materialize_from_skill_body_cache(
@@ -1135,10 +1201,12 @@ In `src/sv/source_cache.py`, add imports:
 
 ```python
 import shutil
+import uuid
 
 from sv.hashformat import SHA256_PREFIX
 from sv.hashing import sha256_file, sha256_skill_directory
 from sv.materialization import remove_materialization_path
+from sv.skills import parse_skill_file
 ```
 
 Add dataclass and path helpers:
@@ -1182,26 +1250,32 @@ def load_skill_body_metadata(paths: SvPaths, content_hash: str) -> SkillBodyMeta
     data = load_toml_document(path, "sv skill body cache metadata")
     if not isinstance(data, dict) or data.get("schema_version") != CACHE_SCHEMA_VERSION:
         raise SvError(f"Failed to read sv skill body cache metadata at {path}: unsupported schema_version.")
-    return SkillBodyMetadata(
+    metadata = SkillBodyMetadata(
         content_hash=_required_hash(data, "content_hash", path),
-        skill_name=_required_string(data, "skill_name", path),
+        skill_name=normalize_skill_name(_required_string(data, "skill_name", path)),
         source_reference=_required_string(data, "source_reference", path),
         size_bytes=_required_int(data, "size_bytes", path),
         created_at=_required_string(data, "created_at", path),
         last_used_at=_required_string(data, "last_used_at", path),
         use_count=_required_int(data, "use_count", path),
     )
+    if metadata.content_hash != content_hash:
+        raise SvError(
+            f"Failed to read sv skill body cache metadata at {path}: content_hash does not match cache path."
+        )
+    _parse_utc(metadata.created_at, path)
+    _parse_utc(metadata.last_used_at, path)
+    return metadata
 
 
 def _required_int(data: dict, field: str, path: Path) -> int:
     value = data.get(field)
-    if not isinstance(value, int) or value < 0:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise SvError(f"Failed to read sv cache metadata at {path}: field '{field}' must be a non-negative integer.")
     return value
 
 
-def _save_skill_body_metadata(paths: SvPaths, metadata: SkillBodyMetadata) -> None:
-    path = _skill_body_metadata_path(paths, metadata.content_hash)
+def _save_skill_body_metadata_at(path: Path, metadata: SkillBodyMetadata) -> None:
     _reject_symlinked_cache_dir(path.parent)
     text = "\n".join([
         f"schema_version = {CACHE_SCHEMA_VERSION}",
@@ -1218,8 +1292,14 @@ def _save_skill_body_metadata(paths: SvPaths, metadata: SkillBodyMetadata) -> No
         path,
         text,
         document_name="sv skill body cache metadata",
-        temp_name=f".{path.name}.tmp",
         temp_path_description="sv skill body cache metadata temp file",
+    )
+
+
+def _save_skill_body_metadata(paths: SvPaths, metadata: SkillBodyMetadata) -> None:
+    _save_skill_body_metadata_at(
+        _skill_body_metadata_path(paths, metadata.content_hash),
+        metadata,
     )
 ```
 
@@ -1237,50 +1317,51 @@ def store_skill_body_cache(
     source_reference: str,
     now: datetime,
 ) -> None:
+    skill_name = normalize_skill_name(skill_name)
+    parse_skill_file(source_skill_dir / "SKILL.md", expected_folder=skill_name)
     if sha256_skill_directory(source_skill_dir, expected_name=skill_name) != content_hash:
         raise SvError(f"Refusing to cache skill '{skill_name}': content hash mismatch.")
     cache_root = skill_body_cache_path(paths, content_hash)
-    temp_root = paths.cache_tmp_dir / f"skill-{content_hash.removeprefix(SHA256_PREFIX)}"
     _reject_symlinked_cache_dir(paths.cache_tmp_dir)
     _reject_symlinked_cache_dir(cache_root.parent)
     paths.cache_tmp_dir.mkdir(parents=True, exist_ok=True)
     cache_root.parent.mkdir(parents=True, exist_ok=True)
     _reject_symlinked_cache_dir(paths.cache_tmp_dir)
     _reject_symlinked_cache_dir(cache_root.parent)
-    if temp_root.is_symlink():
-        raise SvError(f"Refusing to use symlinked skill body cache temp path at {temp_root}.")
-    remove_materialization_path(temp_root, ignore_errors=True)
+    if cache_root.is_symlink():
+        raise SvError(f"Refusing to use symlinked skill body cache path at {cache_root}.")
+    if cache_root.exists():
+        if _cached_skill_body_is_valid(paths, content_hash, skill_name=skill_name):
+            _touch_skill_body_cache(paths, content_hash, now=now)
+            return
+        remove_materialization_path(cache_root, ignore_errors=True)
+
+    temp_root = _unique_skill_body_temp_root(paths, content_hash)
     try:
         temp_skill = temp_root / "skill"
-        temp_skill.parent.mkdir(parents=True, exist_ok=True)
+        temp_skill.parent.mkdir(parents=True, exist_ok=False)
         shutil.copytree(source_skill_dir, temp_skill, symlinks=True)
+        parse_skill_file(temp_skill / "SKILL.md", expected_folder=skill_name)
         if sha256_skill_directory(temp_skill, expected_name=skill_name) != content_hash:
             raise SvError(f"Refusing to cache skill '{skill_name}': copied content hash mismatch.")
-        size_bytes = _directory_size(temp_skill)
-        if cache_root.is_symlink():
-            raise SvError(f"Refusing to use symlinked skill body cache path at {cache_root}.")
-        if cache_root.exists():
-            try:
-                _touch_skill_body_cache(paths, content_hash, now=now)
-                return
-            except SvError:
-                remove_materialization_path(cache_root, ignore_errors=True)
-        temp_root.replace(cache_root)
         timestamp = _utc_timestamp(now)
-        _save_skill_body_metadata(
-            paths,
-            SkillBodyMetadata(
-                content_hash=content_hash,
-                skill_name=skill_name,
-                source_reference=source_reference,
-                size_bytes=size_bytes,
-                created_at=timestamp,
-                last_used_at=timestamp,
-                use_count=1,
-            ),
+        metadata = SkillBodyMetadata(
+            content_hash=content_hash,
+            skill_name=skill_name,
+            source_reference=source_reference,
+            size_bytes=_directory_size(temp_skill),
+            created_at=timestamp,
+            last_used_at=timestamp,
+            use_count=1,
         )
+        _save_skill_body_metadata_at(temp_root / "metadata.toml", metadata)
+        if sha256_skill_directory(temp_skill, expected_name=skill_name) != content_hash:
+            raise SvError(f"Refusing to cache skill '{skill_name}': staged content hash mismatch.")
+        temp_root.replace(cache_root)
     except Exception:
         remove_materialization_path(temp_root, ignore_errors=True)
+        if cache_root.exists() and not _cached_skill_body_is_valid(paths, content_hash, skill_name=skill_name):
+            remove_materialization_path(cache_root, ignore_errors=True)
         raise
 
 
@@ -1292,12 +1373,10 @@ def try_materialize_from_skill_body_cache(
     destination: Path,
     now: datetime,
 ) -> bool:
+    skill_name = normalize_skill_name(skill_name)
+    if not _cached_skill_body_is_valid(paths, content_hash, skill_name=skill_name):
+        return False
     skill_folder = _skill_body_folder(paths, content_hash)
-    if not skill_folder.is_dir():
-        return False
-    if sha256_skill_directory(skill_folder, expected_name=skill_name) != content_hash:
-        remove_materialization_path(skill_body_cache_path(paths, content_hash), ignore_errors=True)
-        return False
     if destination.exists() or destination.is_symlink():
         remove_materialization_path(destination, ignore_errors=True)
     try:
@@ -1329,6 +1408,40 @@ def _touch_skill_body_cache(paths: SvPaths, content_hash: str, *, now: datetime)
             use_count=metadata.use_count + 1,
         ),
     )
+
+
+def _cached_skill_body_is_valid(
+    paths: SvPaths,
+    content_hash: str,
+    *,
+    skill_name: str,
+) -> bool:
+    cache_root = skill_body_cache_path(paths, content_hash)
+    skill_folder = _skill_body_folder(paths, content_hash)
+    if not skill_folder.is_dir():
+        if cache_root.exists() or cache_root.is_symlink():
+            remove_materialization_path(cache_root, ignore_errors=True)
+        return False
+    try:
+        metadata = load_skill_body_metadata(paths, content_hash)
+        if metadata.skill_name != skill_name:
+            raise SvError("cached skill body metadata skill_name mismatch")
+        if sha256_skill_directory(skill_folder, expected_name=skill_name) != content_hash:
+            raise SvError("cached skill body hash mismatch")
+    except SvError:
+        remove_materialization_path(cache_root, ignore_errors=True)
+        return False
+    return True
+
+
+def _unique_skill_body_temp_root(paths: SvPaths, content_hash: str) -> Path:
+    digest = content_hash.removeprefix(SHA256_PREFIX)
+    for _ in range(100):
+        candidate = paths.cache_tmp_dir / f"skill-{digest}-{uuid.uuid4().hex}"
+        if candidate.exists() or candidate.is_symlink():
+            continue
+        return candidate
+    raise SvError("Failed to allocate unique sv skill body cache temp path.")
 
 
 def _directory_size(path: Path) -> int:
@@ -1730,6 +1843,9 @@ def _wrap_source_skill(
                 "Run the command without --cached once to populate the body cache."
             )
         original_materialize(destination)
+        # Preserve existing project/vault validation ordering: surface invalid SKILL.md
+        # errors before reporting an indexed content-hash mismatch.
+        parse_skill_file(destination / "SKILL.md", expected_folder=entry.name)
         actual_hash = sha256_skill_directory(destination, expected_name=entry.name)
         actual_skill_file_hash = sha256_file(destination / "SKILL.md")
         if content_hash is not None and actual_hash != content_hash:
@@ -1857,7 +1973,7 @@ def test_prune_skill_body_cache_enforces_size_cap_by_lru_then_use_count(tmp_path
 def test_prune_skill_body_cache_refuses_symlinked_marker_temp_file(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     paths.cache_dir.mkdir(parents=True)
-    temp_path = paths.cache_prune_marker.with_name(f".{paths.cache_prune_marker.name}.tmp")
+    temp_path = paths.cache_prune_marker.with_name(f".{paths.cache_prune_marker.name}.{os.getpid()}.tmp")
     target = tmp_path / "attacker-marker.toml"
     temp_path.symlink_to(target)
 
@@ -1975,7 +2091,6 @@ def _write_prune_marker(paths: SvPaths, *, now: datetime) -> None:
         path,
         f"schema_version = {CACHE_SCHEMA_VERSION}\nlast_pruned_at = {_toml_string(_utc_timestamp(now))}\n",
         document_name="sv cache prune marker",
-        temp_name=f".{path.name}.tmp",
         temp_path_description="sv cache prune marker temp file",
     )
 ```
@@ -2025,11 +2140,10 @@ def test_list_uses_fresh_cached_metadata_without_refresh(tmp_path: Path, run_sv)
 
     first = run_sv(["list"], cwd=project, home=home)
     assert first.exit_code == 0
+    shutil.rmtree(source / ".git")
 
     def fail_git(args, cwd=None):
-        if args[:2] in (["git", "fetch"], ["git", "clone"]):
-            raise AssertionError(f"unexpected refresh: {args}")
-        return default_runner(args, cwd)
+        raise AssertionError(f"fresh cache should avoid Git/source refresh: {args}")
 
     second = run_sv(["list"], cwd=project, home=home, git_runner=fail_git)
 
@@ -2037,7 +2151,7 @@ def test_list_uses_fresh_cached_metadata_without_refresh(tmp_path: Path, run_sv)
     assert "alpha" in second.stdout
 ```
 
-Add to `tests/test_cli_search_contracts.py` (also import `configure_source`, `make_source_repo`, and `default_runner` if this file does not already import them):
+Add to `tests/test_cli_search_contracts.py` (also import `shutil`, `configure_source`, and `make_source_repo` if this file does not already import them):
 
 ```python
 def test_search_uses_cached_metadata_after_list(tmp_path: Path, run_sv):
@@ -2047,11 +2161,10 @@ def test_search_uses_cached_metadata_after_list(tmp_path: Path, run_sv):
     project.mkdir()
     configure_source(source, project, home)
     assert run_sv(["list"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
 
     def fail_git(args, cwd=None):
-        if args[:2] in (["git", "fetch"], ["git", "clone"]):
-            raise AssertionError(f"unexpected refresh: {args}")
-        return default_runner(args, cwd)
+        raise AssertionError(f"fresh cache should avoid Git/source refresh: {args}")
 
     result = run_sv(["search", "alpha"], cwd=project, home=home, git_runner=fail_git)
 
@@ -2102,12 +2215,17 @@ def _add_cache_policy_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _cache_policy_from_args(args: argparse.Namespace) -> CachePolicy:
+def _cache_policy_from_args(
+    args: argparse.Namespace,
+    *,
+    default_mode: CacheMode = CacheMode.NORMAL,
+    allow_stale_on_error: bool = True,
+) -> CachePolicy:
     if getattr(args, "refresh", False):
-        return CachePolicy.force_refresh()
+        return CachePolicy.force_refresh(allow_stale_on_error=allow_stale_on_error)
     if getattr(args, "cached", False):
         return CachePolicy.cache_only()
-    return CachePolicy.default()
+    return CachePolicy(mode=default_mode, allow_stale_on_error=allow_stale_on_error)
 ```
 
 - [ ] **Step 4: Add cache flags to source-consuming parsers**
@@ -2377,13 +2495,47 @@ uv run pytest tests/test_cli_add_contracts.py::test_add_uses_cached_metadata_and
 
 Expected: PASS.
 
-- [ ] **Step 4: Route `sync` and `update` through cache helper**
+- [ ] **Step 4: Route `sync` and `update` through cache helper with refresh-first defaults**
 
-In `handle` for `sync`, replace `_update_sources_and_catalog(...)` with config load plus `_catalog_for_source_command(...)` using `_cache_policy_from_args(args)`.
+In `handle` for `sync`, replace `_update_sources_and_catalog(...)` with config load plus `_catalog_for_source_command(...)`. Preserve existing sync semantics by forcing refresh and failing closed unless the user explicitly passes `--cached`:
 
-In `_handle_update`, replace `_update_sources_and_catalog_from_repos(...)` with `_catalog_for_source_command(...)` using the policy passed from `handle`. Change `_handle_update` signature to accept `cache_policy: CachePolicy`, and pass `_cache_policy_from_args(args)` from `handle`.
+```python
+config = _load_config_for_source_command(paths)
+sync_policy = _cache_policy_from_args(
+    args,
+    default_mode=CacheMode.FORCE_REFRESH,
+    allow_stale_on_error=False,
+)
+catalog = _catalog_for_source_command(
+    config.repos,
+    paths,
+    git_runner,
+    policy=sync_policy,
+    record_global_source_state=record_global_source_state,
+    allow_partial_failures=False,
+)
+```
 
-Concrete signature change:
+In `_handle_update`, replace `_update_sources_and_catalog_from_repos(...)` with `_catalog_for_source_command(...)` using the policy passed from `handle`. Change `_handle_update` signature to accept `cache_policy: CachePolicy`, and pass this from `handle`:
+
+```python
+update_policy = _cache_policy_from_args(
+    args,
+    default_mode=CacheMode.FORCE_REFRESH,
+    allow_stale_on_error=False,
+)
+return _handle_update(
+    cwd=cwd,
+    paths=paths,
+    adapter=adapter,
+    git_runner=git_runner,
+    record_global_source_state=record_global_source_state,
+    context=local_context,
+    cache_policy=update_policy,
+)
+```
+
+Concrete `_handle_update` signature:
 
 ```python
 def _handle_update(
@@ -2398,33 +2550,88 @@ def _handle_update(
 ) -> int:
 ```
 
-- [ ] **Step 5: Route source-aware status refresh through cache helper**
+Inside `_handle_update`, keep the existing user-facing `print("Updating source repos...")`, then call `_catalog_for_source_command(...)` with `policy=cache_policy`.
+
+- [ ] **Step 5: Route source-aware status refresh through cache helper with refresh-first defaults**
 
 Change `_status_catalog_if_configured` to accept `cache_policy: CachePolicy`. Replace its direct `_update_sources_and_catalog_from_repos(...)` call with `_catalog_for_source_command(...)`.
 
-Thread `cache_policy=_cache_policy_from_args(args)` from `handle` into `_handle_status`, `_handle_vault_status`, and `_status_catalog_if_configured`.
-
-- [ ] **Step 6: Add stale fallback test for update**
-
-Add to `tests/test_cli_update_contracts.py`:
+Thread this policy from `handle` into `_handle_status`, `_handle_vault_status`, and `_status_catalog_if_configured`:
 
 ```python
-def test_update_warns_and_uses_stale_cached_metadata_when_refresh_fails(tmp_path, run_sv):
+status_policy = _cache_policy_from_args(
+    args,
+    default_mode=CacheMode.FORCE_REFRESH,
+    allow_stale_on_error=False,
+)
+```
+
+This preserves existing `sv status` behavior: if managed installed skills require source comparison, status refreshes source metadata instead of trusting a 24-hour-old cache. `sv status --cached` remains available for offline/cache-only status checks and must not call source backends.
+
+- [ ] **Step 6: Add tests that mutating/status commands do not reuse fresh metadata by default**
+
+Add to `tests/test_cli_sync_contracts.py`:
+
+```python
+def test_sync_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path: Path, run_sv):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
     configure_source(source, project, home)
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
-    shutil.rmtree(source / ".git")
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
 
-    result = run_sv(["update", "--refresh"], cwd=project, home=home)
+    result = run_sv(["sync"], cwd=project, home=home)
 
     assert result.exit_code == 0
-    assert "warning: using stale cached metadata" in result.stderr
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
 ```
 
-Add `import shutil` if needed.
+Add to `tests/test_cli_update_contracts.py`:
+
+```python
+def test_update_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    result = run_sv(["update"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+```
+
+Add to `tests/test_cli_status_contracts.py`:
+
+```python
+def test_status_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path: Path, run_sv):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
+    result = run_sv(["status"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout
+    assert "update available" in result.stdout
+```
+
+Do not add a test that expects `sv update --refresh` to use stale metadata after refresh failure. Mutating/status source comparisons are intentionally failure-closed by default; keep the existing unreachable-source contract tests.
 
 - [ ] **Step 7: Run affected CLI contract tests**
 
@@ -2562,10 +2769,12 @@ def test_cache_summary_counts_catalogs_and_skill_bodies(tmp_path: Path) -> None:
     )
 
     summary = cache_summary(paths)
+    cleaned = clean_cache(paths, now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC))
 
     assert summary.catalog_files == 1
     assert summary.skill_bodies == 1
     assert summary.skill_body_bytes > 0
+    assert cleaned == summary
 ```
 
 - [ ] **Step 5: Run focused tests**
@@ -2603,7 +2812,9 @@ In `docs/commands.md`, add a section after Source discovery and refresh:
 ```markdown
 ## Global cache
 
-`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours by default. Commands that need source metadata use cached metadata when it is fresh, refresh lazily when it expires, and warn while using stale metadata if refresh fails.
+`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, `sv add`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
+
+`sv sync`, `sv update`, and source-aware `sv status` are refresh-first by default so they continue to report and apply current source changes. They still use the cache manager for `--cached`, cache writes, body-cache reuse, and cache-only error handling, but they do not silently trust 24-hour-old metadata by default.
 
 Materialized skill folders are cached by content hash. Indexed sources provide the content hash in source metadata; non-index sources learn and record the hash after the first successful add/sync/update materialization. Reinstalling or syncing a skill can reuse a cached skill body when the cached hash matches the source metadata. Cached skill bodies are pruned lazily after cache writes: entries unused for more than 30 days are removed, and the cache is reduced to 256 MiB when it grows beyond that size.
 
@@ -2621,7 +2832,7 @@ Global cache metadata and skill bodies live under:
 ~/.sv/cache/v1/
 ```
 
-Source metadata is cached for 24 hours. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization.
+Source metadata for normal browsing/install commands is cached for 24 hours. `sv sync`, `sv update`, and source-aware `sv status` refresh metadata by default to preserve current-source semantics. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization.
 ```
 
 - [ ] **Step 3: Update usage and troubleshooting**
@@ -2637,8 +2848,9 @@ sv cache clean
 
 In `docs/troubleshooting.md`, add notes for:
 
-- stale metadata warning means refresh failed and cached metadata was used
+- stale metadata warning means refresh failed and cached metadata was used by a command that allows stale fallback (`list`, `search`, `add`, or `add --all`)
 - `--refresh` forces a new source check
+- `sync`, `update`, and source-aware `status` refresh by default and fail closed on refresh errors unless `--cached` is used
 - `--cached` requires existing metadata cache
 - `sv add --cached`, `sv sync --cached`, and `sv update --cached` also require matching cached skill bodies for any skill they need to materialize
 - if a cached skill body is missing, rerun once without `--cached` to populate the body cache
@@ -2760,7 +2972,8 @@ If `git status --short` shows no changes after Step 1-6, do not create an empty 
 ## Self-review checklist for implementer
 
 - Metadata TTL is exactly 24 hours by default.
-- Expired metadata refresh failure warns and uses stale metadata when stale metadata exists.
+- Expired metadata refresh failure warns and uses stale metadata for `list`, `search`, `add`, and `add --all` when stale metadata exists.
+- `sync`, `update`, and source-aware `status` refresh by default and fail closed on refresh errors unless `--cached` is explicitly used.
 - `--cached` never calls Git, GitHub API, or HTTPS source refresh code.
 - `--cached` materialization fails with guidance when metadata or a matching cached skill body is missing.
 - `--refresh` bypasses fresh metadata cache.
@@ -2768,6 +2981,6 @@ If `git status --short` shows no changes after Step 1-6, do not create an empty 
 - Skill bodies are copied from cache only when the content hash matches.
 - Body cache entries update `last_used_at` and `use_count` on hit and store.
 - Lazy pruning respects 30 days unused and 256 MiB body-cache cap.
-- All cache writes reject symlinked cache paths and use temp files/directories followed by atomic replace.
-- Source materialization remains validated by existing project/vault install validation.
-- Read-only and mutating source commands use the same cache manager path.
+- All cache writes reject symlinked cache paths and use unique temp files/directories followed by atomic replace of complete cache entries.
+- Source materialization still surfaces existing project/vault validation errors before hash-mismatch errors where those errors are more specific.
+- Read-only and mutating source commands use the same cache manager path, with command-specific default policies.
