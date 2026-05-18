@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,7 +9,7 @@ import stat
 
 import pytest
 
-from sv.catalog import SourceSkill  # noqa: F401
+from sv.catalog import SourceSkill
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
 from sv.source_cache import (
@@ -23,6 +24,7 @@ from sv.source_cache import (
     cached_catalog_is_fresh,
     load_cached_catalog,
     save_cached_catalog,
+    get_catalog_with_cache,
     _cached_catalog_hash,
 )
 
@@ -302,3 +304,217 @@ def test_catalog_cache_load_rejects_provenance_field_tampering(tmp_path: Path) -
 
     with pytest.raises(SvError, match="catalog_hash does not match document"):
         load_cached_catalog(paths, repo)
+
+
+def test_get_catalog_with_cache_uses_fresh_metadata_without_refresh(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    save_cached_catalog(paths, repo, _catalog_document("2026-05-18T11:30:00Z"))
+    calls: list[Sequence[RepoConfig]] = []
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        calls.append(repos)
+        raise AssertionError("fresh cache should avoid refresh")
+
+    catalog = get_catalog_with_cache(
+        [repo],
+        paths,
+        policy=CachePolicy.default(),
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        refresh_catalog=refresh,
+        warn=lambda message: None,
+    )
+
+    assert calls == []
+    assert [(entry.name, entry.description) for entry in catalog] == [
+        ("find-docs", "Find documentation.")
+    ]
+
+
+def test_get_catalog_with_cache_refreshes_expired_metadata(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    save_cached_catalog(paths, repo, _catalog_document("2026-05-17T11:00:00Z"))
+    refreshed_entry = SourceSkill(
+        name="new-skill",
+        description="New skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "new-skill",
+        source_relative_path="skills/new-skill",
+        source_backend="fake",
+        source_content_hash="sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d",
+    )
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        assert list(repos) == [repo]
+        return [refreshed_entry]
+
+    catalog = get_catalog_with_cache(
+        [repo],
+        paths,
+        policy=CachePolicy.default(),
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        refresh_catalog=refresh,
+        warn=lambda message: None,
+    )
+
+    assert [entry.name for entry in catalog] == ["new-skill"]
+    cached_document = load_cached_catalog(paths, repo)
+    assert cached_document is not None
+    assert cached_document.entries[0].name == "new-skill"
+
+
+def test_get_catalog_with_cache_warns_and_uses_stale_metadata_when_refresh_fails(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    save_cached_catalog(paths, repo, _catalog_document("2026-05-17T11:00:00Z"))
+    warnings: list[str] = []
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        raise SvError("network unavailable")
+
+    catalog = get_catalog_with_cache(
+        [repo],
+        paths,
+        policy=CachePolicy.default(),
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        refresh_catalog=refresh,
+        warn=warnings.append,
+    )
+
+    assert [entry.name for entry in catalog] == ["find-docs"]
+    assert warnings == [
+        "warning: using stale cached metadata for Org/Skills; refresh failed: network unavailable"
+    ]
+
+
+def test_get_catalog_with_cache_can_fail_closed_when_refresh_fails(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    save_cached_catalog(paths, repo, _catalog_document("2026-05-17T11:00:00Z"))
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        raise SvError("network unavailable")
+
+    with pytest.raises(SvError, match="network unavailable"):
+        get_catalog_with_cache(
+            [repo],
+            paths,
+            policy=CachePolicy.force_refresh(allow_stale_on_error=False),
+            now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+            refresh_catalog=refresh,
+            warn=lambda message: None,
+        )
+
+
+def test_get_catalog_with_cache_cache_only_fails_without_cached_metadata(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        raise AssertionError("cache-only mode must not refresh")
+
+    with pytest.raises(SvError, match="No cached metadata found for Org/Skills"):
+        get_catalog_with_cache(
+            [repo],
+            paths,
+            policy=CachePolicy.cache_only(),
+            now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+            refresh_catalog=refresh,
+            warn=lambda message: None,
+        )
+
+
+def test_get_catalog_with_cache_refreshes_when_normal_mode_cache_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    catalog_cache_path(paths, repo).parent.mkdir(parents=True)
+    catalog_cache_path(paths, repo).write_text("not = [valid", encoding="utf-8")
+    warnings: list[str] = []
+    refreshed_entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="fake",
+    )
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        assert list(repos) == [repo]
+        return [refreshed_entry]
+
+    catalog = get_catalog_with_cache(
+        [repo],
+        paths,
+        policy=CachePolicy.default(),
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        refresh_catalog=refresh,
+        warn=warnings.append,
+    )
+
+    assert [entry.name for entry in catalog] == ["alpha"]
+    assert len(warnings) == 1
+    assert warnings[0].startswith(
+        "warning: ignoring invalid cached metadata for Org/Skills: Failed to read sv catalog cache"
+    )
+
+
+def test_get_catalog_with_cache_cache_only_fails_when_cache_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    catalog_cache_path(paths, repo).parent.mkdir(parents=True)
+    catalog_cache_path(paths, repo).write_text("not = [valid", encoding="utf-8")
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        raise AssertionError("cache-only mode must not refresh")
+
+    with pytest.raises(SvError, match="Failed to read sv catalog cache"):
+        get_catalog_with_cache(
+            [repo],
+            paths,
+            policy=CachePolicy.cache_only(),
+            now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+            refresh_catalog=refresh,
+            warn=lambda message: None,
+        )
+
+
+def test_get_catalog_with_cache_fails_closed_for_symlinked_catalog_cache(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    path = catalog_cache_path(paths, repo)
+    path.parent.mkdir(parents=True)
+    target = tmp_path / "attacker-catalog.toml"
+    path.symlink_to(target)
+
+    def refresh(repos: Sequence[RepoConfig]) -> list[SourceSkill]:
+        raise AssertionError("symlinked cache metadata must fail before refresh")
+
+    with pytest.raises(SvError, match="symlinked"):
+        get_catalog_with_cache(
+            [repo],
+            paths,
+            policy=CachePolicy.default(),
+            now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+            refresh_catalog=refresh,
+            warn=lambda message: None,
+        )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -9,7 +9,7 @@ from typing import Any, cast
 import hashlib
 import stat
 
-from sv.catalog import normalize_source_relative_path
+from sv.catalog import SourceSkill, normalize_source_relative_path
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
 from sv.hashformat import is_sha256_digest
@@ -51,6 +51,18 @@ class CachePolicy:
     @classmethod
     def cache_only(cls) -> "CachePolicy":
         return cls(mode=CacheMode.CACHE_ONLY, allow_stale_on_error=False)
+
+
+@dataclass(frozen=True)
+class CacheRefreshResult:
+    entries: tuple[SourceSkill, ...]
+    refreshed_backends_by_repo: Mapping[str, str] = field(default_factory=dict)
+    index_hashes_by_repo: Mapping[str, str | None] = field(default_factory=dict)
+
+
+CacheRefreshValue = CacheRefreshResult | Sequence[SourceSkill]
+RefreshCatalog = Callable[[Sequence[RepoConfig]], CacheRefreshValue]
+Warn = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -154,6 +166,195 @@ def cached_catalog_is_fresh(
     )
     age = now.astimezone(UTC) - refreshed_at
     return timedelta(seconds=0) <= age <= timedelta(seconds=ttl_seconds)
+
+
+def get_catalog_with_cache(
+    repos: Sequence[RepoConfig],
+    paths: SvPaths,
+    *,
+    policy: CachePolicy,
+    now: datetime,
+    refresh_catalog: RefreshCatalog,
+    warn: Warn,
+) -> list[SourceSkill]:
+    documents: dict[str, CachedCatalogDocument] = {}
+    cached_entries: list[SourceSkill] = []
+    repos_to_refresh: list[RepoConfig] = []
+
+    for repo in repos:
+        try:
+            document = load_cached_catalog(paths, repo)
+        except SvError as exc:
+            if (
+                _cache_error_is_symlink_violation(exc)
+                or policy.mode is CacheMode.CACHE_ONLY
+            ):
+                raise
+            warn(f"warning: ignoring invalid cached metadata for {repo.id}: {exc}")
+            repos_to_refresh.append(repo)
+            continue
+
+        if document is None:
+            if policy.mode is CacheMode.CACHE_ONLY:
+                raise SvError(f"No cached metadata found for {repo.id}.")
+            repos_to_refresh.append(repo)
+            continue
+
+        documents[repo.id] = document
+        if policy.mode is CacheMode.CACHE_ONLY:
+            cached_entries.extend(
+                _source_skills_from_cached_document(repo, paths, document)
+            )
+            continue
+        if policy.mode is CacheMode.FORCE_REFRESH or not cached_catalog_is_fresh(
+            document, now=now, ttl_seconds=policy.metadata_ttl_seconds
+        ):
+            repos_to_refresh.append(repo)
+            continue
+        cached_entries.extend(
+            _source_skills_from_cached_document(repo, paths, document)
+        )
+
+    refreshed_entries: list[SourceSkill] = []
+    if repos_to_refresh:
+        try:
+            refresh_result = _coerce_refresh_result(refresh_catalog(repos_to_refresh))
+        except SvError as exc:
+            if not policy.allow_stale_on_error:
+                raise
+            fallback_entries: list[SourceSkill] = []
+            for repo in repos_to_refresh:
+                document = documents.get(repo.id)
+                if document is None:
+                    raise
+                warn(
+                    f"warning: using stale cached metadata for {repo.id}; "
+                    f"refresh failed: {exc}"
+                )
+                fallback_entries.extend(
+                    _source_skills_from_cached_document(repo, paths, document)
+                )
+            refreshed_entries = fallback_entries
+        else:
+            entries_by_repo = _entries_by_repo(refresh_result.entries)
+            for repo in repos_to_refresh:
+                repo_entries = entries_by_repo.get(repo.id, ())
+                backend = refresh_result.refreshed_backends_by_repo.get(repo.id)
+                index_hash = refresh_result.index_hashes_by_repo.get(repo.id)
+                document = _catalog_document_from_entries(
+                    repo,
+                    repo_entries,
+                    _utc_timestamp(now),
+                    backend=backend,
+                    index_hash=index_hash,
+                )
+                try:
+                    save_cached_catalog(paths, repo, document)
+                except SvError as exc:
+                    if _cache_write_error_must_fail(exc):
+                        raise
+                    warn(
+                        f"warning: failed to write cached metadata for {repo.id}: {exc}"
+                    )
+                refreshed_entries.extend(repo_entries)
+
+    final_entries = [*cached_entries, *refreshed_entries]
+    return sorted(
+        final_entries,
+        key=lambda entry: (entry.name, entry.repo_id, entry.source_relative_path),
+    )
+
+
+def _catalog_document_from_entries(
+    repo: RepoConfig,
+    entries: Sequence[SourceSkill],
+    refreshed_at: str,
+    *,
+    backend: str | None = None,
+    index_hash: str | None = None,
+) -> CachedCatalogDocument:
+    cached_entries = tuple(
+        sorted(
+            (
+                CachedCatalogEntry(
+                    name=normalize_skill_name(entry.name),
+                    description=escape_terminal_controls(entry.description),
+                    source_path=normalize_source_relative_path(
+                        entry.source_relative_path
+                    ),
+                    content_hash=entry.source_content_hash,
+                    skill_file_hash=entry.source_skill_file_hash,
+                )
+                for entry in entries
+            ),
+            key=lambda entry: (entry.name, entry.source_path),
+        )
+    )
+    document = CachedCatalogDocument(
+        repo_id=repo.id,
+        repo_url=repo.url,
+        source_key=repo_source_key(repo.url),
+        skills_paths=tuple(repo.skills_paths),
+        backend=backend or _catalog_backend(entries),
+        refreshed_at=refreshed_at,
+        catalog_hash="sha256:" + ("0" * 64),
+        index_hash=index_hash,
+        entries=cached_entries,
+    )
+    return replace(document, catalog_hash=_cached_catalog_hash(document))
+
+
+def _catalog_backend(entries: Sequence[SourceSkill]) -> str:
+    backends = {entry.source_backend for entry in entries}
+    if len(backends) == 1:
+        return next(iter(backends))
+    return "mixed"
+
+
+def _source_skills_from_cached_document(
+    repo: RepoConfig, paths: SvPaths, document: CachedCatalogDocument
+) -> list[SourceSkill]:
+    repo_path = paths.source_repo_for(repo.id)
+    entries: list[SourceSkill] = []
+    for entry in document.entries:
+        source_relative_path = normalize_source_relative_path(entry.source_path)
+        entries.append(
+            SourceSkill(
+                name=normalize_skill_name(entry.name),
+                description=escape_terminal_controls(entry.description),
+                repo_id=repo.id,
+                repo_url=repo.url,
+                repo_path=repo_path,
+                source_path=repo_path / source_relative_path,
+                source_relative_path=source_relative_path,
+                repo_aliases=repo.aliases,
+                source_backend=f"cache:{document.backend}",
+                source_content_hash=entry.content_hash,
+                source_skill_file_hash=entry.skill_file_hash,
+            )
+        )
+    return entries
+
+
+def _coerce_refresh_result(value: CacheRefreshValue) -> CacheRefreshResult:
+    if isinstance(value, CacheRefreshResult):
+        return value
+    return CacheRefreshResult(entries=tuple(value))
+
+
+def _entries_by_repo(
+    entries: Sequence[SourceSkill],
+) -> dict[str, tuple[SourceSkill, ...]]:
+    grouped: dict[str, list[SourceSkill]] = {}
+    for entry in entries:
+        grouped.setdefault(entry.repo_id, []).append(entry)
+    return {repo_id: tuple(repo_entries) for repo_id, repo_entries in grouped.items()}
+
+
+def _utc_timestamp(value: datetime) -> str:
+    return (
+        value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
 
 
 def _validate_cached_catalog_matches_repo(
