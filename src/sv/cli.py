@@ -1166,8 +1166,8 @@ def _ensure_source_repos_for_refresh(
 ) -> tuple[RepoConfig, str] | None:
     def worker(repo: RepoConfig) -> tuple[RepoConfig, str | None]:
         repo_path = paths.source_repo_for(repo.id)
-        reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
         try:
+            reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
             ensure_source_repo(
                 repo.url,
                 repo_path,

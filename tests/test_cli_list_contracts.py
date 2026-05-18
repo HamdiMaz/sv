@@ -5,8 +5,10 @@ import subprocess
 
 import pytest
 
+import sv.cli as cli_module
 from sv.cli import build_parser, handle
-from sv.config import SvPaths, derive_repo_id, load_config
+from sv.config import RepoConfig, SvPaths, derive_repo_id, load_config
+from sv.errors import SvError
 import sv.source as source_module
 from sv.source import default_runner
 from tests.helpers import (
@@ -610,6 +612,38 @@ def test_list_cached_flag_uses_metadata_without_refreshing_source(
 
     assert result.exit_code == 0
     assert "alpha" in result.stdout
+
+
+def test_ensure_source_repos_for_refresh_returns_safety_check_failures_by_repo(
+    tmp_path: Path, monkeypatch
+):
+    paths = SvPaths.from_home(tmp_path / "home")
+    repos = [
+        RepoConfig(id="Org/Good", url="https://example.invalid/good.git"),
+        RepoConfig(id="Org/Bad", url="https://example.invalid/bad.git"),
+    ]
+    ensured: list[str] = []
+
+    def reject_symlinked_source_cache_path(repo_path: Path, sources_dir: Path) -> None:
+        if repo_path == paths.source_repo_for("Org/Bad"):
+            raise SvError("refusing symlinked source cache path")
+
+    def ensure_source_repo(url: str, repo_path: Path, **kwargs) -> None:
+        ensured.append(url)
+
+    monkeypatch.setattr(
+        cli_module,
+        "reject_symlinked_source_cache_path",
+        reject_symlinked_source_cache_path,
+    )
+    monkeypatch.setattr(cli_module, "ensure_source_repo", ensure_source_repo)
+
+    failure = cli_module._ensure_source_repos_for_refresh(
+        repos, paths, git_runner=object(), update=True
+    )
+
+    assert failure == (repos[1], "refusing symlinked source cache path")
+    assert ensured == ["https://example.invalid/good.git"]
 
 
 def test_source_command_reports_invalid_sv_jobs(tmp_path, run_sv, monkeypatch):
