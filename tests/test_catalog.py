@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import threading
 
 import pytest
 
@@ -82,10 +83,71 @@ class IndexedBackend:
 
     def list_candidate_skill_files(self, configured_skills_paths=()):
         self.list_candidate_calls += 1
-        raise AssertionError("indexed catalog discovery should not run generic discovery")
+        raise AssertionError(
+            "indexed catalog discovery should not run generic discovery"
+        )
 
     def materialize_folder(self, source_path: str, destination: Path) -> None:
         raise AssertionError("catalog should not materialize folders during discovery")
+
+
+class PeerWaitingBackend:
+    name = "peer-waiting"
+
+    def __init__(
+        self, skill_name: str, started: threading.Event, peer_started: threading.Event
+    ):
+        self.skill_name = skill_name
+        self.started = started
+        self.peer_started = peer_started
+
+    def read_index(self) -> bytes | None:
+        self.started.set()
+        assert self.peer_started.wait(2), (
+            "independent repo discovery did not run concurrently"
+        )
+        return None
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        return [f"skills/{self.skill_name}/SKILL.md"]
+
+    def read_file(self, path: str) -> bytes:
+        return (
+            "---\n"
+            f"name: {self.skill_name}\n"
+            f"description: {self.skill_name.title()} skill.\n"
+            "---\n"
+        ).encode("utf-8")
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("catalog discovery must not materialize folders")
+
+
+def test_build_source_catalog_from_backends_refreshes_independent_repos_in_parallel(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo_a = RepoConfig(id="Org/A", url="https://github.com/Org/A.git")
+    repo_b = RepoConfig(id="Org/B", url="https://github.com/Org/B.git")
+    a_started = threading.Event()
+    b_started = threading.Event()
+
+    result = build_source_catalog_from_backends(
+        [repo_a, repo_b],
+        paths,
+        {
+            repo_a.id: (PeerWaitingBackend("alpha", a_started, b_started),),
+            repo_b.id: (PeerWaitingBackend("beta", b_started, a_started),),
+        },
+        jobs=2,
+    )
+
+    assert [(entry.name, entry.repo_id) for entry in result.entries] == [
+        ("alpha", "Org/A"),
+        ("beta", "Org/B"),
+    ]
+    assert result.failures == ()
+    assert result.refreshed_repo_ids == ("Org/A", "Org/B")
 
 
 def test_search_source_catalog_uses_case_insensitive_ranked_text_and_fuzzy_matches(
@@ -215,7 +277,10 @@ def test_build_source_catalog_from_backend_rejects_index_name_source_path_mismat
 
     assert result.entries == ()
     assert len(result.failures) == 1
-    assert "source_path 'skills/beta' does not match skill name 'alpha'" in result.failure_report()
+    assert (
+        "source_path 'skills/beta' does not match skill name 'alpha'"
+        in result.failure_report()
+    )
     assert backend.read_file_calls == []
     assert backend.list_candidate_calls == 0
 
@@ -283,9 +348,7 @@ def test_build_source_catalog_from_backend_discovers_valid_skills_without_git(
         }
     )
 
-    result = build_source_catalog_from_backends(
-        [repo], paths, {repo.id: (backend,)}
-    )
+    result = build_source_catalog_from_backends([repo], paths, {repo.id: (backend,)})
 
     assert [
         (entry.name, entry.source_relative_path, entry.source_backend)
@@ -625,9 +688,7 @@ def test_build_source_catalog_ignores_repeated_repo_urls(tmp_path: Path):
 def test_build_source_catalog_ignores_equivalent_github_repo_urls(tmp_path: Path):
     paths = SvPaths.from_home(tmp_path)
     repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills")
-    duplicate_url = RepoConfig(
-        id="Mirror/Skills", url="git@github.com:Org/Skills.git"
-    )
+    duplicate_url = RepoConfig(id="Mirror/Skills", url="git@github.com:Org/Skills.git")
     make_skill(paths.source_repo_for(repo.id), "alpha", "Alpha skill.")
     make_skill(paths.source_repo_for(duplicate_url.id), "alpha", "Alpha skill.")
 

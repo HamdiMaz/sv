@@ -8,6 +8,7 @@ import unicodedata
 
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
+from sv.parallel import map_ordered
 from sv.project import normalize_skill_name
 from sv.terminal import escape_terminal_controls
 from sv.skills import InvalidSkillError, parse_skill_file, parse_skill_text
@@ -95,6 +96,17 @@ class SourceCatalogResult:
 class _BackendCatalogResult:
     entries: list[SourceSkill]
     index_hash: str | None
+
+
+@dataclass(frozen=True)
+class _RepoBackendCatalogResult:
+    repo_id: str
+    entries: tuple[SourceSkill, ...]
+    failures: tuple[SourceBackendFailure, ...]
+    refreshed: bool
+    refreshed_backend: str | None = None
+    index_hash: str | None = None
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,10 +203,9 @@ def _subsequence_match_score(text: str, term: str) -> int | None:
     return positions[0] + gaps
 
 
-def build_source_catalog(
-    repos: Iterable[RepoConfig], paths: SvPaths, warn: Callable[[str], None] | None = None
-) -> list[SourceSkill]:
-    entries: list[SourceSkill] = []
+def _unique_catalog_repos(
+    repos: Iterable[RepoConfig],
+) -> tuple[list[RepoConfig], dict[str, tuple[str, ...]]]:
     unique_repos: list[RepoConfig] = []
     aliases_by_source: dict[str, tuple[str, ...]] = {}
     seen_repos: dict[str, str] = {}
@@ -219,6 +230,82 @@ def build_source_catalog(
         seen_sources.add(source_key)
         aliases_by_source[source_key] = repo.aliases
         unique_repos.append(repo)
+    return unique_repos, aliases_by_source
+
+
+def _catalog_from_one_repo_backends(
+    repo: RepoConfig,
+    paths: SvPaths,
+    repo_aliases: tuple[str, ...],
+    backends: Sequence[SourceBackend],
+) -> _RepoBackendCatalogResult:
+    repo_path = paths.source_repo_for(repo.id)
+    reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
+    warnings: list[str] = []
+    if not backends:
+        return _RepoBackendCatalogResult(
+            repo_id=repo.id,
+            entries=(),
+            failures=(
+                SourceBackendFailure(
+                    repo_id=repo.id,
+                    repo_url=repo.url,
+                    backend="none",
+                    operation="selecting source backend",
+                    detail="no lightweight source backend was configured",
+                ),
+            ),
+            refreshed=False,
+        )
+
+    failures: list[SourceBackendFailure] = []
+    for backend in backends:
+        try:
+            backend_result = _catalog_entries_from_backend(
+                repo,
+                repo_path,
+                repo_aliases,
+                backend,
+                warnings.append,
+            )
+        except SourceBackendError as exc:
+            failures.append(
+                SourceBackendFailure.from_error(
+                    repo_id=repo.id,
+                    repo_url=repo.url,
+                    backend=backend.name,
+                    error=exc,
+                )
+            )
+            if exc.operation == "parsing .sv/index.toml":
+                break
+            continue
+        return _RepoBackendCatalogResult(
+            repo_id=repo.id,
+            entries=tuple(backend_result.entries),
+            failures=tuple(failures),
+            refreshed=True,
+            refreshed_backend=backend.name,
+            index_hash=backend_result.index_hash,
+            warnings=tuple(warnings),
+        )
+
+    return _RepoBackendCatalogResult(
+        repo_id=repo.id,
+        entries=(),
+        failures=tuple(failures),
+        refreshed=False,
+        warnings=tuple(warnings),
+    )
+
+
+def build_source_catalog(
+    repos: Iterable[RepoConfig],
+    paths: SvPaths,
+    warn: Callable[[str], None] | None = None,
+) -> list[SourceSkill]:
+    entries: list[SourceSkill] = []
+    unique_repos, aliases_by_source = _unique_catalog_repos(repos)
 
     for repo in unique_repos:
         source_key = repo_source_key(repo.url)
@@ -272,86 +359,47 @@ def build_source_catalog_from_backends(
     paths: SvPaths,
     backends_by_repo: Mapping[str, Sequence[SourceBackend]],
     warn: Callable[[str], None] | None = None,
+    *,
+    jobs: int | None = None,
 ) -> SourceCatalogResult:
     """Build a source catalog through lightweight backend interfaces.
 
-    The backends are attempted in the order provided for each repository. A
-    failed backend records an actionable failure and the next backend is tried;
-    this function never falls back to a persistent full clone.
+    Repos are independent and may refresh concurrently. Backends for one repo are
+    still attempted in the configured fallback order.
     """
+
+    unique_repos, aliases_by_source = _unique_catalog_repos(repos)
+
+    def worker(repo: RepoConfig) -> _RepoBackendCatalogResult:
+        source_key = repo_source_key(repo.url)
+        return _catalog_from_one_repo_backends(
+            repo,
+            paths,
+            aliases_by_source[source_key],
+            tuple(backends_by_repo.get(repo.id, ())),
+        )
+
+    repo_results = map_ordered(unique_repos, worker, jobs=jobs)
 
     entries: list[SourceSkill] = []
     failures: list[SourceBackendFailure] = []
     refreshed_repo_ids: list[str] = []
-    unique_repos: list[RepoConfig] = []
-    aliases_by_source: dict[str, tuple[str, ...]] = {}
-    seen_repos: dict[str, str] = {}
-    seen_sources: set[str] = set()
-    for repo in repos:
-        source_key = repo_source_key(repo.url)
-        existing_url = seen_repos.get(repo.id)
-        if existing_url is not None:
-            if existing_url == repo.url or repo_source_key(existing_url) == source_key:
-                continue
-            raise SvError(
-                f"Configured source repo id {repo.id!r} is listed more than once with different URLs."
-            )
-        seen_repos[repo.id] = repo.url
-        if source_key in seen_sources:
-            aliases_by_source[source_key] = (
-                *aliases_by_source[source_key],
-                repo.id,
-                *repo.aliases,
-            )
-            continue
-        seen_sources.add(source_key)
-        aliases_by_source[source_key] = repo.aliases
-        unique_repos.append(repo)
-
     refreshed_backends_by_repo: dict[str, str] = {}
     index_hashes_by_repo: dict[str, str | None] = {}
-    for repo in unique_repos:
-        source_key = repo_source_key(repo.url)
-        repo_path = paths.source_repo_for(repo.id)
-        reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
-        backends = tuple(backends_by_repo.get(repo.id, ()))
-        if not backends:
-            failures.append(
-                SourceBackendFailure(
-                    repo_id=repo.id,
-                    repo_url=repo.url,
-                    backend="none",
-                    operation="selecting source backend",
-                    detail="no lightweight source backend was configured",
+
+    for repo_result in repo_results:
+        if warn is not None:
+            for message in repo_result.warnings:
+                warn(message)
+        entries.extend(repo_result.entries)
+        failures.extend(repo_result.failures)
+        if repo_result.refreshed:
+            refreshed_repo_ids.append(repo_result.repo_id)
+            if repo_result.refreshed_backend is not None:
+                refreshed_backends_by_repo[repo_result.repo_id] = (
+                    repo_result.refreshed_backend
                 )
-            )
-            continue
-        for backend in backends:
-            try:
-                backend_result = _catalog_entries_from_backend(
-                    repo,
-                    repo_path,
-                    aliases_by_source[source_key],
-                    backend,
-                    warn,
-                )
-                entries.extend(backend_result.entries)
-            except SourceBackendError as exc:
-                failures.append(
-                    SourceBackendFailure.from_error(
-                        repo_id=repo.id,
-                        repo_url=repo.url,
-                        backend=backend.name,
-                        error=exc,
-                    )
-                )
-                if exc.operation == "parsing .sv/index.toml":
-                    break
-                continue
-            refreshed_repo_ids.append(repo.id)
-            refreshed_backends_by_repo[repo.id] = backend.name
-            index_hashes_by_repo[repo.id] = backend_result.index_hash
-            break
+            index_hashes_by_repo[repo_result.repo_id] = repo_result.index_hash
 
     return SourceCatalogResult(
         entries=tuple(
@@ -562,7 +610,9 @@ def _contains_unicode_format_character(value: str) -> bool:
 
 
 def _warn_invalid_skill(
-    warn: Callable[[str], None] | None, skill_dir: Path | PurePosixPath, error: Exception
+    warn: Callable[[str], None] | None,
+    skill_dir: Path | PurePosixPath,
+    error: Exception,
 ) -> None:
     if warn is None:
         return
@@ -619,9 +669,8 @@ def find_qualified_catalog_entry(
     if "/" in source_reference:
         source_relative_path = normalize_source_relative_path(source_reference)
         for entry in catalog:
-            if (
-                entry.source_relative_path == source_relative_path
-                and (entry.repo_id == repo_id or repo_id in entry.repo_aliases)
+            if entry.source_relative_path == source_relative_path and (
+                entry.repo_id == repo_id or repo_id in entry.repo_aliases
             ):
                 return entry
         return None
