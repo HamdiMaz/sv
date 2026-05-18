@@ -16,6 +16,7 @@
 - Future-dated cached metadata timestamps are treated as stale in normal/refresh modes so clock skew or tampering cannot pin a catalog indefinitely.
 - Skill body cache retention: **30 days unused** and **256 MiB max total skill-body bytes**.
 - Skill-body quota decisions use the actual cached directory size, not only the stored metadata size field.
+- Fresh prune markers may skip age-based cleanup only while actual skill-body bytes are within the 256 MiB cap; over-budget caches are pruned after writes even if the last prune ran less than a day ago.
 - Refresh model: **lazy and synchronous**. No background process, daemon, thread, or scheduled job.
 - Expired metadata refresh failure policy is command-specific:
   - `list`, `search`, `add`, and `add --all` warn and use stale metadata when cached metadata exists.
@@ -27,7 +28,7 @@
   - `--cached`: fail with guidance and never call source backends.
   - normal/`--refresh`: refresh that repo's metadata first, then materialize the refreshed catalog entry from source. Indexed entries still validate the materialized tree against the refreshed content hash.
 - Cache filesystem access rejects symlinked cache roots, cache entry directories, metadata files, body `skill/` directories, and temp paths before reading, writing, copying, or deleting. Cache directories are created owner-private (`0700`) where supported.
-- Cache pruning runs lazily after cache writes, at most once per day.
+- Cache pruning runs lazily after cache writes, at most once per day when under the size cap. Future-dated or corrupt prune markers are ignored so clock skew or tampering cannot pin cache cleanup indefinitely.
 - Commands that read source metadata still route through the same cache manager path, but with different default policies:
   - `list`, `search`, `add`, and `add --all`: normal 24-hour TTL policy.
   - `sync`, `update`, and source-aware `status`: force-refresh policy by default.
@@ -2351,6 +2352,78 @@ def test_prune_skill_body_cache_uses_actual_size_when_metadata_underreports(tmp_
     assert skill_body_cache_path(paths, second_hash).exists()
 
 
+def test_prune_skill_body_cache_enforces_size_cap_even_with_fresh_marker(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    first = _write_skill_tree(tmp_path / "first", "first-skill", body="a" * 100)
+    first_hash = sha256_skill_directory(first, expected_name="first-skill")
+    store_skill_body_cache(
+        paths,
+        first,
+        skill_name="first-skill",
+        content_hash=first_hash,
+        source_reference="Org/Skills:skills/first-skill",
+        now=datetime(2026, 5, 10, 12, 0, tzinfo=UTC),
+    )
+    second = _write_skill_tree(tmp_path / "second", "second-skill", body="b" * 100)
+    second_hash = sha256_skill_directory(second, expected_name="second-skill")
+    store_skill_body_cache(
+        paths,
+        second,
+        skill_name="second-skill",
+        content_hash=second_hash,
+        source_reference="Org/Skills:skills/second-skill",
+        now=datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+    )
+    second_size = load_skill_body_metadata(paths, second_hash).size_bytes
+    paths.cache_prune_marker.write_text(
+        'schema_version = 1\nlast_pruned_at = "2026-05-18T12:30:00Z"\n',
+        encoding="utf-8",
+    )
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC),
+        max_unused_seconds=30 * 24 * 60 * 60,
+        max_bytes=second_size,
+        force=False,
+    )
+
+    assert not skill_body_cache_path(paths, first_hash).exists()
+    assert skill_body_cache_path(paths, second_hash).exists()
+
+
+def test_prune_skill_body_cache_treats_future_marker_as_due(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    old_skill = _write_skill_tree(tmp_path / "old", "old-skill")
+    old_hash = sha256_skill_directory(old_skill, expected_name="old-skill")
+    store_skill_body_cache(
+        paths,
+        old_skill,
+        skill_name="old-skill",
+        content_hash=old_hash,
+        source_reference="Org/Skills:skills/old-skill",
+        now=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+    )
+    paths.cache_prune_marker.write_text(
+        'schema_version = 1\nlast_pruned_at = "2026-05-19T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+
+    prune_skill_body_cache(
+        paths,
+        now=datetime(2026, 5, 18, 13, 0, tzinfo=UTC),
+        max_unused_seconds=30 * 24 * 60 * 60,
+        max_bytes=256 * 1024 * 1024,
+        force=False,
+    )
+
+    assert not skill_body_cache_path(paths, old_hash).exists()
+    assert (
+        'last_pruned_at = "2026-05-18T13:00:00Z"'
+        in paths.cache_prune_marker.read_text(encoding="utf-8")
+    )
+
+
 def test_prune_skill_body_cache_refuses_symlinked_marker_temp_file(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     paths.cache_dir.mkdir(parents=True)
@@ -2445,9 +2518,14 @@ def prune_skill_body_cache(
     max_bytes: int = DEFAULT_SKILL_BODY_MAX_BYTES,
     force: bool = False,
 ) -> None:
-    if not force and not _should_prune(paths, now=now):
-        return
     entries = _skill_body_cache_entries(paths)
+    if not force and not _should_prune(
+        paths,
+        now=now,
+        entries=entries,
+        max_bytes=max_bytes,
+    ):
+        return
     cutoff = now.timestamp() - max_unused_seconds
     kept: list[_SkillBodyCacheEntry] = []
     for entry in entries:
@@ -2502,7 +2580,15 @@ def _skill_body_cache_entries(paths: SvPaths) -> list[_SkillBodyCacheEntry]:
     return entries
 
 
-def _should_prune(paths: SvPaths, *, now: datetime) -> bool:
+def _should_prune(
+    paths: SvPaths,
+    *,
+    now: datetime,
+    entries: Sequence[_SkillBodyCacheEntry],
+    max_bytes: int,
+) -> bool:
+    if sum(entry.metadata.size_bytes for entry in entries) > max_bytes:
+        return True
     marker = paths.cache_prune_marker
     _reject_symlinked_cache_dir(marker.parent)
     if marker.is_symlink():
@@ -2516,6 +2602,8 @@ def _should_prune(paths: SvPaths, *, now: datetime) -> bool:
             return True
         last_pruned = _parse_utc(value, marker)
     except SvError:
+        return True
+    if last_pruned > now:
         return True
     return now - last_pruned >= timedelta(days=1)
 
@@ -3161,22 +3249,28 @@ In `handle`, replace catalog reads in the `add` branch:
 - `args.all` path currently calling `_update_sources_and_catalog_for_add_all(...)`
 - single skill path currently calling `_update_sources_and_catalog(... update=True ...)`
 
-Use cache helper with the loaded config. Preserve the existing interactive behavior by passing `update=False` for `sv add -l`; use `update=True` for single-skill add and `add --all`:
+Keep the existing argument validation order before loading source config:
+
+- `sv add -l` must still reject combinations with a skill name, `--all`, or `--repo` before config loading/prompting.
+- `sv add --repo` without `--all`, `sv add --all SKILL`, and missing skill names must keep their current errors before config loading/prompting.
+
+Use cache helper with the loaded config. Preserve the existing interactive behavior by passing `update=False` for normal `sv add -l`, but treat `sv add -l --refresh` as a true source refresh by passing `update=True`. Use `update=True` for single-skill add and `add --all`:
 
 ```python
+add_policy = _cache_policy_from_args(args)
 config = _load_config_for_source_command(paths)
 catalog = _catalog_for_source_command(
     config.repos,
     paths,
     git_runner,
-    policy=_cache_policy_from_args(args),
+    policy=add_policy,
     record_global_source_state=record_global_source_state,
     lightweight_discovery=True,
-    update=not args.interactive,
+    update=(not args.interactive) or args.refresh,
 )
 ```
 
-For `sv add --all --repo REPO_ID`, filter `config.repos` to the requested repo ID before calling `_catalog_for_source_command`, preserving the existing missing repo error message.
+In the actual branch implementation, keep the interactive, `--all`, and single-skill branches separate so the validation order above is preserved. For `sv add --all --repo REPO_ID`, filter `config.repos` to the requested repo ID before calling `_catalog_for_source_command`, preserving the existing missing repo error message.
 
 - [ ] **Step 3: Run add-focused tests**
 
@@ -3805,11 +3899,13 @@ If `git status --short` shows no changes after Step 1-6, do not create an empty 
 - `--cached` materialization fails with guidance when metadata or a matching cached skill body is missing.
 - Normal/`--refresh` materialization from cached metadata refreshes that repo first on body-cache miss.
 - `--refresh` bypasses fresh metadata cache.
+- `sv add -l --refresh` forces source backend refresh even though normal `sv add -l` preserves the existing no-update interactive behavior.
 - Cached catalog loads verify `catalog_hash` against normalized entries and preserve backend/index-hash provenance when refreshed metadata is cached.
 - Non-index sources write the observed content hash back into cached metadata after a successful materialization.
 - Skill bodies are copied from cache only when the content hash matches.
 - Body cache entries update `last_used_at` and `use_count` on hit and store.
 - Lazy pruning respects 30 days unused and 256 MiB body-cache cap using actual cached directory sizes, not trust-only metadata size fields.
+- Over-budget body caches prune even with a fresh prune marker, and future-dated/corrupt prune markers do not pin cleanup indefinitely.
 - All cache reads, writes, summaries, pruning deletes, and body materializations reject symlinked cache roots/entries and use unique temp files/directories followed by atomic replace of complete cache entries.
 - Failed source materialization or post-materialization validation removes the destination/temp folder before returning an error.
 - Source materialization still surfaces existing project/vault validation errors before hash-mismatch errors where those errors are more specific.
