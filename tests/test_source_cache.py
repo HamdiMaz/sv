@@ -13,8 +13,10 @@ import pytest
 from sv.catalog import SourceSkill
 from sv.config import RepoConfig, SvPaths
 from sv.errors import SvError
-from sv.hashing import sha256_skill_directory
+from sv.hashing import sha256_file, sha256_skill_directory
+from sv.source import FakeSourceBackend
 from sv.source_cache import (
+    attach_source_materializers,
     CacheMode,
     CachePolicy,
     CacheRefreshResult,
@@ -32,6 +34,8 @@ from sv.source_cache import (
     skill_body_cache_path,
     store_skill_body_cache,
     try_materialize_from_skill_body_cache,
+    record_cached_skill_body_hash,
+    wrap_catalog_with_skill_body_cache,
     _cached_catalog_hash,
     _utc_timestamp,
 )
@@ -997,3 +1001,308 @@ def test_store_skill_body_cache_replaces_corrupt_existing_metadata(
     metadata = load_skill_body_metadata(paths, content_hash)
     assert metadata.last_used_at == "2026-05-18T13:00:00Z"
     assert metadata.use_count == 1
+
+
+def test_cache_aware_materializer_uses_body_cache_before_source(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    cached_skill = _write_skill_tree(tmp_path / "cache-source", "alpha", "cached\n")
+    content_hash = sha256_skill_directory(cached_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        cached_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    repo = _repo()
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="fake",
+        source_content_hash=content_hash,
+        _materializer=lambda destination: (_ for _ in ()).throw(
+            AssertionError("source materializer must not be called")
+        ),
+    )
+
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 13, tzinfo=UTC),
+        after_store=lambda entry, content_hash, skill_file_hash: None,
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    wrapped.materialize_to(destination)
+
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "cached\n"
+
+
+def test_cache_aware_materializer_stores_source_materialization_on_miss(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha", "remote\n")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    repo = _repo()
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=tmp_path / "source",
+        source_path=source_skill,
+        source_relative_path="skills/alpha",
+        source_backend="local-cache",
+        source_content_hash=content_hash,
+    )
+    stored: list[tuple[SourceSkill, str, str]] = []
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 13, tzinfo=UTC),
+        after_store=lambda entry, content_hash, skill_file_hash: stored.append(
+            (entry, content_hash, skill_file_hash)
+        ),
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    wrapped.materialize_to(destination)
+
+    assert stored == [(entry, content_hash, sha256_file(destination / "SKILL.md"))]
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "remote\n"
+    later = tmp_path / "later" / "alpha"
+    assert (
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=later,
+            now=datetime(2026, 5, 18, 14, tzinfo=UTC),
+        )
+        is True
+    )
+    assert (later / "notes.md").read_text(encoding="utf-8") == "remote\n"
+
+
+def test_cache_aware_materializer_removes_destination_on_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha", "remote\n")
+    repo = _repo()
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=tmp_path / "source",
+        source_path=source_skill,
+        source_relative_path="skills/alpha",
+        source_backend="local-cache",
+        source_content_hash="sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d",
+    )
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 13, tzinfo=UTC),
+        after_store=lambda entry, content_hash, skill_file_hash: None,
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    with pytest.raises(SvError, match="hash did not match"):
+        wrapped.materialize_to(destination)
+
+    assert not destination.exists()
+
+
+def test_cache_only_materializer_fails_on_body_miss_without_source_call(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="cache:github-https-api",
+        source_content_hash="sha256:41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d",
+        _materializer=lambda destination: (_ for _ in ()).throw(
+            AssertionError("source materializer must not be called")
+        ),
+    )
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 13, tzinfo=UTC),
+        after_store=lambda entry, content_hash, skill_file_hash: None,
+        allow_source_fallback=False,
+    )[0]
+
+    with pytest.raises(
+        SvError,
+        match="Cached skill body for Org/Skills:alpha was not found",
+    ):
+        wrapped.materialize_to(tmp_path / "destination" / "alpha")
+
+
+def test_cached_metadata_materializer_refreshes_before_source_body_miss(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    expected_skill = tmp_path / "expected" / "alpha"
+    expected_skill.mkdir(parents=True)
+    (expected_skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n", encoding="utf-8"
+    )
+    (expected_skill / "notes.md").write_text("remote\n", encoding="utf-8")
+    content_hash = sha256_skill_directory(expected_skill, expected_name="alpha")
+    cached_entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="cache:github-https-api",
+        source_content_hash=content_hash,
+    )
+    backend = FakeSourceBackend(
+        {
+            "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+            "skills/alpha/notes.md": "remote\n",
+        }
+    )
+    refreshed_with_source = replace(
+        cached_entry,
+        source_backend="fake",
+        _materializer=lambda destination: backend.materialize_folder(
+            "skills/alpha", destination
+        ),
+    )
+    refresh_calls: list[SourceSkill] = []
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [cached_entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 13, tzinfo=UTC),
+        after_store=lambda entry, content_hash, skill_file_hash: None,
+        refresh_entry_on_body_miss=lambda entry: (
+            refresh_calls.append(entry) or refreshed_with_source
+        ),
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    wrapped.materialize_to(destination)
+
+    assert refresh_calls == [cached_entry]
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "remote\n"
+    later = tmp_path / "later" / "alpha"
+    assert (
+        try_materialize_from_skill_body_cache(
+            paths,
+            content_hash=content_hash,
+            skill_name="alpha",
+            destination=later,
+            now=datetime(2026, 5, 18, 14, tzinfo=UTC),
+        )
+        is True
+    )
+
+
+def test_attach_source_materializers_restores_source_fallback_for_cached_entries(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    cached_entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="cache:github-https-api",
+    )
+    backend = FakeSourceBackend(
+        {
+            "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+            "skills/alpha/notes.md": "remote\n",
+        }
+    )
+
+    attached = attach_source_materializers(
+        [cached_entry], [repo], backend_factory=lambda selected_repo: (backend,)
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    attached.materialize_to(destination)
+
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "remote\n"
+
+
+def test_record_cached_skill_body_hash_updates_non_index_cached_metadata(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = CachedCatalogDocument(
+        repo_id=repo.id,
+        repo_url=repo.url,
+        source_key="github:org/skills",
+        skills_paths=(),
+        backend="git-local-source",
+        refreshed_at="2026-05-18T12:00:00Z",
+        catalog_hash="sha256:" + ("0" * 64),
+        index_hash=None,
+        entries=(
+            CachedCatalogEntry(
+                name="find-docs",
+                description="Find documentation.",
+                source_path="skills/find-docs",
+                content_hash=None,
+                skill_file_hash=None,
+            ),
+        ),
+    )
+    save_cached_catalog(
+        paths, repo, replace(document, catalog_hash=_cached_catalog_hash(document))
+    )
+    source_skill = _write_skill_tree(tmp_path / "source", "find-docs", "remote\n")
+    content_hash = sha256_skill_directory(source_skill, expected_name="find-docs")
+    skill_file_hash = sha256_file(source_skill / "SKILL.md")
+    entry = SourceSkill(
+        name="find-docs",
+        description="Find documentation.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=tmp_path / "source",
+        source_path=source_skill,
+        source_relative_path="skills/find-docs",
+        source_backend="cache:git-local-source",
+    )
+
+    record_cached_skill_body_hash(
+        paths,
+        repo,
+        entry,
+        content_hash=content_hash,
+        skill_file_hash=skill_file_hash,
+    )
+
+    cached = load_cached_catalog(paths, repo)
+    assert cached is not None
+    assert cached.entries[0].content_hash == content_hash
+    assert cached.entries[0].skill_file_hash == skill_file_hash

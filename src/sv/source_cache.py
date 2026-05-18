@@ -14,7 +14,7 @@ from sv.catalog import SourceSkill, normalize_source_relative_path
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
 from sv.hashformat import SHA256_PREFIX, is_sha256_digest
-from sv.hashing import sha256_skill_directory
+from sv.hashing import sha256_file, sha256_skill_directory
 from sv.materialization import (
     copy_skill_folder_to_temp,
     remove_materialization_path,
@@ -22,6 +22,7 @@ from sv.materialization import (
 )
 from sv.project import normalize_skill_name
 from sv.skills import parse_skill_file
+from sv.source import SourceBackend, SourceBackendError
 from sv.terminal import escape_terminal_controls
 from sv.tomlutil import atomic_write_text, load_toml_document, toml_escape
 
@@ -72,6 +73,10 @@ class CacheRefreshResult:
 CacheRefreshValue = CacheRefreshResult | Sequence[SourceSkill]
 RefreshCatalog = Callable[[Sequence[RepoConfig]], CacheRefreshValue]
 Warn = Callable[[str], None]
+Now = Callable[[], datetime]
+BackendFactory = Callable[[RepoConfig], Sequence[SourceBackend]]
+AfterStore = Callable[[SourceSkill, str, str], None]
+RefreshEntryOnBodyMiss = Callable[[SourceSkill], SourceSkill | None]
 
 
 @dataclass(frozen=True)
@@ -563,6 +568,208 @@ def get_catalog_with_cache(
         final_entries,
         key=lambda entry: (entry.name, entry.repo_id, entry.source_relative_path),
     )
+
+
+def attach_source_materializers(
+    catalog: Sequence[SourceSkill],
+    repos: Sequence[RepoConfig],
+    *,
+    backend_factory: BackendFactory,
+) -> list[SourceSkill]:
+    repos_by_id = {repo.id: repo for repo in repos}
+    attached: list[SourceSkill] = []
+    for entry in catalog:
+        if not entry.source_backend.startswith("cache:"):
+            attached.append(entry)
+            continue
+        repo = repos_by_id.get(entry.repo_id)
+        if repo is None:
+            raise SvError(
+                f"No source repo configured for cached entry {entry.repo_id}."
+            )
+
+        def materialize(
+            destination: Path,
+            *,
+            cached_entry: SourceSkill = entry,
+            selected_repo: RepoConfig = repo,
+        ) -> None:
+            failures: list[str] = []
+            for backend in backend_factory(selected_repo):
+                try:
+                    backend.materialize_folder(
+                        cached_entry.source_relative_path, destination
+                    )
+                    return
+                except SourceBackendError as exc:
+                    failures.append(f"{backend.name}: {exc.detail}")
+            details = (
+                "; ".join(failures) if failures else "no source backends were available"
+            )
+            raise SvError(
+                f"Failed to materialize {cached_entry.qualified_reference} from source: {details}."
+            )
+
+        attached.append(replace(entry, _materializer=materialize))
+    return attached
+
+
+def record_cached_skill_body_hash(
+    paths: SvPaths,
+    repo: RepoConfig,
+    entry: SourceSkill,
+    *,
+    content_hash: str,
+    skill_file_hash: str,
+) -> None:
+    document = load_cached_catalog(paths, repo)
+    if document is None:
+        return
+    updated_entries: list[CachedCatalogEntry] = []
+    changed = False
+    for cached_entry in document.entries:
+        if (
+            cached_entry.name == entry.name
+            and cached_entry.source_path == entry.source_relative_path
+        ):
+            replacement = replace(
+                cached_entry,
+                content_hash=content_hash,
+                skill_file_hash=skill_file_hash,
+            )
+            updated_entries.append(replacement)
+            changed = changed or replacement != cached_entry
+        else:
+            updated_entries.append(cached_entry)
+    if not changed:
+        return
+    unhashed = replace(
+        document,
+        entries=tuple(updated_entries),
+        catalog_hash="sha256:" + ("0" * 64),
+    )
+    save_cached_catalog(
+        paths, repo, replace(unhashed, catalog_hash=_cached_catalog_hash(unhashed))
+    )
+
+
+def wrap_catalog_with_skill_body_cache(
+    catalog: Sequence[SourceSkill],
+    paths: SvPaths,
+    *,
+    now: Now,
+    after_store: AfterStore,
+    allow_source_fallback: bool = True,
+    refresh_entry_on_body_miss: RefreshEntryOnBodyMiss | None = None,
+    warn: Warn | None = None,
+) -> list[SourceSkill]:
+    return [
+        _wrap_source_skill(
+            entry,
+            paths,
+            now=now,
+            after_store=after_store,
+            allow_source_fallback=allow_source_fallback,
+            refresh_entry_on_body_miss=refresh_entry_on_body_miss,
+            warn=warn,
+        )
+        for entry in catalog
+    ]
+
+
+def _wrap_source_skill(
+    entry: SourceSkill,
+    paths: SvPaths,
+    *,
+    now: Now,
+    after_store: AfterStore,
+    allow_source_fallback: bool,
+    refresh_entry_on_body_miss: RefreshEntryOnBodyMiss | None,
+    warn: Warn | None,
+) -> SourceSkill:
+    original_materialize = entry.materialize_to
+
+    def materialize(destination: Path) -> None:
+        current_time = now()
+        if (
+            entry.source_content_hash is not None
+            and try_materialize_from_skill_body_cache(
+                paths,
+                content_hash=entry.source_content_hash,
+                skill_name=entry.name,
+                destination=destination,
+                now=current_time,
+            )
+        ):
+            return
+
+        if not allow_source_fallback:
+            if entry.source_content_hash is None:
+                raise SvError(
+                    f"No cached skill body hash is available for {entry.qualified_reference}. "
+                    "Run the command without --cached once to populate the body cache."
+                )
+            raise SvError(
+                f"Cached skill body for {entry.qualified_reference} was not found. "
+                "Run the command without --cached once to populate the body cache."
+            )
+
+        if entry.source_backend.startswith("cache:"):
+            if refresh_entry_on_body_miss is None:
+                raise SvError(
+                    f"Cached skill body for {entry.qualified_reference} was not found and no source refresh was provided."
+                )
+            refreshed = refresh_entry_on_body_miss(entry)
+            if refreshed is None:
+                raise SvError(
+                    f"Refreshed source metadata did not include {entry.qualified_reference}."
+                )
+            _wrap_source_skill(
+                refreshed,
+                paths,
+                now=now,
+                after_store=after_store,
+                allow_source_fallback=True,
+                refresh_entry_on_body_miss=None,
+                warn=warn,
+            ).materialize_to(destination)
+            return
+
+        try:
+            original_materialize(destination)
+            parse_skill_file(destination / "SKILL.md", expected_folder=entry.name)
+            actual_hash = sha256_skill_directory(destination, expected_name=entry.name)
+            actual_skill_file_hash = sha256_file(destination / "SKILL.md")
+            if (
+                entry.source_content_hash is not None
+                and actual_hash != entry.source_content_hash
+            ):
+                raise SvError(
+                    f"Source skill {entry.qualified_reference} hash did not match expected {entry.source_content_hash}; got {actual_hash}."
+                )
+            try:
+                store_skill_body_cache(
+                    paths,
+                    destination,
+                    skill_name=entry.name,
+                    content_hash=actual_hash,
+                    source_reference=entry.qualified_reference,
+                    now=current_time,
+                )
+            except SvError as exc:
+                if _cache_write_error_must_fail(exc):
+                    remove_materialization_path(destination, ignore_errors=True)
+                    raise
+                if warn is not None:
+                    warn(
+                        f"warning: failed to write skill body cache for {entry.qualified_reference}: {exc}"
+                    )
+            after_store(entry, actual_hash, actual_skill_file_hash)
+        except Exception:
+            remove_materialization_path(destination, ignore_errors=True)
+            raise
+
+    return replace(entry, _materializer=materialize)
 
 
 def _catalog_document_from_entries(
