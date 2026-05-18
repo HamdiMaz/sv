@@ -234,6 +234,7 @@ def try_materialize_from_skill_body_cache(
     skill_name: str,
     destination: Path,
     now: datetime,
+    warn: Warn | None = None,
 ) -> bool:
     skill_name = normalize_skill_name(skill_name)
     if not _cached_skill_body_is_valid(paths, content_hash, skill_name):
@@ -259,13 +260,18 @@ def try_materialize_from_skill_body_cache(
             _touch_skill_body_cache(paths, content_hash, now)
             _prune_after_body_cache_write(paths, now=now)
         except SvError as exc:
-            remove_materialization_path(destination, ignore_errors=True)
-            if _cache_error_is_symlink_violation(exc):
-                raise
-            remove_materialization_path(
-                skill_body_cache_path(paths, content_hash), ignore_errors=True
-            )
-            return False
+            if _cache_write_error_must_fail(exc):
+                remove_materialization_path(destination, ignore_errors=True)
+                if _cache_error_is_symlink_violation(exc):
+                    raise
+                remove_materialization_path(
+                    skill_body_cache_path(paths, content_hash), ignore_errors=True
+                )
+                return False
+            if warn is not None:
+                warn(
+                    f"warning: failed skill body cache touch/prune maintenance for {skill_name}: {exc}"
+                )
     except SvError:
         remove_materialization_path(destination, ignore_errors=True)
         raise
@@ -932,6 +938,7 @@ def _wrap_source_skill(
                 skill_name=entry.name,
                 destination=destination,
                 now=current_time,
+                warn=warn,
             )
         ):
             return

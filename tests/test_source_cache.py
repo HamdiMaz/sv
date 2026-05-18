@@ -1474,6 +1474,62 @@ def test_cache_aware_materializer_uses_body_cache_before_source(tmp_path: Path) 
     assert (destination / "notes.md").read_text(encoding="utf-8") == "cached\n"
 
 
+def test_cache_only_materializer_uses_body_cache_when_touch_maintenance_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    cached_skill = _write_skill_tree(tmp_path / "cache-source", "alpha", "cached\n")
+    content_hash = sha256_skill_directory(cached_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        cached_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:alpha",
+        now=datetime(2026, 5, 18, 12, tzinfo=UTC),
+    )
+    repo = _repo()
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="fake",
+        source_content_hash=content_hash,
+        _materializer=lambda destination: (_ for _ in ()).throw(
+            AssertionError("source materializer must not be called")
+        ),
+    )
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        source_cache,
+        "_touch_skill_body_cache",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            SvError("metadata write unavailable")
+        ),
+    )
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 13, tzinfo=UTC),
+        after_store=lambda entry, content_hash, skill_file_hash: None,
+        allow_source_fallback=False,
+        warn=warnings.append,
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    wrapped.materialize_to(destination)
+
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "cached\n"
+    assert skill_body_cache_path(paths, content_hash).exists()
+    assert warnings == [
+        "warning: failed skill body cache touch/prune maintenance for alpha: metadata write unavailable"
+    ]
+
+
 def test_cache_aware_materializer_stores_source_materialization_on_miss(
     tmp_path: Path,
 ) -> None:
@@ -2761,11 +2817,21 @@ def test_load_cached_catalog_rejects_more_invalid_document_fields(
         load_cached_catalog(paths, repo)
 
 
-def test_materialize_from_body_cache_removes_destination_when_touch_fails_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("patched_function", "warning_fragment"),
+    [
+        ("_touch_skill_body_cache", "touch"),
+        ("_prune_after_body_cache_write", "prune"),
+    ],
+)
+def test_materialize_from_body_cache_keeps_valid_hit_when_maintenance_fails_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    patched_function: str,
+    warning_fragment: str,
 ) -> None:
     paths = SvPaths.from_home(tmp_path)
-    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha", "cached notes\n")
     content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
     store_skill_body_cache(
         paths,
@@ -2776,10 +2842,13 @@ def test_materialize_from_body_cache_removes_destination_when_touch_fails_open(
         now=datetime(2026, 5, 18, 12, tzinfo=UTC),
     )
     destination = tmp_path / "dest" / "alpha"
+    warnings: list[str] = []
     monkeypatch.setattr(
         source_cache,
-        "_touch_skill_body_cache",
-        lambda *args, **kwargs: (_ for _ in ()).throw(SvError("metadata busy")),
+        patched_function,
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            SvError("metadata write unavailable")
+        ),
     )
 
     assert try_materialize_from_skill_body_cache(
@@ -2788,10 +2857,15 @@ def test_materialize_from_body_cache_removes_destination_when_touch_fails_open(
         skill_name="alpha",
         destination=destination,
         now=datetime(2026, 5, 18, 13, tzinfo=UTC),
-    ) is False
+        warn=warnings.append,
+    ) is True
 
-    assert not destination.exists()
-    assert not skill_body_cache_path(paths, content_hash).exists()
+    assert (destination / "notes.md").read_text(encoding="utf-8") == "cached notes\n"
+    assert skill_body_cache_path(paths, content_hash).exists()
+    assert len(warnings) == 1
+    assert "failed skill body cache" in warnings[0]
+    assert warning_fragment in warnings[0]
+    assert "metadata write unavailable" in warnings[0]
 
 
 def test_cache_summary_refuses_symlinked_skill_body_root(tmp_path: Path) -> None:
