@@ -392,10 +392,9 @@ Expected: failure because `build_source_catalog_from_backends` does not accept `
 
 - [ ] **Step 3: Add repo-result dataclass and warning capture**
 
-In `src/sv/catalog.py`, add imports:
+In `src/sv/catalog.py`, add this import:
 
 ```python
-import threading
 from sv.parallel import map_ordered
 ```
 
@@ -912,7 +911,10 @@ def test_sparse_backend_materialization_serializes_same_repo_cache(
 Append this test to `tests/test_source_cache.py` near `record_cached_skill_body_hash` tests:
 
 ```python
-def test_record_cached_skill_body_hash_preserves_parallel_updates(tmp_path: Path) -> None:
+def test_record_cached_skill_body_hash_preserves_parallel_updates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths = SvPaths.from_home(tmp_path)
     repo = _repo()
     alpha = _source_skill(repo, paths, "alpha")
@@ -931,17 +933,56 @@ def test_record_cached_skill_body_hash_preserves_parallel_updates(tmp_path: Path
     beta_hash = "sha256:" + "c" * 64
     beta_skill_file_hash = "sha256:" + "d" * 64
 
+    original_save_cached_catalog = source_cache.save_cached_catalog
+    active_saves = 0
+    active_saves_lock = threading.Lock()
+    first_save_waiting = threading.Event()
+    concurrent_save_entered = threading.Event()
+
+    def coordinated_save_cached_catalog(
+        save_paths: SvPaths,
+        save_repo: RepoConfig,
+        save_document: CachedCatalogDocument,
+    ) -> None:
+        nonlocal active_saves
+        with active_saves_lock:
+            active_saves += 1
+            active_count = active_saves
+            if active_count == 1:
+                first_save_waiting.set()
+            else:
+                concurrent_save_entered.set()
+        if active_count == 1:
+            concurrent_save_entered.wait(0.5)
+        else:
+            assert first_save_waiting.is_set(), "first catalog save did not start"
+        try:
+            original_save_cached_catalog(save_paths, save_repo, save_document)
+        finally:
+            with active_saves_lock:
+                active_saves -= 1
+            concurrent_save_entered.set()
+
+    monkeypatch.setattr(
+        source_cache,
+        "save_cached_catalog",
+        coordinated_save_cached_catalog,
+    )
     barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
 
     def record(entry: SourceSkill, content_hash: str, skill_file_hash: str) -> None:
-        barrier.wait(2)
-        record_cached_skill_body_hash(
-            paths,
-            repo,
-            entry,
-            content_hash=content_hash,
-            skill_file_hash=skill_file_hash,
-        )
+        try:
+            barrier.wait(2)
+            record_cached_skill_body_hash(
+                paths,
+                repo,
+                entry,
+                content_hash=content_hash,
+                skill_file_hash=skill_file_hash,
+            )
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
 
     first = threading.Thread(target=record, args=(alpha, alpha_hash, alpha_skill_file_hash))
     second = threading.Thread(target=record, args=(beta, beta_hash, beta_skill_file_hash))
@@ -950,6 +991,9 @@ def test_record_cached_skill_body_hash_preserves_parallel_updates(tmp_path: Path
     first.join(2)
     second.join(2)
 
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
     updated = load_cached_catalog(paths, repo)
     assert updated is not None
     by_name = {entry.name: entry for entry in updated.entries}
@@ -962,12 +1006,213 @@ def test_record_cached_skill_body_hash_preserves_parallel_updates(tmp_path: Path
 Add these imports if missing:
 
 ```python
+import shutil
 import threading
+
+import sv.source_cache as source_cache
 from sv.catalog import SourceSkill
-from sv.source_cache import CachedCatalogEntry
+from sv.source_cache import CachedCatalogDocument, CachedCatalogEntry
 ```
 
 If `_catalog_document` in `tests/test_source_cache.py` does not accept an `entries` keyword, extend that test helper so the default remains the current single `find-docs` entry and callers may pass a custom tuple of `CachedCatalogEntry` values.
+
+Append this cached body miss fallback lock test to `tests/test_source_cache.py` near the other body-cache materialization tests:
+
+```python
+def test_cached_body_miss_source_fallback_serializes_same_repo_materialization(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    cached_alpha = replace(
+        _source_skill(repo, paths, "alpha"),
+        source_backend="cache:github-https-api",
+        source_content_hash="sha256:" + "a" * 64,
+    )
+    cached_beta = replace(
+        _source_skill(repo, paths, "beta"),
+        source_backend="cache:github-https-api",
+        source_content_hash="sha256:" + "b" * 64,
+    )
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+    alpha_inside = threading.Event()
+    beta_thread_started = threading.Event()
+    beta_inside = threading.Event()
+    release = threading.Event()
+
+    def blocking_materializer(name: str):
+        def materialize(destination: Path) -> None:
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+                if name == "alpha":
+                    alpha_inside.set()
+                else:
+                    beta_inside.set()
+            try:
+                assert release.wait(2), "test did not release source fallback"
+                destination.mkdir(parents=True, exist_ok=True)
+                (destination / "SKILL.md").write_text(
+                    "---\n"
+                    f"name: {name}\n"
+                    "description: Fallback skill.\n"
+                    "---\n"
+                )
+                (destination / "notes.md").write_text(f"{name} fallback\n")
+            finally:
+                with active_lock:
+                    active -= 1
+
+        return materialize
+
+    refreshed_by_name = {
+        "alpha": replace(
+            cached_alpha,
+            source_backend="fake-remote",
+            source_content_hash=None,
+            _materializer=blocking_materializer("alpha"),
+        ),
+        "beta": replace(
+            cached_beta,
+            source_backend="fake-remote",
+            source_content_hash=None,
+            _materializer=blocking_materializer("beta"),
+        ),
+    }
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [cached_alpha, cached_beta],
+        paths,
+        now=lambda: datetime(2026, 5, 18, 12, 0, tzinfo=UTC),
+        after_store=lambda *_args: None,
+        refresh_entry_on_body_miss=lambda entry: refreshed_by_name[entry.name],
+    )
+    errors: list[BaseException] = []
+
+    def run_materialize(entry: SourceSkill, destination: Path) -> None:
+        try:
+            if entry.name == "beta":
+                beta_thread_started.set()
+            entry.materialize_to(destination)
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    first = threading.Thread(target=run_materialize, args=(wrapped[0], tmp_path / "alpha-dest"))
+    second = threading.Thread(target=run_materialize, args=(wrapped[1], tmp_path / "beta-dest"))
+    first.start()
+    assert alpha_inside.wait(2), "first source fallback did not start"
+    second.start()
+    assert beta_thread_started.wait(2), "second source fallback thread did not start"
+    assert not beta_inside.wait(0.25), "same-repo source fallback materialization overlapped"
+    release.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert beta_inside.is_set(), "second source fallback never ran after first released"
+    assert max_active == 1
+    assert (tmp_path / "alpha-dest" / "notes.md").read_text() == "alpha fallback\n"
+    assert (tmp_path / "beta-dest" / "notes.md").read_text() == "beta fallback\n"
+```
+
+Append this direct cached-entry source fallback lock test to `tests/test_source_cache.py` near `attach_source_materializers` tests:
+
+```python
+def test_attach_source_materializers_serializes_same_repo_cached_entries(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    source_root = tmp_path / "remote"
+    _write_skill_tree(source_root / "skills", "alpha", "alpha fallback\n")
+    _write_skill_tree(source_root / "skills", "beta", "beta fallback\n")
+    cached_alpha = replace(
+        _source_skill(repo, paths, "alpha"),
+        source_backend="cache:github-https-api",
+    )
+    cached_beta = replace(
+        _source_skill(repo, paths, "beta"),
+        source_backend="cache:github-https-api",
+    )
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+    alpha_inside = threading.Event()
+    beta_thread_started = threading.Event()
+    beta_inside = threading.Event()
+    release = threading.Event()
+
+    class BlockingBackend:
+        name = "blocking"
+
+        def read_index(self) -> bytes | None:
+            raise AssertionError("fallback materialization test should not read indexes")
+
+        def list_candidate_skill_files(self, configured_skills_paths=()):
+            raise AssertionError("fallback materialization test should not list skills")
+
+        def read_file(self, path: str) -> bytes:
+            raise AssertionError("fallback materialization test should not read files")
+
+        def materialize_folder(self, source_path: str, destination: Path) -> None:
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+                if source_path.endswith("/alpha"):
+                    alpha_inside.set()
+                else:
+                    beta_inside.set()
+            try:
+                assert release.wait(2), "test did not release source fallback"
+                source = source_root / Path(*source_path.split("/"))
+                shutil.copytree(source, destination)
+            finally:
+                with active_lock:
+                    active -= 1
+
+    def backend_factory(selected_repo: RepoConfig):
+        assert selected_repo == repo
+        return (BlockingBackend(),)
+
+    attached = attach_source_materializers(
+        [cached_alpha, cached_beta],
+        [repo],
+        backend_factory=backend_factory,
+    )
+    errors: list[BaseException] = []
+
+    def run_materialize(entry: SourceSkill, destination: Path) -> None:
+        try:
+            if entry.name == "beta":
+                beta_thread_started.set()
+            entry.materialize_to(destination)
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    first = threading.Thread(target=run_materialize, args=(attached[0], tmp_path / "alpha-attached"))
+    second = threading.Thread(target=run_materialize, args=(attached[1], tmp_path / "beta-attached"))
+    first.start()
+    assert alpha_inside.wait(2), "first attached fallback did not start"
+    second.start()
+    assert beta_thread_started.wait(2), "second attached fallback thread did not start"
+    assert not beta_inside.wait(0.25), "same-repo attached fallback materialization overlapped"
+    release.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert beta_inside.is_set(), "second attached fallback never ran after first released"
+    assert max_active == 1
+    assert (tmp_path / "alpha-attached" / "notes.md").read_text() == "alpha fallback\n"
+    assert (tmp_path / "beta-attached" / "notes.md").read_text() == "beta fallback\n"
+```
 
 - [ ] **Step 3: Run the new lock tests and verify failures**
 
@@ -977,10 +1222,12 @@ Run:
 uv run pytest \
   tests/test_source.py::test_sparse_backend_materialization_serializes_same_repo_cache \
   tests/test_source_cache.py::test_record_cached_skill_body_hash_preserves_parallel_updates \
+  tests/test_source_cache.py::test_cached_body_miss_source_fallback_serializes_same_repo_materialization \
+  tests/test_source_cache.py::test_attach_source_materializers_serializes_same_repo_cached_entries \
   -q --no-cov
 ```
 
-Expected: sparse materialization may overlap, and cached catalog updates may lose one write without a lock.
+Expected: sparse materialization may overlap, the coordinated cached-catalog save wrapper should force two unlocked writebacks to save stale documents so one hash update is lost without a lock, and same-repo cached body miss/attached fallback materialization should overlap without the fallback lock.
 
 - [ ] **Step 4: Add source repo cache locks**
 
@@ -1056,7 +1303,7 @@ Use an `RLock` because `_materialize_folder_locked` calls `_prepare_checkout`, a
 
 - [ ] **Step 5: Lock sparse checkout preparation**
 
-In `src/sv/source.py`, wrap `_prepare_checkout` with the same repo lock so metadata refresh for a repo does not interleave sparse checkout commands with another materialization. Also lock the shared direct helper used by `ensure_source_repo()` so the non-lightweight refresh path cannot mutate the same sparse cache concurrently:
+In `src/sv/source.py`, wrap `_prepare_checkout` with the same repo lock so metadata refresh for a repo does not interleave sparse checkout commands with another materialization:
 
 ```python
     def _prepare_checkout(self, patterns: Sequence[str], operation: str) -> None:
@@ -1087,9 +1334,49 @@ In `src/sv/source.py`, wrap `_prepare_checkout` with the same repo lock so metad
             ) from exc
 ```
 
-Then wrap `_ensure_sparse_git_repo_after_git_check` with the same repo lock by moving its current body into `_ensure_sparse_git_repo_after_git_check_locked(...)` and replacing the public helper with:
+Also lock the full direct sparse mutation lifecycle used by `ensure_source_repo()` and `_ensure_sparse_git_repo()`. Do not lock only `_ensure_sparse_git_repo_after_git_check`; the treeless failure cleanup, blobless fallback, and `_remove_failed_lightweight_checkout()` calls must stay inside the same repo lock.
+
+Move each current public function body into a private locked helper and make the public function acquire `_source_repo_lock(repo_path)` first:
 
 ```python
+def ensure_source_repo(
+    repo_url: str,
+    repo_path: Path,
+    runner: Runner = default_runner,
+    *,
+    update: bool = True,
+    configured_skills_paths: Sequence[str] = (),
+) -> None:
+    with _source_repo_lock(repo_path):
+        _ensure_source_repo_locked(
+            repo_url,
+            repo_path,
+            runner=runner,
+            update=update,
+            configured_skills_paths=configured_skills_paths,
+        )
+
+
+def _ensure_sparse_git_repo(
+    repo_url: str,
+    repo_path: Path,
+    runner: Runner,
+    *,
+    filter_spec: str,
+    sparse_patterns: Sequence[str],
+    update: bool,
+) -> None:
+    with _source_repo_lock(repo_path):
+        _ensure_sparse_git_repo_locked(
+            repo_url,
+            repo_path,
+            runner,
+            filter_spec=filter_spec,
+            sparse_patterns=sparse_patterns,
+            update=update,
+        )
+
+
 def _ensure_sparse_git_repo_after_git_check(
     repo_url: str,
     repo_path: Path,
@@ -1110,7 +1397,7 @@ def _ensure_sparse_git_repo_after_git_check(
         )
 ```
 
-Keep the existing `_ensure_sparse_git_repo_after_git_check` logic unchanged inside the locked helper. This central lock covers `ensure_source_repo()`, `ensure_source_repos()`, CLI non-lightweight refresh, and sparse backend metadata checkout.
+Create `_ensure_source_repo_locked(...)`, `_ensure_sparse_git_repo_locked(...)`, and `_ensure_sparse_git_repo_after_git_check_locked(...)` by moving the existing bodies unchanged. Nested calls may reacquire the same `RLock`. This central lock covers `ensure_source_repo()`, `ensure_source_repos()`, CLI non-lightweight refresh, sparse backend metadata checkout, sparse materialization cleanup, and failed-checkout cleanup.
 
 - [ ] **Step 6: Add cache write lock**
 
@@ -1188,10 +1475,11 @@ This keeps same-repo cached body misses from concurrently refreshing/writing cat
 
 - [ ] **Step 7: Attach materializer locks for in-memory backend instances**
 
-In `src/sv/catalog.py`, import `RLockType` for annotations and create one `threading.RLock()` per `_catalog_entries_from_backend` call:
+In `src/sv/catalog.py`, add these imports and create one `threading.RLock()` per `_catalog_entries_from_backend` call:
 
 ```python
 from _thread import RLock as RLockType
+import threading
 ```
 
 Pass that lock to entry materializers.
@@ -1236,6 +1524,8 @@ Run:
 uv run pytest \
   tests/test_source.py::test_sparse_backend_materialization_serializes_same_repo_cache \
   tests/test_source_cache.py::test_record_cached_skill_body_hash_preserves_parallel_updates \
+  tests/test_source_cache.py::test_cached_body_miss_source_fallback_serializes_same_repo_materialization \
+  tests/test_source_cache.py::test_attach_source_materializers_serializes_same_repo_cached_entries \
   tests/test_catalog.py \
   tests/test_source.py \
   tests/test_source_cache.py \
@@ -1398,6 +1688,31 @@ def test_add_all_project_skills_preserves_duplicate_name_result_rows(tmp_path: P
     ]
 ```
 
+Append this vault duplicate-name replacement regression test so prompt decisions are keyed by catalog item, not only skill name:
+
+```python
+def test_add_all_vault_skills_honors_duplicate_name_replace_indexes(tmp_path: Path) -> None:
+    installed = make_source_skill(tmp_path / "installed-source", "alpha", repo_id="Org/Installed")
+    first = make_source_skill(tmp_path / "source-a", "alpha", repo_id="Org/A")
+    second = make_source_skill(tmp_path / "source-b", "alpha", repo_id="Org/B")
+    vault_skills = tmp_path / "vault" / "skills"
+    add_vault_skill(installed, vault_skills)
+    (second.source_path / "notes.md").write_text("second replacement\n")
+
+    result = add_all_vault_skills(
+        [first, second],
+        vault_skills,
+        replace_existing_indexes=frozenset({1}),
+    )
+
+    assert [(item.skill, item.status, item.repo_id, item.existing_repo_id) for item in result.results] == [
+        ("alpha", "exists", "Org/A", "Org/Installed"),
+        ("alpha", "replaced", "Org/B", None),
+    ]
+    assert (vault_skills / "alpha" / "notes.md").read_text() == "second replacement\n"
+    assert_no_partial_sv_dirs(vault_skills)
+```
+
 - [ ] **Step 3: Run the new tests and verify they fail**
 
 Run:
@@ -1408,10 +1723,11 @@ uv run pytest \
   tests/test_project.py::test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails \
   tests/test_project.py::test_add_all_vault_skills_replaces_existing_targets_with_replace_temp \
   tests/test_project.py::test_add_all_project_skills_preserves_duplicate_name_result_rows \
+  tests/test_project.py::test_add_all_vault_skills_honors_duplicate_name_replace_indexes \
   -q --no-cov
 ```
 
-Expected: first test fails because add-all is serial; second may fail because sequential add can commit `alpha` before `beta` fails; third fails until bulk replacement prepares into the sync temp and reports `replaced`; fourth protects per-catalog result ordering for duplicate names.
+Expected: first test fails because add-all is serial; second may fail because sequential add can commit `alpha` before `beta` fails; third fails until bulk replacement prepares into the sync temp and reports `replaced`; fourth protects per-catalog result ordering for duplicate names; fifth fails until replacement decisions can target a specific catalog item.
 
 - [ ] **Step 4: Add add-all plan dataclasses**
 
@@ -1451,7 +1767,7 @@ def _plan_add_all_skills(
     target_style: _TargetStyle,
     *,
     replace_existing: bool,
-    replace_existing_names: frozenset[str] = frozenset(),
+    replace_existing_indexes: frozenset[int] = frozenset(),
 ) -> tuple[list[_AddPlan], list[_AddPlan]]:
     manifest = _load_manifest_for_target(project_skills_dir, target_style)
     existing_or_skipped: list[_AddPlan] = []
@@ -1485,7 +1801,7 @@ def _plan_add_all_skills(
             )
             continue
         target_exists = target.exists() or target.is_symlink()
-        should_replace = replace_existing or skill_name in replace_existing_names
+        should_replace = replace_existing or index in replace_existing_indexes
         if target_exists:
             _reject_symlinked_project_skill(target, target_style)
             if not target.is_dir():
@@ -1565,7 +1881,7 @@ def _add_all_skills_parallel(
     target_style: _TargetStyle,
     *,
     replace_existing: bool = False,
-    replace_existing_names: frozenset[str] = frozenset(),
+    replace_existing_indexes: frozenset[int] = frozenset(),
 ) -> AddAllSkillsResult:
     _ensure_safe_project_skills_dir(project_skills_dir, target_style)
     try:
@@ -1580,7 +1896,7 @@ def _add_all_skills_parallel(
         project_skills_dir,
         target_style,
         replace_existing=replace_existing,
-        replace_existing_names=replace_existing_names,
+        replace_existing_indexes=replace_existing_indexes,
     )
 
     prepared: list[_PreparedAdd] = []
@@ -1682,14 +1998,14 @@ def add_all_vault_skills(
     vault_skills_dir: Path,
     *,
     replace_existing: bool = False,
-    replace_existing_names: frozenset[str] = frozenset(),
+    replace_existing_indexes: frozenset[int] = frozenset(),
 ) -> AddAllSkillsResult:
     return _add_all_skills_parallel(
         catalog,
         vault_skills_dir,
         _VAULT_TARGET,
         replace_existing=replace_existing,
-        replace_existing_names=replace_existing_names,
+        replace_existing_indexes=replace_existing_indexes,
     )
 ```
 
@@ -1697,28 +2013,28 @@ def add_all_vault_skills(
 
 In `src/sv/cli.py`, import `add_all_vault_skills` from `sv.project`.
 
-Replace the skill-vault branch of `_add_all_skills_to_context` with serial replacement resolution followed by one bulk call. Keep the full catalog so "no" prompt decisions still report `exists`, and pass affirmative prompt decisions as per-skill replacement names:
+Replace the skill-vault branch of `_add_all_skills_to_context` with serial replacement resolution followed by one bulk call. Keep the full catalog so "no" prompt decisions still report `exists`, and pass affirmative prompt decisions as catalog indexes so duplicate skill names remain distinct:
 
 ```python
     if context.is_skill_vault:
-        replace_names: set[str] = set()
-        for entry in catalog:
+        replace_indexes: set[int] = set()
+        for index, entry in enumerate(catalog):
             should_replace = _resolve_vault_replacement(
                 entry,
                 context.vault_skills_dir,
                 replace_existing=replace_existing,
             )
             if should_replace:
-                replace_names.add(normalize_skill_name(entry.name))
+                replace_indexes.add(index)
         return add_all_vault_skills(
             catalog,
             context.vault_skills_dir,
             replace_existing=replace_existing,
-            replace_existing_names=frozenset(replace_names),
+            replace_existing_indexes=frozenset(replace_indexes),
         )
 ```
 
-Keep prompts serial. Do not prompt from workers, and do not discard per-skill prompt decisions.
+Keep prompts serial. Do not prompt from workers, and do not discard per-catalog-item prompt decisions.
 
 - [ ] **Step 9: Run add tests**
 
@@ -1730,6 +2046,7 @@ uv run pytest \
   tests/test_project.py::test_add_all_project_skills_cleans_prepared_temps_when_one_prepare_fails \
   tests/test_project.py::test_add_all_vault_skills_replaces_existing_targets_with_replace_temp \
   tests/test_project.py::test_add_all_project_skills_preserves_duplicate_name_result_rows \
+  tests/test_project.py::test_add_all_vault_skills_honors_duplicate_name_replace_indexes \
   tests/test_project.py \
   tests/test_cli_add_contracts.py \
   tests/test_vault_mode_targets.py \
@@ -2192,8 +2509,8 @@ def test_scan_repo_for_index_hashes_candidate_skills_in_parallel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SV_JOBS", "2")
-    write_skill(tmp_path / "skills" / "alpha", name="alpha", description="Alpha skill.")
-    write_skill(tmp_path / "skills" / "beta", name="beta", description="Beta skill.")
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+    _write_skill(tmp_path / "skills" / "beta", "beta", "Beta skill.")
     alpha_started = threading.Event()
     beta_started = threading.Event()
     original_hash = index_module.sha256_skill_directory
@@ -2217,7 +2534,7 @@ def test_scan_repo_for_index_hashes_candidate_skills_in_parallel(
     ]
 ```
 
-Use the existing helper names in `tests/test_index.py`. If the file uses `make_skill` instead of `write_skill`, call the existing helper and keep the same assertions. Add imports:
+Use the existing `_write_skill` helper in `tests/test_index.py` and keep the same assertions. Add imports:
 
 ```python
 import threading
