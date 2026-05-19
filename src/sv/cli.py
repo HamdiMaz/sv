@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -402,14 +403,30 @@ def handle(
     process_runner=default_process_runner,
     skill_selector: SkillSelector = select_skills,
     skill_chooser: SkillChooser | None = None,
+    *,
+    runtime: Runtime | None = None,
 ) -> int:
+    runtime = (
+        Runtime(
+            cwd=cwd,
+            home=home,
+            env=os.environ,
+            stdin=sys.stdin,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+        if runtime is None
+        else runtime
+    )
+    cwd = runtime.cwd
+    home = runtime.home
     paths = SvPaths.from_home(home)
     adapter = PiAdapter()
     chooser = _choose_skill if skill_chooser is None else skill_chooser
     record_global_source_state = _should_record_global_source_state(cwd, home)
 
     try:
-        configured_jobs()
+        configured_jobs(runtime.env)
 
         if args.command == "cache":
             return _handle_cache(args, paths)
@@ -641,7 +658,7 @@ def handle(
 
         raise SvError(f"Unknown command: {args.command}")
     except SvError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=runtime.stderr)
         return 1
 
 
@@ -649,7 +666,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     runtime = Runtime.from_process()
-    return handle(args, cwd=runtime.cwd, home=runtime.home)
+    return handle(args, cwd=runtime.cwd, home=runtime.home, runtime=runtime)
 
 
 def svx_main(argv: Sequence[str] | None = None) -> int:
@@ -659,7 +676,7 @@ def svx_main(argv: Sequence[str] | None = None) -> int:
         forwarded.extend(["--skills-path", skills_path])
     args = build_parser().parse_args(forwarded)
     runtime = Runtime.from_process()
-    return handle(args, cwd=runtime.cwd, home=runtime.home)
+    return handle(args, cwd=runtime.cwd, home=runtime.home, runtime=runtime)
 
 
 def _build_svx_parser() -> argparse.ArgumentParser:

@@ -1229,14 +1229,18 @@ def test_main_parses_arguments_and_uses_current_project_paths(monkeypatch, tmp_p
         classmethod(lambda cls: Namespace(cwd=project, home=home)),
     )
 
-    def fake_handle(args, cwd, home):
-        parsed_calls.append((args.command, args.repo_command, cwd, home))
+    def fake_handle(args, cwd, home, **kwargs):
+        parsed_calls.append(
+            (args.command, args.repo_command, cwd, home, kwargs["runtime"])
+        )
         return 0
 
     monkeypatch.setattr(cli_module, "handle", fake_handle)
 
     assert cli_module.main(["repo", "list"]) == 0
-    assert parsed_calls == [("repo", "list", project, home)]
+    assert parsed_calls == [
+        ("repo", "list", project, home, Namespace(cwd=project, home=home))
+    ]
 
 
 def test_svx_main_dispatches_to_repo_add_flow(monkeypatch, tmp_path: Path):
@@ -1250,9 +1254,17 @@ def test_svx_main_dispatches_to_repo_add_flow(monkeypatch, tmp_path: Path):
         classmethod(lambda cls: Namespace(cwd=project, home=home)),
     )
 
-    def fake_handle(args, cwd, home):
+    def fake_handle(args, cwd, home, **kwargs):
         parsed_calls.append(
-            (args.command, args.repo_command, args.repo, args.skills_paths, cwd, home)
+            (
+                args.command,
+                args.repo_command,
+                args.repo,
+                args.skills_paths,
+                cwd,
+                home,
+                kwargs["runtime"],
+            )
         )
         return 0
 
@@ -1260,7 +1272,15 @@ def test_svx_main_dispatches_to_repo_add_flow(monkeypatch, tmp_path: Path):
 
     assert cli_module.svx_main(["owner/repo", "--skills-path", "custom/skills"]) == 0
     assert parsed_calls == [
-        ("repo", "add", "owner/repo", ["custom/skills"], project, home)
+        (
+            "repo",
+            "add",
+            "owner/repo",
+            ["custom/skills"],
+            project,
+            home,
+            Namespace(cwd=project, home=home),
+        )
     ]
 
 
@@ -1608,3 +1628,32 @@ def test_cli_prompt_for_initial_sources_handles_cancel_custom_repo_and_retries(
     monkeypatch.setattr("builtins.input", lambda _prompt: "q")
     with pytest.raises(SvError, match="No skill source repos"):
         cli_module._prompt_for_initial_sources(paths)
+
+
+def test_handle_validates_sv_jobs_from_injected_environment(tmp_path):
+    from io import StringIO
+
+    from sv.cli import handle
+    from sv.runtime import Runtime
+
+    runtime = Runtime(
+        cwd=tmp_path,
+        home=tmp_path / "home",
+        env={"SV_JOBS": "invalid"},
+        stdin=StringIO(),
+        stdout=StringIO(),
+        stderr=StringIO(),
+    )
+
+    exit_code = handle(
+        parse(["list"]),
+        cwd=runtime.cwd,
+        home=runtime.home,
+        runtime=runtime,
+    )
+
+    assert exit_code == 1
+    assert (
+        "SV_JOBS must be an integer between 1 and 64."
+        in runtime.stderr.getvalue()
+    )

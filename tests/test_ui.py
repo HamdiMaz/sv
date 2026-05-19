@@ -101,3 +101,15 @@ def test_browse_tty_table_uses_the_chosen_browser(monkeypatch):
     assert calls == [
         (["Skill"], [["alpha"]], {"clear_on_exit": True})
     ]
+
+
+def test_plain_output_and_tty_ui_are_separate_adapter_instances():
+    plain = PlainOutput()
+    tty = TtyUi(
+        selector=lambda items, **kwargs: list(items),
+        table_browser=lambda headers, rows, **kwargs: None,
+    )
+
+    assert plain.table(["A"], [["B"]]).splitlines()[0] == "A"
+    assert tty.select_many(["alpha"]) == ["alpha"]
+    assert tty.browse_table(["Skill"], [["alpha"]]) is None

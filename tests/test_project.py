@@ -362,10 +362,10 @@ def test_add_project_skill_rolls_back_copy_when_manifest_update_fails(
     project_skills = tmp_path / "project" / ".pi" / "skills"
     temp_dir = project_skills / ".alpha.sv-add-tmp"
 
-    def fail_upsert(project_skills_dir, manifest_entry):
+    def fail_manifest_save(self, entries):
         raise SvError("manifest write failed")
 
-    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+    monkeypatch.setattr("sv.project.ProjectManifestStore.save", fail_manifest_save)
 
     with pytest.raises(SvError, match="manifest write failed"):
         add_project_skill(entry, project_skills)
@@ -383,7 +383,7 @@ def test_add_project_skill_reports_manifest_failure_rollback_failure(
     temp_dir = project_skills / ".alpha.sv-add-tmp"
     original_rmtree = shutil.rmtree
 
-    def fail_upsert(project_skills_dir, manifest_entry):
+    def fail_manifest_save(self, entries):
         raise SvError("manifest write failed")
 
     def fail_rmtree(path, *args, **kwargs):
@@ -391,7 +391,7 @@ def test_add_project_skill_reports_manifest_failure_rollback_failure(
             raise OSError("rollback failed")
         return original_rmtree(path, *args, **kwargs)
 
-    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+    monkeypatch.setattr("sv.project.ProjectManifestStore.save", fail_manifest_save)
     monkeypatch.setattr(shutil, "rmtree", fail_rmtree)
 
     with pytest.raises(SvError, match="rollback failed"):
@@ -940,10 +940,10 @@ def test_remove_project_skill_restores_skill_when_manifest_update_fails(
     original_notes = skill / "notes.md"
     assert original_notes.read_text() == "alpha remote\n"
 
-    def fail_remove_manifest_entry(project_skills_dir, skill_name):
+    def fail_manifest_save(self, entries):
         raise SvError("manifest write failed")
 
-    monkeypatch.setattr("sv.project.remove_manifest_entry", fail_remove_manifest_entry)
+    monkeypatch.setattr("sv.project.ProjectManifestStore.save", fail_manifest_save)
 
     with pytest.raises(SvError, match="manifest write failed"):
         remove_project_skill("alpha", project_skills)
@@ -1052,7 +1052,7 @@ def test_remove_project_skill_reports_manifest_failure_when_restore_fails(
     backup_target = project_skills / ".alpha.sv-remove-backup"
     original_rename = Path.rename
 
-    def fail_remove_manifest_entry(project_skills_dir, skill_name):
+    def fail_manifest_save(self, entries):
         raise SvError("manifest write failed")
 
     def fail_restore_rename(path, target):
@@ -1060,7 +1060,7 @@ def test_remove_project_skill_reports_manifest_failure_when_restore_fails(
             raise OSError("restore failed")
         return original_rename(path, target)
 
-    monkeypatch.setattr("sv.project.remove_manifest_entry", fail_remove_manifest_entry)
+    monkeypatch.setattr("sv.project.ProjectManifestStore.save", fail_manifest_save)
     monkeypatch.setattr(Path, "rename", fail_restore_rename)
 
     with pytest.raises(SvError, match="rollback failed"):
@@ -1751,10 +1751,10 @@ def test_sync_project_skills_restores_local_skill_when_manifest_update_fails(
     (managed_local / "notes.md").write_text("local v1\n")
     save_manifest(project_skills, {"managed": entry_manifest(entry)})
 
-    def fail_upsert(project_skills_dir, manifest_entry):
+    def fail_manifest_save(self, entries):
         raise SvError("manifest write failed")
 
-    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+    monkeypatch.setattr("sv.project.ProjectManifestStore.save", fail_manifest_save)
 
     with pytest.raises(SvError, match="manifest write failed"):
         sync_project_skills([entry], project_skills)
@@ -1825,7 +1825,7 @@ def test_sync_project_skills_reports_manifest_failure_when_restore_fails(
     backup_target = project_skills / ".managed.sv-sync-backup"
     original_rename = Path.rename
 
-    def fail_upsert(project_skills_dir, manifest_entry):
+    def fail_manifest_save(self, entries):
         raise SvError("manifest write failed")
 
     def fail_restore_rename(path, target):
@@ -1833,7 +1833,7 @@ def test_sync_project_skills_reports_manifest_failure_when_restore_fails(
             raise OSError("restore failed")
         return original_rename(path, target)
 
-    monkeypatch.setattr("sv.project.upsert_manifest_entry", fail_upsert)
+    monkeypatch.setattr("sv.project.ProjectManifestStore.save", fail_manifest_save)
     monkeypatch.setattr(Path, "rename", fail_restore_rename)
 
     with pytest.raises(SvError, match="manifest update failed .* rollback failed"):

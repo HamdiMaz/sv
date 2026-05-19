@@ -9,11 +9,7 @@ from typing import Protocol
 
 from sv.config import repo_source_key
 from sv.errors import SvError
-from sv.manifest import (
-    ManifestEntry,
-    remove_manifest_entry,
-    upsert_manifest_entry,
-)
+from sv.manifest import ManifestEntry
 from sv.materialization import DEFAULT_MATERIALIZATION_ADAPTER
 from sv.parallel import map_ordered
 from sv.stores import ProjectManifestStore
@@ -1532,22 +1528,24 @@ def _source_reference_for_manifest(entry: ManifestEntry) -> str:
 def _upsert_manifest_entry_for_target(
     project_skills_dir: Path, entry: ManifestEntry, target_style: _TargetStyle
 ) -> None:
+    store = ProjectManifestStore(project_skills_dir)
+    entries = store.load()
     if target_style.target_kind == _PI_TARGET.target_kind:
-        upsert_manifest_entry(project_skills_dir, entry)
+        entries[entry.name] = entry
+        store.save(entries)
         return
-    entries = ProjectManifestStore(project_skills_dir).load()
     for key, existing_entry in entries.items():
         if existing_entry.name == entry.name and _manifest_entry_matches_target(
             existing_entry, target_style
         ):
             entries[key] = entry
-            ProjectManifestStore(project_skills_dir).save(entries)
+            store.save(entries)
             return
     key = entry.name
     if key in entries:
         key = f"{entry.target_kind}:{entry.target_agent or ''}:{entry.target_path}:{entry.name}"
     entries[key] = entry
-    ProjectManifestStore(project_skills_dir).save(entries)
+    store.save(entries)
 
 
 def _load_manifest_for_target(
@@ -1563,16 +1561,19 @@ def _load_manifest_for_target(
 def _remove_manifest_entry_for_target(
     project_skills_dir: Path, skill_name: str, target_style: _TargetStyle
 ) -> None:
+    store = ProjectManifestStore(project_skills_dir)
+    entries = store.load()
     if target_style.target_kind == _PI_TARGET.target_kind:
-        remove_manifest_entry(project_skills_dir, skill_name)
+        if skill_name in entries:
+            del entries[skill_name]
+            store.save(entries)
         return
-    entries = ProjectManifestStore(project_skills_dir).load()
     for key, existing_entry in list(entries.items()):
         if existing_entry.name == skill_name and _manifest_entry_matches_target(
             existing_entry, target_style
         ):
             del entries[key]
-            ProjectManifestStore(project_skills_dir).save(entries)
+            store.save(entries)
             return
 
 
