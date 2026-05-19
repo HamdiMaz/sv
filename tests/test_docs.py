@@ -249,6 +249,36 @@ def test_common_documented_sv_command_examples_parse(command):
     _parse_sv_command(command)
 
 
+def test_adapter_architecture_document_lists_expected_adapter_modules():
+    lines = (DOCS_DIR / "adapters.md").read_text(encoding="utf-8").splitlines()
+    heading_index = lines.index("## Adapter modules")
+    table_rows = [
+        line
+        for line in lines[heading_index + 1 :]
+        if line.startswith("|") and line.endswith("|")
+    ]
+    headers = [cell.strip() for cell in table_rows[0].strip("|").split("|")]
+    module_index = headers.index("Module")
+
+    documented_modules = []
+    for row in table_rows[2:]:
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        module_match = re.fullmatch(r"`([^`]+)`", cells[module_index])
+        assert module_match is not None
+        documented_modules.append(module_match.group(1))
+
+    assert documented_modules == [
+        "sv.ui",
+        "sv.runtime",
+        "sv.parallel",
+        "sv.process",
+        "sv.source_backends",
+        "sv.materialization",
+        "sv.stores",
+        "sv.source_cache",
+    ]
+
+
 def test_command_reference_documents_search():
     command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")
 
