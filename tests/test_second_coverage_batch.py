@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 from io import StringIO
+from pathlib import Path
 from typing import cast
 import os
 import subprocess
@@ -22,7 +22,7 @@ import sv.tomlutil as tomlutil_module
 from sv.catalog import SourceCatalogResult, SourceSkill
 from sv.config import RepoConfig, SvPaths, _save_config
 from sv.errors import SvError
-from sv.manifest import GlobalSourceState, ManifestEntry, load_global_manifest, save_manifest
+from sv.manifest import GlobalSourceState, ManifestEntry, load_global_manifest, load_manifest, save_manifest
 from sv.project import AddSkillResult, SyncResult, SyncSkip
 from sv.materialization import (
     install_materialized_skill_folder,
@@ -444,11 +444,11 @@ def test_manifest_parsing_rejects_global_and_project_edge_shapes(tmp_path: Path)
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text("schema_version = 1\nskills = {}\n")
     with pytest.raises(SvError, match="skills must be a list"):
-        cli_module.load_manifest(project_skills)
+        load_manifest(project_skills)
 
     manifest_path.write_text("schema_version = 1\n[[skills]]\nname = \"alpha\"\n")
     with pytest.raises(SvError, match="missing 'source_repo_id'"):
-        cli_module.load_manifest(project_skills)
+        load_manifest(project_skills)
 
     manifest_path.write_text(
         "schema_version = 1\n[[skills]]\n"
@@ -456,7 +456,7 @@ def test_manifest_parsing_rejects_global_and_project_edge_shapes(tmp_path: Path)
         "source_path = \"skills/alpha\"\ndescription = \"Alpha\"\nmodified = \"yes\"\n"
     )
     with pytest.raises(SvError, match="modified.*boolean"):
-        cli_module.load_manifest(project_skills)
+        load_manifest(project_skills)
 
 
 def test_manifest_duplicate_keys_and_symlinked_manifest_dir(tmp_path: Path):
@@ -470,7 +470,7 @@ def test_manifest_duplicate_keys_and_symlinked_manifest_dir(tmp_path: Path):
         "[[skills]]\nname = \"alpha\"\ntarget_kind = \"skill-vault\"\ntarget_path = \"skills/alpha\"\nsource_repo_id = \"C\"\nsource_repo_url = \"url\"\nsource_path = \"skills/alpha\"\ndescription = \"Alpha\"\n"
     )
 
-    entries = cli_module.load_manifest(project_skills)
+    entries = load_manifest(project_skills)
 
     assert set(entries) == {"alpha", "skill-vault::skills/alpha:alpha", "skill-vault::skills/alpha:alpha:2"}
 
@@ -1167,10 +1167,10 @@ def test_project_list_remove_and_manifest_target_helper_edges(tmp_path: Path, mo
     )
     save_manifest(vault_skills, {"other": other})
     project_module._upsert_manifest_entry_for_target(vault_skills, entry, project_module._VAULT_TARGET)
-    entries = cli_module.load_manifest(vault_skills)
+    entries = load_manifest(vault_skills)
     assert any(item.target_kind == "skill-vault" for item in entries.values())
     project_module._remove_manifest_entry_for_target(vault_skills, "alpha", project_module._VAULT_TARGET)
-    assert all(item.target_kind != "skill-vault" for item in cli_module.load_manifest(vault_skills).values())
+    assert all(item.target_kind != "skill-vault" for item in load_manifest(vault_skills).values())
 
     assert project_module._source_reference_for_manifest(entry) == "Repo"
     non_default = ManifestEntry(

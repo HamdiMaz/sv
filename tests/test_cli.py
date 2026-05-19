@@ -1636,13 +1636,14 @@ def test_handle_validates_sv_jobs_from_injected_environment(tmp_path):
     from sv.cli import handle
     from sv.runtime import Runtime
 
+    stderr = StringIO()
     runtime = Runtime(
         cwd=tmp_path,
         home=tmp_path / "home",
         env={"SV_JOBS": "invalid"},
         stdin=StringIO(),
         stdout=StringIO(),
-        stderr=StringIO(),
+        stderr=stderr,
     )
 
     exit_code = handle(
@@ -1655,5 +1656,5 @@ def test_handle_validates_sv_jobs_from_injected_environment(tmp_path):
     assert exit_code == 1
     assert (
         "SV_JOBS must be an integer between 1 and 64."
-        in runtime.stderr.getvalue()
+        in stderr.getvalue()
     )

@@ -38,17 +38,18 @@ def test_runtime_captures_paths_env_streams_and_clock(tmp_path: Path):
 
 
 def test_runtime_prompt_reads_from_configured_streams():
+    stdout = StringIO()
     runtime = Runtime(
         cwd=Path("/work"),
         home=Path("/home/user"),
         env={},
         stdin=StringIO("repo/name\n"),
-        stdout=StringIO(),
+        stdout=stdout,
         stderr=StringIO(),
     )
 
     assert runtime.prompt("Repo: ") == "repo/name"
-    assert runtime.stdout.getvalue() == "Repo: "
+    assert stdout.getvalue() == "Repo: "
 
 
 def test_runtime_can_prompt_requires_tty_stdin_and_stdout():

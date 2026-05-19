@@ -194,8 +194,8 @@ def test_repo_list_escapes_control_characters_in_repo_url(
     paths.config_file.write_text("schema_version = 1\nrepos = []\n")
 
     monkeypatch.setattr(
-        "sv.cli.load_config",
-        lambda _paths: SvConfig(
+        "sv.cli.ConfigStore.load",
+        lambda _store: SvConfig(
             repos=(RepoConfig(id="Org/Skills", url="https://example.com/Bad\x1b[2J.git"),)
         ),
     )
