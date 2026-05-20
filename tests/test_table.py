@@ -9,6 +9,7 @@ import pytest
 
 from sv.errors import SvError
 from sv.table import (
+    DetailLine,
     TableState,
     _read_escape_sequence,
     _read_filter_query,
@@ -216,6 +217,53 @@ def test_interactive_detail_trims_trailing_empty_sequence_lines_before_footer(
     visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
     assert line_count == 2
     assert visible_lines == ["Skill: alpha", "q back"]
+
+
+def test_interactive_detail_default_footer_is_concise(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "80")
+    stdout = StringIO()
+
+    line_count = _render_interactive_detail(
+        ["alpha"],
+        lambda row, status: "Skill: " + row[0],
+        None,
+        stdout,
+    )
+
+    visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert line_count == 2
+    assert visible_lines == ["Skill: alpha", "a add • q back"]
+
+
+def test_interactive_detail_renders_styled_wrapped_lines_safely(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "28")
+    stdout = StringIO()
+
+    line_count = _render_interactive_detail(
+        ["alpha"],
+        lambda row, status: [
+            DetailLine("╭─ Skill" + "─" * 32, style="accent"),
+            DetailLine("│ safe\x1b title", style="title"),
+            DetailLine(
+                "Long description with 日本語 characters and emoji ✨",
+                wrap=True,
+                indent=2,
+            ),
+        ],
+        None,
+        stdout,
+        detail_key_help="a add • q back",
+    )
+
+    output = stdout.getvalue()
+    visible_lines = [visible_text(line) for line in output.splitlines()]
+    assert "\x1b[38;5;" in output
+    assert "safe\x1b title" not in visible_text(output)
+    assert "safe\\x1b title" in visible_text(output)
+    assert visible_lines[-1] == "a add • q back"
+    assert line_count == len(visible_lines)
+    assert line_count > 4
+    assert all(display_width(line) <= 28 for line in visible_lines)
 
 
 def test_table_state_keeps_raw_rows_for_details_while_rendering_safely():

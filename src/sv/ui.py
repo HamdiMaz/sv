@@ -4,9 +4,23 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
-from sv.table import CellWidths, format_table
+from sv.table import CellWidths, DetailLine, detail_line, format_table
 
 T = TypeVar("T")
+
+__all__ = [
+    "CHOSEN_TTY_UI_APPROACH",
+    "CellWidths",
+    "DetailLine",
+    "PlainOutput",
+    "TtyUi",
+    "TtyUiApproach",
+    "browse_tty_table",
+    "detail_line",
+    "format_plain_table",
+    "format_table",
+    "select_tty_items",
+]
 
 
 @dataclass(frozen=True)

@@ -29,9 +29,49 @@ _FG_CURSOR = "\x1b[38;5;231m"
 _FG_HEADER = "\x1b[38;5;183m"
 _FG_MUTED = "\x1b[38;5;245m"
 _FG_RULE = "\x1b[38;5;60m"
+_DETAIL_FG_ACCENT = "\x1b[38;5;80m"
+_DETAIL_FG_TITLE = "\x1b[38;5;183m"
+_DETAIL_FG_SUCCESS = "\x1b[38;5;114m"
+_DETAIL_STYLES = {
+    "accent": _DETAIL_FG_ACCENT,
+    "muted": _FG_MUTED,
+    "rule": _FG_RULE,
+    "success": _DETAIL_FG_SUCCESS,
+    "title": _DETAIL_FG_TITLE,
+}
 _BG_CURSOR = "\x1b[48;5;24m"
 _HIDE_CURSOR = "\x1b[?25l"
 _SHOW_CURSOR = "\x1b[?25h"
+
+
+@dataclass(frozen=True)
+class DetailLine:
+    """A safely rendered detail line styled only by sv-owned ANSI codes."""
+
+    text: str
+    style: str = ""
+    wrap: bool = False
+    indent: int = 0
+
+
+def detail_line(
+    text: object,
+    *,
+    style: str = "",
+    wrap: bool = False,
+    indent: int = 0,
+) -> DetailLine:
+    return DetailLine(str(text), style=style, wrap=wrap, indent=max(indent, 0))
+
+
+DetailRenderLine = str | DetailLine
+DetailRenderResult = str | Sequence[DetailRenderLine]
+
+
+@dataclass(frozen=True)
+class _RenderedDetailLine:
+    visible: str
+    styled: str
 
 
 @dataclass
@@ -167,10 +207,10 @@ def browse_table(
     key_help: str = "",
     clear_on_exit: bool = False,
     row_ranker: Callable[[str], Sequence[int]] | None = None,
-    detail_renderer: Callable[[Sequence[str], str | None], str | Sequence[str]]
+    detail_renderer: Callable[[Sequence[str], str | None], DetailRenderResult]
     | None = None,
     detail_actions: Mapping[str, Callable[[Sequence[str]], str | None]] | None = None,
-    detail_key_help: str = "a add skill • q back",
+    detail_key_help: str = "a add • q back",
 ) -> Sequence[str] | None:
     """Browse rows in a read-only TTY table.
 
@@ -363,12 +403,12 @@ def _clear_rendered_table(stdout: TextIO, rendered_lines: int) -> None:
 
 def _render_interactive_detail(
     row: Sequence[str],
-    detail_renderer: Callable[[Sequence[str], str | None], str | Sequence[str]] | None,
+    detail_renderer: Callable[[Sequence[str], str | None], DetailRenderResult] | None,
     status: str | None,
     stdout: TextIO,
     *,
     previous_line_count: int = 0,
-    detail_key_help: str = "a add skill • q back",
+    detail_key_help: str = "a add • q back",
 ) -> int:
     if previous_line_count:
         stdout.write(f"\x1b[{previous_line_count}F")
@@ -376,21 +416,61 @@ def _render_interactive_detail(
 
     terminal_width = _terminal_width()
     rendered = detail_renderer(row, status) if detail_renderer is not None else ""
-    if isinstance(rendered, str):
-        content_lines = rendered.splitlines() or [""]
-    else:
-        content_lines = [str(line) for line in rendered]
-    lines = [_fit_text(_sanitize_cell(line), terminal_width) for line in content_lines]
-    while lines and lines[-1] == "":
-        lines.pop()
-    lines.append(
-        f"{_FG_MUTED}{_fit_text(_sanitize_cell(detail_key_help), terminal_width)}{_RESET}"
-    )
+    rendered_lines = _format_detail_content_lines(rendered, terminal_width)
+    while rendered_lines and rendered_lines[-1].visible == "":
+        rendered_lines.pop()
+    lines = [line.styled for line in rendered_lines]
+    footer = _fit_text(_sanitize_cell(detail_key_help), terminal_width)
+    lines.append(f"{_FG_MUTED}{footer}{_RESET}")
 
     stdout.write("\n".join(lines))
     stdout.write("\n")
     stdout.flush()
     return len(lines)
+
+
+def _format_detail_content_lines(
+    rendered: DetailRenderResult, terminal_width: int
+) -> list[_RenderedDetailLine]:
+    if isinstance(rendered, str):
+        content_lines: Sequence[DetailRenderLine] = rendered.splitlines() or [""]
+    else:
+        content_lines = rendered
+    formatted: list[_RenderedDetailLine] = []
+    for line in content_lines:
+        formatted.extend(_format_detail_line(line, terminal_width))
+    return formatted
+
+
+def _format_detail_line(
+    line: DetailRenderLine, terminal_width: int
+) -> list[_RenderedDetailLine]:
+    if isinstance(line, DetailLine):
+        safe_text = _sanitize_cell(line.text)
+        indent = " " * min(line.indent, max(terminal_width - 1, 0))
+        if line.wrap:
+            body_width = max(terminal_width - _display_width(indent), 1)
+            parts = _wrap_cell(safe_text, body_width) if safe_text else [""]
+            return [
+                _styled_detail_line(
+                    _fit_text(indent + part, terminal_width), line.style
+                )
+                for part in parts
+            ]
+        return [
+            _styled_detail_line(
+                _fit_text(indent + safe_text, terminal_width), line.style
+            )
+        ]
+    visible = _fit_text(_sanitize_cell(str(line)), terminal_width)
+    return [_RenderedDetailLine(visible=visible, styled=visible)]
+
+
+def _styled_detail_line(visible: str, style: str) -> _RenderedDetailLine:
+    prefix = _DETAIL_STYLES.get(style)
+    if not prefix:
+        return _RenderedDetailLine(visible=visible, styled=visible)
+    return _RenderedDetailLine(visible=visible, styled=f"{prefix}{visible}{_RESET}")
 
 
 def _render_interactive_table(
