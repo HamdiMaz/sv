@@ -498,7 +498,7 @@ def handle(
             local_context = _detect_local_context(cwd)
             status_policy = _cache_policy_from_args(
                 args,
-                default_mode=CacheMode.FORCE_REFRESH,
+                default_mode=CacheMode.NORMAL,
                 allow_stale_on_error=False,
             )
             return _handle_status(

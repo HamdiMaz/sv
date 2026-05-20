@@ -66,7 +66,7 @@ sv remove find-docs
 
 If you see a warning like `using stale cached metadata`, `sv` tried to refresh source metadata, the refresh failed, and the command used an older cached catalog instead. Only browsing/install commands allow this fallback: `sv list`, `sv search`, and all `sv add` modes (`sv add`, `sv add -l`, and `sv add --all`).
 
-Use `--refresh` to force a new source check. `sv sync`, `sv update`, and source-aware `sv status` already refresh by default and fail closed on refresh errors unless you explicitly pass `--cached`.
+Use `--refresh` to force a new source check. Plain `sv status` uses fresh cached source metadata when available and refreshes only when metadata is missing or stale; use `sv status --refresh` when you need an immediate current-source status check. `sv sync`, `sv update`, and `sv status --refresh` fail closed on refresh errors unless you explicitly pass `--cached`.
 
 Use `--cached` when you need to avoid network and Git source refreshes. This mode requires existing cached metadata. Commands that materialize skills (all add modes that copy skills, including `sv add --cached`, `sv add --all --cached`, and interactive add with `--cached`; plus `sv sync --cached` and `sv update --cached`) also require matching cached skill bodies. If a cached body is missing, rerun once without `--cached` to populate the body cache, then retry the cached command.
 

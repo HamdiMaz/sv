@@ -5,6 +5,7 @@
 - Redesigned interactive source skill detail pages as framed, color-accented cards with wrapped descriptions, safe styled metadata, status feedback, and the concise footer `a add • q back`.
 - Fixed `sv init` to target the enclosing repository root when run without a folder and reject `sv init <folder>` inside existing Git or sv-managed repositories instead of creating nested vaults.
 - Fixed `sv index` output to collapse identical skill content to one canonical highest-level source path while preserving same-name skills with different hashes.
+- Changed plain `sv status` to use fresh cached source metadata by default for faster repeated checks, while keeping `sv status --refresh` for immediate current-source checks and `sv status --cached` for strict cache-only status.
 - Added visible ranked `/` search to interactive table browsers and multi-select pickers, including source-skill-aware ordering that matches `sv search` in source skill lists.
 - Unified interactive TTY browser and picker output around a framed table shell, with renderer-owned `Sel` columns for structured pickers, command-specific picker footers, and refreshed skill details.
 - Added inline skill detail pages for TTY list/search/repo browsing, including detail-level single-skill add actions while preserving repo list-mode add-all.
