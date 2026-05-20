@@ -56,7 +56,9 @@ def test_tty_list_browses_source_skills_with_details_by_default(
     assert browse_calls
     headers, rows, kwargs = browse_calls[0]
     assert headers == ["Skill", "Source", "Description"]
-    assert ["alpha", derive_repo_id(str(source)), "Alpha skill."] in rows
+    assert ["alpha", derive_repo_id(str(source)), "Alpha skill."] in [
+        row[:3] for row in rows
+    ]
     assert callable(kwargs["on_detail"])
     ranker = kwargs["row_ranker"]
     assert callable(ranker)
@@ -131,7 +133,7 @@ def test_tty_search_browses_ranked_matches_with_details_by_default(
     headers, rows, kwargs = browse_calls[0]
     assert headers == ["Skill", "Source", "Description"]
     repo_id = derive_repo_id(str(source))
-    assert rows == [
+    assert [row[:3] for row in rows] == [
         ["docs", repo_id, "Docs skill."],
         ["alpha-docs", repo_id, "Alpha docs."],
         ["beta", repo_id, "Docs in description."],
@@ -183,7 +185,7 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
     repo_rows = browse_calls[0][1]
     skill_rows = browse_calls[1][1]
     assert repo_rows[0][0] == repo_id
-    assert ["gamma", repo_id, "Gamma skill."] in skill_rows
+    assert ["gamma", repo_id, "Gamma skill."] in [row[:3] for row in skill_rows]
     skill_kwargs = browse_calls[1][2]
     ranker = skill_kwargs["row_ranker"]
     assert callable(ranker)

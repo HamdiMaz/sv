@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import hashlib
+import inspect
 import os
 from pathlib import Path
 import shutil
@@ -2267,8 +2268,13 @@ def _interactive_source_skill_rows(
     entries: Sequence[SourceSkill],
 ) -> tuple[list[list[str]], list[SourceSkill]]:
     rows = [
-        [entry.name, _interactive_source_label(entry, entries), entry.description]
-        for entry in entries
+        [
+            entry.name,
+            _interactive_source_label(entry, entries),
+            entry.description,
+            str(index),
+        ]
+        for index, entry in enumerate(entries)
     ]
     return rows, list(entries)
 
@@ -2290,6 +2296,14 @@ def _entry_for_interactive_row(
     row: Sequence[str], rows: Sequence[Sequence[str]], entries: Sequence[SourceSkill]
 ) -> SourceSkill | None:
     row_values = [str(value) for value in row]
+    if len(row_values) > len(_source_skill_headers()):
+        try:
+            row_index = int(row_values[len(_source_skill_headers())])
+        except ValueError:
+            row_index = -1
+        if 0 <= row_index < len(entries):
+            return entries[row_index]
+
     for candidate_row, entry in zip(rows, entries, strict=False):
         if list(candidate_row) == row_values:
             return entry
@@ -2831,17 +2845,37 @@ def _call_selector(
     items: Sequence[Any],
     **kwargs: Any,
 ) -> list[Any]:
+    if kwargs and not _selector_accepts_keyword_arguments(selector, kwargs):
+        if _selector_accepts_items_only(selector):
+            return selector(items)
+    return selector(items, **kwargs)
+
+
+def _selector_accepts_keyword_arguments(
+    selector: SkillSelector, kwargs: Mapping[str, Any]
+) -> bool:
     try:
-        return selector(items, **kwargs)
-    except TypeError as exc:
-        # Existing tests and simple integrations may provide a one-argument selector.
-        # Retry only for that compatibility path; real selector failures still surface.
-        if kwargs:
-            try:
-                return selector(items)
-            except TypeError:
-                pass
-        raise exc
+        signature = inspect.signature(selector)
+    except (TypeError, ValueError):
+        return True
+
+    parameters = signature.parameters
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return True
+    return all(
+        name in parameters
+        and parameters[name].kind
+        in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+        for name in kwargs
+    )
+
+
+def _selector_accepts_items_only(selector: SkillSelector) -> bool:
+    try:
+        inspect.signature(selector).bind(object())
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _can_prompt_for_confirmation() -> bool:

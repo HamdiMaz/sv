@@ -928,6 +928,27 @@ def test_cli_print_helpers_and_interactive_source_rows(tmp_path: Path, capsys):
     rows, entries = cli_module._interactive_source_skill_rows([first, second])
     assert rows[0][1] == "A:skills/alpha"
     assert cli_module._entry_for_interactive_row(rows[1], rows, entries) == second
+
+    duplicate_first = _source_skill(tmp_path, "Dup", "https://github.com/Org/Dup.git")
+    duplicate_second = SourceSkill(
+        name=duplicate_first.name,
+        description=duplicate_first.description,
+        repo_id=duplicate_first.repo_id,
+        repo_url=duplicate_first.repo_url,
+        repo_path=duplicate_first.repo_path,
+        source_path=duplicate_first.source_path,
+        source_relative_path=duplicate_first.source_relative_path,
+    )
+    duplicate_rows, duplicate_entries = cli_module._interactive_source_skill_rows(
+        [duplicate_first, duplicate_second]
+    )
+    assert duplicate_rows[0][:3] == duplicate_rows[1][:3]
+    assert (
+        cli_module._entry_for_interactive_row(
+            duplicate_rows[1], duplicate_rows, duplicate_entries
+        )
+        is duplicate_second
+    )
     assert cli_module._entry_for_interactive_row(["missing"], rows, entries) is None
 
     cli_module._print_source_skill_detail(second)
@@ -1023,6 +1044,19 @@ def test_cli_update_sync_duplicate_and_selector_helper_branches(tmp_path: Path, 
 
     with pytest.raises(TypeError, match="real failure"):
         cli_module._call_selector(bad_selector, ["alpha"], item_label=str)
+
+    keyword_type_error_calls = 0
+
+    def keyword_type_error_selector(items, **kwargs):
+        nonlocal keyword_type_error_calls
+        keyword_type_error_calls += 1
+        if kwargs:
+            raise TypeError("internal keyword failure")
+        return [items[0]]
+
+    with pytest.raises(TypeError, match="internal keyword failure"):
+        cli_module._call_selector(keyword_type_error_selector, ["alpha"], item_label=str)
+    assert keyword_type_error_calls == 1
 
 
 def test_cli_vault_replacement_warning_branches(tmp_path: Path, capsys):
