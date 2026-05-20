@@ -6,13 +6,14 @@ import sys
 
 import pytest
 
-from sv.catalog import SourceSkill
+from sv.catalog import SourceSkill, search_source_catalog
 from sv import cli as cli_module
 from sv.cli import _choose_skill, build_parser, handle
 from sv.config import SvPaths, load_config
 from sv.errors import SvError
 from sv.hashing import sha256_skill_directory
 from sv.manifest import load_manifest
+from sv.search import ranked_search_indices
 from sv.source import default_runner
 from sv.source_cache import load_cached_catalog, save_cached_catalog, _cached_catalog_hash
 from tests.helpers import (
@@ -88,9 +89,9 @@ def _source_skill(tmp_path: Path, name: str, repo_id: str, description: str) -> 
 
 def test_add_list_picker_provides_structured_skill_source_description_columns(tmp_path):
     matches = [
-        _source_skill(tmp_path, "alpha-docs", "Org/Short", "First alpha docs."),
-        _source_skill(tmp_path, "docs", "LongerOrg/Skills", "Second docs."),
-        _source_skill(tmp_path, "beta", "Org/Short", "docs in description."),
+        _source_skill(tmp_path, "zeta", "Tooling/Docs", "Reference manual."),
+        _source_skill(tmp_path, "omega", "Org/Other", "docs guide."),
+        _source_skill(tmp_path, "theta", "Org/Misc", "unrelated docs note."),
     ]
     selector_calls = []
 
@@ -110,18 +111,26 @@ def test_add_list_picker_provides_structured_skill_source_description_columns(tm
     kwargs = selector_calls[0][1]
     assert kwargs["header_columns"] == ["Skill", "Source", "Description"]
     assert kwargs["item_columns"](matches[0]) == [
-        "alpha-docs",
-        "Org/Short",
-        "First alpha docs.",
+        "zeta",
+        "Tooling/Docs",
+        "Reference manual.",
     ]
     assert kwargs["item_columns"](matches[1]) == [
-        "docs",
-        "LongerOrg/Skills",
-        "Second docs.",
+        "omega",
+        "Org/Other",
+        "docs guide.",
     ]
     ranker = kwargs["item_ranker"]
     assert callable(ranker)
-    assert ranker("docs") == [1, 0, 2]
+    item_label = kwargs["item_label"]
+    source_aware_order = [
+        matches.index(entry) for entry in search_source_catalog(matches, "docs")
+    ]
+    generic_fallback_order = ranked_search_indices(
+        "docs", [(item_label(match),) for match in matches]
+    )
+    assert source_aware_order != generic_fallback_order
+    assert ranker("docs") == source_aware_order
 
 
 def test_add_list_picker_keeps_one_argument_selector_compatibility(tmp_path):
@@ -139,8 +148,8 @@ def test_add_list_picker_keeps_one_argument_selector_compatibility(tmp_path):
 
 def test_duplicate_source_chooser_uses_aligned_source_table(monkeypatch, tmp_path):
     matches = [
-        _source_skill(tmp_path, "alpha", "Org/Short", "First alpha."),
-        _source_skill(tmp_path, "alpha", "LongerOrg/Skills", "Second alpha."),
+        _source_skill(tmp_path, "alpha", "Tooling/Docs", "Reference manual."),
+        _source_skill(tmp_path, "alpha", "Org/Other", "docs guide."),
     ]
     selector_calls = []
 
@@ -167,7 +176,14 @@ def test_duplicate_source_chooser_uses_aligned_source_table(monkeypatch, tmp_pat
     assert first_label.index(matches[0].description) == second_label.index(matches[1].description)
     ranker = kwargs["item_ranker"]
     assert callable(ranker)
-    assert ranker("alpha") == [0, 1]
+    source_aware_order = [
+        matches.index(entry) for entry in search_source_catalog(matches, "docs")
+    ]
+    generic_fallback_order = ranked_search_indices(
+        "docs", [(item_label(match),) for match in matches]
+    )
+    assert source_aware_order != generic_fallback_order
+    assert ranker("docs") == source_aware_order
 
 
 @pytest.mark.integration
