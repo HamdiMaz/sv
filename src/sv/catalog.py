@@ -113,6 +113,7 @@ class _CandidateSkillFile:
 class _CandidateSkillResult:
     entry: SourceSkill | None = None
     warning: str | None = None
+    error: SourceBackendError | None = None
 
 
 @dataclass(frozen=True)
@@ -508,6 +509,8 @@ def _catalog_entries_from_backend(
     for result in results:
         if result.warning is not None and warn is not None:
             warn(result.warning)
+        if result.error is not None:
+            raise result.error
         if result.entry is not None:
             entries.append(result.entry)
     return _BackendCatalogResult(entries=entries, index_hash=None)
@@ -548,18 +551,23 @@ def _catalog_entry_from_candidate(
     materialize_lock: RLockType,
 ) -> _CandidateSkillResult:
     try:
-        skill_text = backend.read_file(candidate.normalized_skill_file_path).decode(
-            "utf-8"
+        skill_bytes = backend.read_file(candidate.normalized_skill_file_path)
+    except SourceBackendError as exc:
+        return _CandidateSkillResult(error=exc)
+    try:
+        skill_text = skill_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return _CandidateSkillResult(
+            error=SourceBackendError(
+                "reading candidate SKILL.md file",
+                f"Failed to read SKILL.md for skill '{candidate.expected_folder}': "
+                f"{candidate.normalized_skill_file_path} is not valid UTF-8",
+            )
         )
+    try:
         metadata = parse_skill_text(
             skill_text, expected_folder=candidate.expected_folder
         )
-    except UnicodeDecodeError as exc:
-        raise SourceBackendError(
-            "reading candidate SKILL.md file",
-            f"Failed to read SKILL.md for skill '{candidate.expected_folder}': "
-            f"{candidate.normalized_skill_file_path} is not valid UTF-8",
-        ) from exc
     except InvalidSkillError as exc:
         return _CandidateSkillResult(
             warning=_invalid_skill_warning(

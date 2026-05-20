@@ -1642,6 +1642,68 @@ def test_source_repo_lock_key_falls_back_when_resolve_detects_symlink_loop(
     assert git_module._source_repo_lock_key(repo_path) == repo_path.absolute()
 
 
+def test_sparse_backend_read_file_serializes_prepare_and_local_read_for_same_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_path = tmp_path / "cache" / "repo"
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+    first_inside = threading.Event()
+    second_thread_started = threading.Event()
+    second_inside = threading.Event()
+    release = threading.Event()
+
+    def fake_prepare(*args, **kwargs):
+        return None
+
+    def fake_read(self, path):
+        nonlocal active, max_active
+        with active_lock:
+            active += 1
+            max_active = max(max_active, active)
+            if path == "skills/alpha/SKILL.md":
+                first_inside.set()
+            else:
+                second_inside.set()
+        assert release.wait(2), "test did not release metadata read"
+        with active_lock:
+            active -= 1
+        return b"---\nname: alpha\ndescription: Alpha.\n---\n"
+
+    monkeypatch.setattr(git_module, "_ensure_sparse_git_repo", fake_prepare)
+    monkeypatch.setattr(git_module.GitLocalSourceBackend, "read_file", fake_read)
+
+    first = GitTreelessPartialBackend("https://example.com/repo.git", repo_path, runner=FakeRunner([]))
+    second = GitTreelessPartialBackend("https://example.com/repo.git", repo_path, runner=FakeRunner([]))
+    errors: list[BaseException] = []
+
+    def run_backend(backend, path):
+        try:
+            if path == "skills/beta/SKILL.md":
+                second_thread_started.set()
+            backend.read_file(path)
+        except BaseException as exc:  # noqa: BLE001 - test captures worker failures
+            errors.append(exc)
+
+    thread_a = threading.Thread(target=run_backend, args=(first, "skills/alpha/SKILL.md"))
+    thread_b = threading.Thread(target=run_backend, args=(second, "skills/beta/SKILL.md"))
+    thread_a.start()
+    assert first_inside.wait(2), "first metadata read did not start"
+    thread_b.start()
+    assert second_thread_started.wait(2), "second metadata read thread did not start"
+    assert not second_inside.wait(0.25), "second metadata read entered while first held same-repo lock"
+    release.set()
+    thread_a.join(2)
+    thread_b.join(2)
+
+    assert errors == []
+    assert second_inside.is_set(), "second metadata read never ran after first released"
+    assert max_active == 1
+
+
+
 def test_sparse_backend_materialization_serializes_same_repo_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

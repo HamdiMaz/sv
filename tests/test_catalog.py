@@ -146,6 +146,29 @@ class PeerWaitingReadBackend:
         raise AssertionError("catalog discovery must not materialize folders")
 
 
+class InvalidThenFailingCandidateBackend:
+    name = "invalid-then-failing"
+
+    def read_index(self) -> bytes | None:
+        return None
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        return ["skills/first/SKILL.md", "skills/broken/SKILL.md"]
+
+    def read_file(self, path: str) -> bytes:
+        if path == "skills/first/SKILL.md":
+            return b"---\nname: other\ndescription: Wrong folder.\n---\n"
+        if path == "skills/broken/SKILL.md":
+            raise SourceBackendError(
+                "reading candidate SKILL.md file",
+                "simulated metadata read failure",
+            )
+        raise AssertionError(f"unexpected read_file path: {path}")
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("catalog discovery must not materialize folders")
+
+
 class OutOfOrderInvalidSkillBackend:
     name = "out-of-order-invalid"
 
@@ -287,6 +310,31 @@ def test_build_source_catalog_from_backend_emits_parallel_warnings_in_candidate_
     assert "skills/first" in warnings[0]
     assert "skills/second" in warnings[1]
     assert completion_order.index("skills/second") < completion_order.index("skills/first")
+
+
+def test_build_source_catalog_from_backend_preserves_ordered_warnings_before_candidate_error(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    warnings: list[str] = []
+
+    result = build_source_catalog_from_backends(
+        [repo],
+        paths,
+        {repo.id: (InvalidThenFailingCandidateBackend(),)},
+        warn=warnings.append,
+        jobs=2,
+    )
+
+    assert result.entries == ()
+    assert len(result.failures) == 1
+    assert result.failures[0].backend == "invalid-then-failing"
+    assert result.failures[0].operation == "reading candidate SKILL.md file"
+    assert "simulated metadata read failure" in result.failures[0].detail
+    assert len(warnings) == 1
+    assert "skills/first" in warnings[0]
+    assert "does not match folder" in warnings[0]
 
 
 def test_build_source_catalog_from_backends_rejects_unsafe_alias_cache_paths_before_backend_work(
