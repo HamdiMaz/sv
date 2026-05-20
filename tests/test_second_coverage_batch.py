@@ -1072,7 +1072,7 @@ def test_cli_source_table_omits_numbered_choice_column(tmp_path: Path):
     assert lines[3].startswith("RepoB")
 
 
-def test_add_list_picker_labels_align_skill_source_description_columns(tmp_path: Path):
+def test_add_list_picker_columns_include_skill_source_description(tmp_path: Path):
     short = _source_skill(
         tmp_path, "RepoA", "https://github.com/Org/RepoA.git", name="a"
     )
@@ -1083,18 +1083,12 @@ def test_add_list_picker_labels_align_skill_source_description_columns(tmp_path:
         name="longer-name",
     )
 
-    labeler = cli_module._source_skill_picker_labeler([short, longer])
-    first_label = labeler(short)
-    second_label = labeler(longer)
+    first_columns = cli_module._source_skill_picker_columns(short)
+    second_columns = cli_module._source_skill_picker_columns(longer)
 
-    first_source_column = first_label.index(short.repo_id)
-    second_source_column = second_label.index(longer.repo_id)
-    first_description_column = first_label.index(short.description)
-    second_description_column = second_label.index(longer.description)
-
-    assert first_source_column == second_source_column
-    assert first_description_column == second_description_column
-    assert f"{short.repo_id}:a" not in first_label
+    assert first_columns == ["a", "RepoA", short.description]
+    assert second_columns == ["longer-name", "LongerRepo", longer.description]
+    assert f"{short.repo_id}:a" not in first_columns
 
 
 def test_duplicate_resolution_prompt_uses_checkbox_table_without_numbered_rows(
