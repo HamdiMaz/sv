@@ -8,8 +8,8 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | --- | --- | --- |
 | `sv init [folder]` | You want to create a skill-vault repository scaffold. | Initializes the current directory or the optional target folder and makes nested vaults detectable as Git repos. |
 | `sv status` | You want local managed-skill state. | Reports modified, update-available, orphan, missing/invalid target, index, and README status for projects, skill-vaults, or global source context. Global source index/catalog hashes are abbreviated to the first 12 digest characters for readable tables; full hashes stay in `~/.sv/manifest.toml`. |
-| `sv list` | You want to see available source skills. | Uses fresh cached metadata when available, refreshes lazily when it expires, and supports `--refresh` to force a source refresh. If no repos are configured, prints the `sv repo add` next step. TTY output opens a read-only browser with filtering and Enter-for-details; non-TTY output prints the compact table and duplicate-name `Add as` section. |
-| `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser so Enter can show details. |
+| `sv list` | You want to see available source skills. | Uses fresh cached metadata when available, refreshes lazily when it expires, and supports `--refresh` to force a source refresh. If no repos are configured, prints the `sv repo add` next step. TTY output opens an interactive browser where Enter opens an inline detail page, detail `a` adds the shown skill and shows the add result/status, detail `q`/Esc returns to the list, and list `q`/Esc exits; non-TTY output prints the compact table and duplicate-name `Add as` section. |
+| `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser where Enter opens an inline detail page, detail `a` adds the shown skill and shows the add result/status, detail `q`/Esc returns to the list, and list `q`/Esc exits. |
 | `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
 | `sv add <repo>:<skill>` or `sv add <repo>:<path/to/skill>` | Multiple repos or source paths provide the same skill name. | Copy the exact `Add as` value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Use Space to select and Enter to confirm. |
@@ -31,7 +31,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv repo add <owner/repo>` | Add a GitHub source repo. |
 | `sv repo add <path-or-url>` | Add a local or Git URL source repo. |
 | `sv repo add <repo> --skills-path <path>` | Add a source repo with one bounded discovery root. Repeat `--skills-path` to scan multiple repo-relative skill roots. |
-| `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skills; Enter on a skill installs it; `a` installs all non-conflicting skills from that repo. |
+| `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skill browser. In the repo skill browser, list-mode `a` remains add-all for non-conflicting skills from that repo; Enter opens a detail page, detail-mode `a` adds only the shown skill and shows the add result/status, detail `q`/Esc returns to the repo skill list, and list `q`/Esc backtracks or exits. |
 | `sv repo -l` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
 | `sv repo remove -l` | Choose one or more source repos to remove from an interactive list. Use `--yes` to skip the confirmation prompt. |
@@ -57,7 +57,7 @@ Use `sv search <query>` when you know part of a skill's purpose, source repo, or
 sv search find-docs
 ```
 
-Search is case-insensitive across skill name, description, repo, and source path. It uses lightweight fuzzy matching for skill names, repo IDs, aliases, and source paths, while descriptions match by text substring. In non-interactive output, matching skills are sorted by rank. In an interactive terminal, search opens the same read-only browser used by `sv list`, with `/` filtering and Enter for details.
+Search is case-insensitive across skill name, description, repo, and source path. It uses lightweight fuzzy matching for skill names, repo IDs, aliases, and source paths, while descriptions match by text substring. In non-interactive output, matching skills are sorted by rank. In an interactive terminal, search opens the same interactive browser used by `sv list`, with `/` filtering, Enter for an inline detail page, detail `a` to add the shown skill and show the add result/status, detail `q`/Esc to return to the list, and list `q`/Esc to exit.
 
 ## Duplicate skill names
 

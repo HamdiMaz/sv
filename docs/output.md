@@ -4,7 +4,7 @@
 
 ## Skill lists
 
-In an interactive terminal, `sv list` opens a read-only browser so you can move through source skills before choosing anything. In non-interactive output, or when the browser is unavailable, `sv list` shows one row per skill name so the main table stays easy to scan:
+In an interactive terminal, `sv list` opens an interactive browser so you can move through source skills before choosing anything. In non-interactive output, or when the browser is unavailable, `sv list` shows one row per skill name so the main table stays easy to scan:
 
 | Column | Meaning |
 | --- | --- |
@@ -55,7 +55,9 @@ Terminal control characters from repo metadata or skill descriptions are escaped
 
 ## Interactive table browser
 
-`sv list`, `sv search`, and TTY `sv repo list` output use the same inline table browser when stdin and stdout are interactive. Use ↑/↓ to move, ←/→ to page when available, `/` to filter rows, Enter to open details or the highlighted action, and `q` or Esc to go back. `sv list` and `sv search` details show focused skill metadata such as source, path, and description; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts.
+`sv list`, `sv search`, and TTY `sv repo list` output use the same inline table browser when stdin and stdout are interactive. In `sv list` and `sv search`, use ↑/↓ to move, ←/→ to page when available, and `/` to filter rows. Enter opens an inline detail page; detail `a` adds the shown skill and shows the add result/status, and detail `q`/Esc returns to the list. List `q`/Esc exits the browser. Detail pages show focused skill metadata such as source, path, and description; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts.
+
+In TTY `sv repo list`, Enter on a repo opens that repo's skill browser. In the repo skill browser, list-mode `a` still adds all non-conflicting skills from that repo. Enter opens a detail page, where detail-mode `a` adds only the shown skill, shows the add result/status, and detail `q`/Esc returns to the repo skill list. List `q`/Esc backtracks from the repo skill list to the repo list, then exits from the top-level repo list.
 
 ## Interactive picker output
 
