@@ -987,6 +987,71 @@ def test_cli_print_helpers_and_interactive_source_rows(tmp_path: Path, capsys):
     assert "no sv origin recorded" in capsys.readouterr().out
 
 
+def test_duplicate_rendered_rows_entry_for_interactive_row_maps_second_row_to_second_source_skill(tmp_path: Path):
+    first = _source_skill(tmp_path, "Dup", "https://github.com/Org/Dup.git")
+    second = SourceSkill(
+        name=first.name,
+        description=first.description,
+        repo_id=first.repo_id,
+        repo_url=first.repo_url,
+        repo_path=first.repo_path,
+        source_path=first.source_path,
+        source_relative_path=first.source_relative_path,
+    )
+
+    rows, entries = cli_module._interactive_source_skill_rows([first, second])
+
+    assert rows[0][:3] == rows[1][:3]
+    assert cli_module._entry_for_interactive_row(rows[1], rows, entries) is second
+
+
+def test_call_selector_one_argument_fallback_calls_selector_once():
+    calls = 0
+
+    def one_arg_selector(items):
+        nonlocal calls
+        calls += 1
+        return [items[0]]
+
+    assert cli_module._call_selector(one_arg_selector, ["alpha"], item_label=str) == ["alpha"]
+    assert calls == 1
+
+
+def test_call_selector_preserves_internal_type_error_and_calls_once():
+    calls = 0
+
+    def selector_with_internal_type_error(items, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise TypeError("internal type error")
+
+    with pytest.raises(TypeError, match="internal type error"):
+        cli_module._call_selector(
+            selector_with_internal_type_error, ["alpha"], item_label=str
+        )
+    assert calls == 1
+
+
+def test_source_skill_ranker_returns_original_indices_for_duplicate_equal_entries(tmp_path: Path):
+    repeated = _source_skill(tmp_path, "Rank", "https://github.com/Org/Rank.git")
+    equal_but_distinct = SourceSkill(
+        name=repeated.name,
+        description=repeated.description,
+        repo_id=repeated.repo_id,
+        repo_url=repeated.repo_url,
+        repo_path=repeated.repo_path,
+        source_path=repeated.source_path,
+        source_relative_path=repeated.source_relative_path,
+    )
+    entries = [repeated, repeated, equal_but_distinct]
+
+    ranked_indices = cli_module._source_skill_ranker(entries)("alpha")
+
+    assert ranked_indices == [0, 1, 2]
+    assert [entries[index] is repeated for index in ranked_indices[:2]] == [True, True]
+    assert entries[ranked_indices[2]] is equal_but_distinct
+
+
 def test_cli_update_sync_duplicate_and_selector_helper_branches(tmp_path: Path, capsys):
     cli_module._print_update_result(SyncResult(updated=[], skipped=[], backfilled=[], no_skills_dir=True))
     assert "No Pi skills found to update" in capsys.readouterr().out
