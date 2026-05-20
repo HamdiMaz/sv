@@ -428,6 +428,42 @@ def test_init_command_rejects_existing_non_vault_index(tmp_path: Path, run_sv):
     assert "is not a skill-vault index" in result.stderr
 
 
+def test_init_command_from_non_git_project_index_subdirectory_rejects_without_side_effects(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    nested = project / "docs"
+    nested.mkdir(parents=True)
+    index_file = project / ".sv" / "index.toml"
+    index_file.parent.mkdir()
+    index_file.write_text(
+        "schema_version = 1\n"
+        'kind = "project-index"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-15T00:00:00Z"\n'
+        "skills = []\n",
+        encoding="utf-8",
+    )
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append(list(args))
+        if list(args) == ["git", "init"]:
+            assert cwd is not None
+            (cwd / ".git").mkdir()
+            return subprocess.CompletedProcess(list(args), 0, "", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init"]), cwd=nested, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 1
+    assert "is not a skill-vault index" in result.stderr
+    assert not (project / ".git").exists()
+    assert not (project / "skills").exists()
+    assert git_calls == []
+
+
 def test_init_command_reports_target_file_without_git_call(
     tmp_path: Path, run_sv
 ):

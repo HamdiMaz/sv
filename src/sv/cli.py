@@ -1729,11 +1729,11 @@ def _handle_init(
         folder, cwd, global_manifest_file=global_manifest_file
     )
     _prepare_init_target(target)
+    _reject_symlinked_init_metadata_dir(target)
+    document, should_write_index = _init_index_document(target)
+
     _ensure_init_git_repo(target, git_runner)
     _ensure_init_directory(target / "skills", "skills directory")
-    _reject_symlinked_init_metadata_dir(target)
-
-    document, should_write_index = _init_index_document(target)
     update_readme_skill_table(readme_path(target), document)
     if should_write_index:
         save_index(index_path(target), document)
