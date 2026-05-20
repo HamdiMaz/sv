@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import threading
 from typing import Any
 import unicodedata
 
@@ -1202,19 +1203,25 @@ def _catalog_for_source_command(
     )
     allow_source_fallback = policy.mode is not CacheMode.CACHE_ONLY
     repos_by_id = {repo.id: repo for repo in repos}
+    body_miss_refresh_lock = threading.Lock()
+    body_miss_refreshes_by_repo: dict[str, list[SourceSkill]] = {}
 
     def refresh_entry_on_body_miss(entry: SourceSkill) -> SourceSkill | None:
         repo = repos_by_id.get(entry.repo_id)
         if repo is None:
             return None
-        refreshed_catalog = get_catalog_with_cache(
-            [repo],
-            paths,
-            policy=CachePolicy.force_refresh(allow_stale_on_error=False),
-            now=datetime.now(UTC),
-            refresh_catalog=refresh,
-            warn=_print_stderr_warning,
-        )
+        with body_miss_refresh_lock:
+            refreshed_catalog = body_miss_refreshes_by_repo.get(repo.id)
+            if refreshed_catalog is None:
+                refreshed_catalog = get_catalog_with_cache(
+                    [repo],
+                    paths,
+                    policy=CachePolicy.force_refresh(allow_stale_on_error=False),
+                    now=datetime.now(UTC),
+                    refresh_catalog=refresh,
+                    warn=_print_stderr_warning,
+                )
+                body_miss_refreshes_by_repo[repo.id] = refreshed_catalog
         for candidate in refreshed_catalog:
             if (
                 candidate.name == entry.name

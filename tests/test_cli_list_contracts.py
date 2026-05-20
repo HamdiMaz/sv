@@ -586,7 +586,10 @@ def test_list_cached_flag_fails_without_cache(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    configure_source(source, project, home)
+    result = run_sv(
+        ["repo", "add", str(source), "--no-warm-cache"], cwd=project, home=home
+    )
+    assert result.exit_code == 0
 
     result = run_sv(["list", "--cached"], cwd=project, home=home)
 
