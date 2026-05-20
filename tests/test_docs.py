@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+import sv.cli as cli_module
 from tests.helpers import parse_sv
 
 
@@ -53,6 +54,7 @@ COMMON_DOC_COMMAND_EXAMPLES = [
     "sv update",
     "sv run -- --model fast",
     "sv repo add HamdiMaz/Skills",
+    "sv repo add HamdiMaz/Skills --no-warm-cache",
     "sv repo list",
     "sv repo remove HamdiMaz/Skills",
     "sv search find-docs",
@@ -195,6 +197,21 @@ def _normalize_markdown_link_target(raw_target: str) -> str:
     return urlsplit(_clean_markdown_link_target(raw_target)).path
 
 
+def _github_heading_slug(heading: str) -> str:
+    normalized = heading.strip().lower().replace("`", "")
+    normalized = re.sub(r"[^\w\s-]", "", normalized)
+    return re.sub(r"\s+", "-", normalized).strip("-")
+
+
+def _markdown_heading_slugs(path: Path) -> set[str]:
+    slugs: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        heading_match = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if heading_match:
+            slugs.add(_github_heading_slug(heading_match.group(1)))
+    return slugs
+
+
 def _markdown_link_targets(line: str) -> list[str]:
     targets = re.findall(r"\[[^\]]+\]\(([^)]+)\)", line)
     reference_definition = re.match(r"\s*\[[^\]]+\]:\s+(\S+)", line)
@@ -220,11 +237,13 @@ def _local_markdown_links() -> list[tuple[str, int, str]]:
             for raw_target in _markdown_link_targets(line):
                 cleaned_target = _clean_markdown_link_target(raw_target)
                 parsed = urlsplit(cleaned_target)
-                target = parsed.path
-                if not target or cleaned_target.startswith("#"):
-                    continue
                 if parsed.scheme or parsed.netloc:
                     continue
+                if not parsed.path and not parsed.fragment:
+                    continue
+                target = parsed.path
+                if parsed.fragment:
+                    target = f"{target}#{parsed.fragment}"
                 links.append((relative_document, line_number, target))
 
     return links
@@ -247,6 +266,32 @@ def test_documented_sv_commands_parse(document_path, line_number, command):
 @pytest.mark.parametrize("command", COMMON_DOC_COMMAND_EXAMPLES)
 def test_common_documented_sv_command_examples_parse(command):
     _parse_sv_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sv repo add ExampleOrg/Skills --no-warm-cache",
+        "sv add --cached find-docs",
+        "sv add --all --cached",
+        "sv repo list --cached",
+    ],
+)
+def test_documented_placeholder_sv_command_forms_parse_after_substitution(command):
+    _parse_sv_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "svx ExampleOrg/Skills --no-warm-cache",
+        "svx ExampleOrg/Skills --skills-path packages/skills",
+    ],
+)
+def test_documented_placeholder_svx_command_forms_parse_after_substitution(command):
+    args = shlex.split(command)
+    assert args[0] == "svx"
+    cli_module._build_svx_parser().parse_args(args[1:])
 
 
 def test_adapter_architecture_document_lists_expected_adapter_modules():
@@ -312,8 +357,10 @@ def test_command_reference_documents_repo_aliases_and_svx():
     assert "`sv repo -l`" in command_reference
     assert "exact alias for `sv repo list`" in command_reference
     assert "`svx <repo>`" in command_reference
+    assert "`svx <repo> --no-warm-cache`" in command_reference
     assert "console script alias for `sv repo add <repo>`" in command_reference
     assert "passes through repeatable `--skills-path` values" in command_reference
+    assert "warms source metadata by default" in command_reference
 
 
 def test_command_reference_documents_epic1_commands_and_flags():
@@ -326,6 +373,7 @@ def test_command_reference_documents_epic1_commands_and_flags():
         "`sv remove --all`",
         "`sv remove --all --yes`",
         "`sv repo add <repo> --skills-path <path>`",
+        "`sv repo add <repo> --no-warm-cache`",
         "`sv repo remove -l`",
     ]
 
@@ -388,6 +436,7 @@ def test_docs_describe_sv_jobs_parallelism_control() -> None:
     assert "1 through 64" in readme
     assert "at most 8 workers" in readme
     assert "deterministic and serialized" in readme
+    assert "non-index fallback metadata reads" in readme
 
     for snippet in [
         "## Parallelism",
@@ -396,6 +445,7 @@ def test_docs_describe_sv_jobs_parallelism_control() -> None:
         "update",
         "status",
         "index",
+        "fallback source metadata reads",
         "SV_JOBS=1",
         "1 through 64",
         "Invalid values fail before command work starts",
@@ -414,6 +464,43 @@ def test_docs_describe_sv_jobs_parallelism_control() -> None:
     assert "SV_JOBS=1 sv <command>" in usage_guide
     assert "stable order" in usage_guide
     assert "parallelizes independent work" in usage_guide
+
+
+def test_docs_describe_source_metadata_acceleration() -> None:
+    readme = README_PATH.read_text(encoding="utf-8")
+    command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")
+    troubleshooting = (DOCS_DIR / "troubleshooting.md").read_text(encoding="utf-8")
+    usage_guide = (DOCS_DIR / "usage.md").read_text(encoding="utf-8")
+    changelog = CHANGELOG_PATH.read_text(encoding="utf-8")
+
+    assert "machine-local catalog cache" in readme
+    assert "does not mutate remote sources or create `.sv/index.toml`" in readme
+    assert "source-published `.sv/index.toml`" in readme
+    assert "`--no-warm-cache`" in readme
+
+    quick_start = readme[readme.index("## Quick start") : readme.index("## Commands")]
+    assert "first `sv repo add` warms the local catalog cache by default" in quick_start
+    assert "`--no-warm-cache`" in quick_start
+    assert "config-only or offline setup" in quick_start
+
+    for snippet in [
+        "warm its source metadata cache by default",
+        "`sv repo add <repo> --no-warm-cache`",
+        "`svx <repo> --no-warm-cache`",
+        "Source-published indexes are the fastest path",
+        "same 24-hour catalog cache",
+        "fallback source metadata reads",
+    ]:
+        assert snippet in command_reference
+
+    assert "first `sv add -l` should usually open quickly" in usage_guide
+    assert "repo-add warm step" in usage_guide
+    assert "warning: could not warm source metadata cache" in troubleshooting
+    assert "gh auth login" in troubleshooting
+    assert "GH_TOKEN" in troubleshooting
+    assert "GITHUB_TOKEN" in troubleshooting
+    assert "--no-warm-cache" in troubleshooting
+    assert "source metadata acceleration" in changelog
 
 
 def test_docs_distinguish_update_from_force_sync():
@@ -502,7 +589,10 @@ def test_documented_local_markdown_links_exist(
     document_path: str, line_number: int, link_target: str
 ):
     source_path = _PROJECT_ROOT / document_path
-    target_path = (source_path.parent / link_target).resolve()
+    parsed_target = urlsplit(link_target)
+    target_path = (
+        source_path if not parsed_target.path else source_path.parent / parsed_target.path
+    ).resolve()
 
     assert target_path.is_relative_to(_PROJECT_ROOT), (
         f"{document_path}:{line_number} links outside the project: '{link_target}'."
@@ -511,6 +601,17 @@ def test_documented_local_markdown_links_exist(
         f"{document_path}:{line_number} links to missing local file "
         f"'{link_target}' resolved as '{target_path}'."
     )
+    if parsed_target.fragment and (
+        not parsed_target.path or target_path.suffix.lower() == ".md"
+    ):
+        assert parsed_target.fragment in _markdown_heading_slugs(target_path), (
+            f"{document_path}:{line_number} links to missing heading fragment "
+            f"'#{parsed_target.fragment}' in '{target_path.relative_to(_PROJECT_ROOT)}'."
+        )
+
+
+def test_local_markdown_links_keep_fragments_for_anchor_validation():
+    assert ("docs/usage.md", 47, "commands.md#global-cache") in _local_markdown_links()
 
 
 def test_readme_links_to_expected_local_docs():

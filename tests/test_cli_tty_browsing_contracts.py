@@ -848,7 +848,10 @@ def test_tty_repo_list_cached_flag_fails_without_cached_metadata_when_opening_re
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    configure_source(source, project, home)
+    add_result = run_sv(
+        ["repo", "add", str(source), "--no-warm-cache"], cwd=project, home=home
+    )
+    assert add_result.exit_code == 0
 
     result, skill_rows, browse_calls = _open_repo_list_and_capture_skill_rows(
         run_sv,

@@ -527,7 +527,9 @@ def test_status_at_home_with_global_manifest_shows_global_source_health(
     home = tmp_path / "home"
     home.mkdir()
     paths = SvPaths.from_home(home)
-    add_result = run_sv(["repo", "add", "Org/Skills"], cwd=home, home=home)
+    add_result = run_sv(
+        ["repo", "add", "Org/Skills", "--no-warm-cache"], cwd=home, home=home
+    )
     assert add_result.exit_code == 0
     save_global_manifest(
         paths,
@@ -580,7 +582,9 @@ def test_status_under_home_with_global_manifest_shows_global_source_health(
     outside = home / "work" / "scratch"
     outside.mkdir(parents=True)
     paths = SvPaths.from_home(home)
-    add_result = run_sv(["repo", "add", "Org/Skills"], cwd=outside, home=home)
+    add_result = run_sv(
+        ["repo", "add", "Org/Skills", "--no-warm-cache"], cwd=outside, home=home
+    )
     assert add_result.exit_code == 0
     save_global_manifest(
         paths,
@@ -617,7 +621,9 @@ def test_status_global_context_ignores_project_state_in_global_manifest_path(
     outside.mkdir()
     entry = _source_skill(tmp_path / "source", "alpha")
     add_project_skill(entry, home / ".pi" / "skills")
-    add_result = run_sv(["repo", "add", "Org/Skills"], cwd=outside, home=home)
+    add_result = run_sv(
+        ["repo", "add", "Org/Skills", "--no-warm-cache"], cwd=outside, home=home
+    )
     assert add_result.exit_code == 0
 
     result = run_sv(["status"], cwd=outside, home=home, git_runner=default_runner)
@@ -637,7 +643,9 @@ def test_status_outside_git_project_shows_global_source_health(
     outside = tmp_path / "outside"
     outside.mkdir()
     paths = SvPaths.from_home(home)
-    add_result = run_sv(["repo", "add", "Org/Skills"], cwd=outside, home=home)
+    add_result = run_sv(
+        ["repo", "add", "Org/Skills", "--no-warm-cache"], cwd=outside, home=home
+    )
     assert add_result.exit_code == 0
     save_global_manifest(
         paths,

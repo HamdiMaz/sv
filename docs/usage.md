@@ -38,11 +38,11 @@ sv sync
 sv run -- <pi args>
 ```
 
-Run commands from the project root where `.pi/skills` should be managed.
+Run commands from the project root where `.pi/skills` should be managed. After `sv repo add` succeeds, the first `sv add -l` should usually open quickly because repo-add warming has already populated the local catalog cache.
 
 ## Global cache behavior
 
-`sv` keeps source metadata in the global cache for 24 hours for normal browsing, install commands, and default source-aware status. `sv list`, `sv search`, TTY `sv repo list` nested skill browsing, all `sv add` modes, and plain `sv status` use fresh cached metadata and refresh lazily when metadata is missing or stale. Browsing and install commands warn while falling back to stale metadata if a refresh fails; `sv status` fails closed when a required refresh fails. Use `sv status --refresh` for an immediate current-source status check. `sv sync` and `sv update` remain refresh-first by default so they apply current source changes.
+`sv` keeps source metadata in the global cache for 24 hours for normal browsing, install commands, and default source-aware status. `sv repo add` and `svx` warm this local catalog cache by default, so the first `sv list`, `sv search`, or `sv add -l` after adding a repo can start from cached metadata. A repo that does not publish `.sv/index.toml` may still take time during that repo-add warm step because `sv` has to read fallback metadata from skill folders. `sv list`, `sv search`, TTY `sv repo list` nested skill browsing, all `sv add` modes, and plain `sv status` use fresh cached metadata and refresh lazily when metadata is missing or stale. Browsing and install commands warn while falling back to stale metadata if a refresh fails; `sv status` fails closed when a required refresh fails. Use `sv status --refresh` for an immediate current-source status check. `sv sync` and `sv update` remain refresh-first by default so they apply current source changes.
 
 Use `--cached` to avoid network and Git refreshes. Cached mode requires existing metadata and errors if metadata is missing; commands that copy or update skills also require a matching cached skill body before materializing a folder. Normal mode refreshes the source first when metadata exists but the matching skill body is missing, so stale metadata is not paired with newer source content. Cached skill bodies are pruned lazily after cache writes when unused for more than 30 days or when the body cache exceeds 256 MiB. See [global cache](commands.md#global-cache) for details.
 

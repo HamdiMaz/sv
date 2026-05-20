@@ -3,8 +3,11 @@ import sys
 
 import pytest
 
+from sv import cli as cli_module
 from sv.cli import build_parser, handle
 from sv.config import SvPaths, load_config
+from sv.errors import SvError
+from sv.source_cache import catalog_cache_path, load_cached_catalog
 from tests.helpers import configure_source, make_source_repo
 
 
@@ -26,6 +29,119 @@ class _TtyProxy:
         return self._wrapped.flush()
 
 
+def test_repo_add_warms_source_metadata_cache_by_default(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    source = make_source_repo(tmp_path)
+
+    exit_code = handle(parse(["repo", "add", str(source)]), cwd=project, home=home)
+
+    assert exit_code == 0
+    repo = load_config(SvPaths.from_home(home)).repos[0]
+    cached = load_cached_catalog(SvPaths.from_home(home), repo)
+    assert cached is not None
+    assert [entry.name for entry in cached.entries] == ["alpha", "beta"]
+    captured = capsys.readouterr()
+    assert "Added repo" in captured.out
+    assert captured.err == ""
+
+
+def test_repo_add_warm_cache_escapes_internal_cache_warnings(tmp_path: Path, capsys):
+    home = tmp_path / "home\x1b[2J"
+    project = tmp_path / "project"
+    project.mkdir()
+    source = make_source_repo(tmp_path)
+
+    first_exit_code = handle(
+        parse(["repo", "add", str(source), "--no-warm-cache"]),
+        cwd=project,
+        home=home,
+    )
+    assert first_exit_code == 0
+    capsys.readouterr()
+
+    paths = SvPaths.from_home(home)
+    repo = load_config(paths).repos[0]
+    cache_path = catalog_cache_path(paths, repo)
+    cache_path.parent.mkdir(parents=True)
+    cache_path.write_text("schema_version = 0\n")
+
+    exit_code = handle(parse(["repo", "add", str(source)]), cwd=project, home=home)
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert (
+        "Repo local-skill-source-" in captured.out
+        and "is already configured." in captured.out
+    ) or "Updated repo" in captured.out
+    assert "warning: ignoring invalid cached metadata" in captured.err
+    assert "\x1b" not in captured.err
+    assert "\\x1b[2J" in captured.err
+
+
+def test_repo_add_keeps_config_when_default_cache_warm_fails(
+    tmp_path: Path, capsys, monkeypatch
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def failing_catalog(*args, **kwargs):
+        raise SvError("refresh failed \x1b[2J")
+
+    monkeypatch.setattr(cli_module, "_catalog_for_source_command", failing_catalog)
+
+    exit_code = handle(parse(["repo", "add", "owner/repo"]), cwd=project, home=home)
+
+    assert exit_code == 0
+    assert [repo.id for repo in load_config(SvPaths.from_home(home)).repos] == [
+        "owner/repo"
+    ]
+    captured = capsys.readouterr()
+    assert "Added repo owner/repo" in captured.out
+    assert "warning: could not warm source metadata cache for owner/repo" in captured.err
+    assert "refresh failed \\x1b[2J" in captured.err
+    assert "\x1b" not in captured.err
+
+
+def test_repo_add_does_not_suppress_unexpected_warm_cache_errors(
+    tmp_path: Path, monkeypatch
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def failing_catalog(*args, **kwargs):
+        raise AssertionError("programming bug")
+
+    monkeypatch.setattr(cli_module, "_catalog_for_source_command", failing_catalog)
+
+    with pytest.raises(AssertionError, match="programming bug"):
+        handle(parse(["repo", "add", "owner/repo"]), cwd=project, home=home)
+
+
+def test_repo_add_no_warm_cache_skips_metadata_refresh(tmp_path: Path, capsys):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def forbidden_runner(args, cwd=None):
+        raise AssertionError(f"--no-warm-cache must not refresh source metadata: {args}")
+
+    exit_code = handle(
+        parse(["repo", "add", "owner/repo", "--no-warm-cache"]),
+        cwd=project,
+        home=home,
+        git_runner=forbidden_runner,
+    )
+
+    assert exit_code == 0
+    repo = load_config(SvPaths.from_home(home)).repos[0]
+    assert load_cached_catalog(SvPaths.from_home(home), repo) is None
+    assert "Added repo owner/repo" in capsys.readouterr().out
+
+
 def test_repo_add_accepts_repeated_skills_paths_in_order_without_duplicates(
     tmp_path: Path, capsys
 ):
@@ -39,6 +155,7 @@ def test_repo_add_accepts_repeated_skills_paths_in_order_without_duplicates(
                 "repo",
                 "add",
                 "owner/repo",
+                "--no-warm-cache",
                 "--skills-path",
                 "packages/agents/pi/skills",
                 "--skills-path",
@@ -64,7 +181,11 @@ def test_repo_add_existing_repo_appends_new_skills_paths(tmp_path: Path, capsys)
     project = tmp_path / "project"
     project.mkdir()
 
-    first = handle(parse(["repo", "add", "owner/repo"]), cwd=project, home=home)
+    first = handle(
+        parse(["repo", "add", "owner/repo", "--no-warm-cache"]),
+        cwd=project,
+        home=home,
+    )
     capsys.readouterr()
     second = handle(
         parse(
@@ -72,6 +193,7 @@ def test_repo_add_existing_repo_appends_new_skills_paths(tmp_path: Path, capsys)
                 "repo",
                 "add",
                 "https://github.com/owner/repo.git",
+                "--no-warm-cache",
                 "--skills-path",
                 "packages/agents/pi/skills",
             ]
@@ -96,7 +218,16 @@ def test_repo_add_rejects_invalid_skills_path_with_helpful_error(
     project.mkdir()
 
     exit_code = handle(
-        parse(["repo", "add", "owner/repo", "--skills-path", "../outside"]),
+        parse(
+            [
+                "repo",
+                "add",
+                "owner/repo",
+                "--no-warm-cache",
+                "--skills-path",
+                "../outside",
+            ]
+        ),
         cwd=project,
         home=home,
     )
@@ -121,6 +252,7 @@ def test_repo_list_does_not_show_skills_paths_by_default(tmp_path: Path, capsys)
                     "repo",
                     "add",
                     "owner/repo",
+                    "--no-warm-cache",
                     "--skills-path",
                     "packages/agents/pi/skills",
                 ]
@@ -147,7 +279,14 @@ def test_repo_dash_l_matches_repo_list_non_tty_output(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    assert handle(parse(["repo", "add", "owner/repo"]), cwd=project, home=home) == 0
+    assert (
+        handle(
+            parse(["repo", "add", "owner/repo", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
     capsys.readouterr()
 
     list_exit_code = handle(parse(["repo", "list"]), cwd=project, home=home)
@@ -168,7 +307,7 @@ def test_svx_main_matches_repo_add_output_and_config(tmp_path: Path, capsys, mon
     monkeypatch.setattr(cli_module.Path, "cwd", lambda: project)
     monkeypatch.setattr(cli_module.Path, "home", lambda: home)
 
-    exit_code = cli_module.svx_main(["owner/repo"])
+    exit_code = cli_module.svx_main(["owner/repo", "--no-warm-cache"])
 
     assert exit_code == 0
     assert [repo.id for repo in load_config(SvPaths.from_home(home)).repos] == [
@@ -179,14 +318,52 @@ def test_svx_main_matches_repo_add_output_and_config(tmp_path: Path, capsys, mon
     )
 
 
+def test_svx_main_warms_source_metadata_cache_by_default(
+    tmp_path: Path, capsys, monkeypatch
+):
+    from sv import cli as cli_module
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    source = make_source_repo(tmp_path)
+    project.mkdir()
+    monkeypatch.setattr(cli_module.Path, "cwd", lambda: project)
+    monkeypatch.setattr(cli_module.Path, "home", lambda: home)
+
+    exit_code = cli_module.svx_main([str(source)])
+
+    assert exit_code == 0
+    repo = load_config(SvPaths.from_home(home)).repos[0]
+    cached = load_cached_catalog(SvPaths.from_home(home), repo)
+    assert cached is not None
+    assert [entry.name for entry in cached.entries] == ["alpha", "beta"]
+    captured = capsys.readouterr()
+    assert "Added repo" in captured.out
+    assert captured.err == ""
+
+
 def test_repo_remove_interactive_requires_yes_in_non_tty_without_mutation(
     tmp_path: Path, capsys
 ):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    assert handle(parse(["repo", "add", "owner/one"]), cwd=project, home=home) == 0
-    assert handle(parse(["repo", "add", "owner/two"]), cwd=project, home=home) == 0
+    assert (
+        handle(
+            parse(["repo", "add", "owner/one", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
+    assert (
+        handle(
+            parse(["repo", "add", "owner/two", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
     capsys.readouterr()
 
     exit_code = handle(
@@ -210,8 +387,22 @@ def test_repo_remove_interactive_removes_selected_repos_with_confirmation(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    assert handle(parse(["repo", "add", "owner/one"]), cwd=project, home=home) == 0
-    assert handle(parse(["repo", "add", "owner/two"]), cwd=project, home=home) == 0
+    assert (
+        handle(
+            parse(["repo", "add", "owner/one", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
+    assert (
+        handle(
+            parse(["repo", "add", "owner/two", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
     capsys.readouterr()
     selector_calls = []
 
@@ -243,8 +434,22 @@ def test_repo_remove_interactive_declined_confirmation_leaves_config_unchanged(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    assert handle(parse(["repo", "add", "owner/one"]), cwd=project, home=home) == 0
-    assert handle(parse(["repo", "add", "owner/two"]), cwd=project, home=home) == 0
+    assert (
+        handle(
+            parse(["repo", "add", "owner/one", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
+    assert (
+        handle(
+            parse(["repo", "add", "owner/two", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
     capsys.readouterr()
     monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
@@ -297,7 +502,14 @@ def test_list_warns_and_skips_invalid_generic_skills(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
-    configure_source(source, project, home)
+    assert (
+        handle(
+            parse(["repo", "add", str(source), "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
     capsys.readouterr()
 
     exit_code = handle(parse(["list"]), cwd=project, home=home)

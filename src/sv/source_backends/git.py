@@ -243,37 +243,40 @@ class GitSparseSourceBackend:
     def read_file(self, path: str) -> bytes:
         operation = "reading remote file"
         normalized_path = _normalize_backend_relative_path(path)
-        self._prepare_checkout(
-            [
-                *_metadata_sparse_patterns(self._configured_skills_paths),
-                _sparse_file_pattern(normalized_path),
-            ],
-            operation,
-        )
-        return GitLocalSourceBackend(self.repo_path).read_file(normalized_path)
+        with _source_repo_lock(self.repo_path):
+            self._prepare_checkout_locked(
+                [
+                    *_metadata_sparse_patterns(self._configured_skills_paths),
+                    _sparse_file_pattern(normalized_path),
+                ],
+                operation,
+            )
+            return GitLocalSourceBackend(self.repo_path).read_file(normalized_path)
 
     def read_index(self) -> bytes | None:
         operation = "reading .sv/index.toml"
-        if not self._update and self.repo_path.exists():
+        with _source_repo_lock(self.repo_path):
+            if not self._update and self.repo_path.exists():
+                return GitLocalSourceBackend(self.repo_path).read_index()
+            self._prepare_checkout_locked([_sparse_file_pattern(".sv/index.toml")], operation)
             return GitLocalSourceBackend(self.repo_path).read_index()
-        self._prepare_checkout([_sparse_file_pattern(".sv/index.toml")], operation)
-        return GitLocalSourceBackend(self.repo_path).read_index()
 
     def list_candidate_skill_files(
         self, configured_skills_paths: Sequence[str] = ()
     ) -> list[str]:
         operation = "listing candidate SKILL.md files"
-        if not self._update and self._local_metadata_checkout_available(
-            configured_skills_paths
-        ):
+        with _source_repo_lock(self.repo_path):
+            if not self._update and self._local_metadata_checkout_available(
+                configured_skills_paths
+            ):
+                return GitLocalSourceBackend(self.repo_path).list_candidate_skill_files(
+                    configured_skills_paths
+                )
+            patterns = _metadata_sparse_patterns(configured_skills_paths)
+            self._prepare_checkout_locked(patterns, operation)
             return GitLocalSourceBackend(self.repo_path).list_candidate_skill_files(
                 configured_skills_paths
             )
-        patterns = _metadata_sparse_patterns(configured_skills_paths)
-        self._prepare_checkout(patterns, operation)
-        return GitLocalSourceBackend(self.repo_path).list_candidate_skill_files(
-            configured_skills_paths
-        )
 
     def _local_metadata_checkout_available(
         self, configured_skills_paths: Sequence[str]

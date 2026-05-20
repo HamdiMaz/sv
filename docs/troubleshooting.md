@@ -14,6 +14,8 @@ sv repo add HamdiMaz/Skills
 sv repo add SomeOrg/TeamSkills
 ```
 
+`sv repo add` warms the local source metadata cache by default. If that warm step warns but the repo was added, fix the network/auth issue and run `sv list --refresh` later, or use `--no-warm-cache` for offline/config-only setup.
+
 ## Duplicate skill names
 
 A Pi project can only contain one `.pi/skills/<name>` directory. If two source repos provide the same skill name, `sv list` keeps the main skill table compact with one `N sources` row and adds a separate `Duplicate skill names` section with each repo, description, and qualified `Add as` value. The duplicate section shows each skill name once and leaves continuation rows blank in that column, which is expected. Copy the `Add as` value for the source you want.
@@ -65,6 +67,8 @@ sv remove find-docs
 ## Global cache and offline mode
 
 If you see a warning like `using stale cached metadata`, `sv` tried to refresh source metadata, the refresh failed, and the command used an older cached catalog instead. Only browsing/install commands allow this fallback: `sv list`, `sv search`, and all `sv add` modes (`sv add`, `sv add -l`, and `sv add --all`).
+
+If `sv repo add` prints `warning: could not warm source metadata cache`, the repo configuration was still saved but the best-effort local cache warm failed. For private GitHub repos or higher rate limits, authenticate with `gh auth login` or set `GH_TOKEN`/`GITHUB_TOKEN`, then run a source-reading command such as `sv list --refresh`. For offline or config-only workflows, use `sv repo add <repo> --no-warm-cache` or `svx <repo> --no-warm-cache`.
 
 Use `--refresh` to force a new source check. Plain `sv status` uses fresh cached source metadata when available and refreshes only when metadata is missing or stale; use `sv status --refresh` when you need an immediate current-source status check. `sv sync`, `sv update`, and `sv status --refresh` fail closed on refresh errors unless you explicitly pass `--cached`.
 

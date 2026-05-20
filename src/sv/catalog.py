@@ -10,7 +10,7 @@ import unicodedata
 
 from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
-from sv.parallel import map_ordered
+from sv.parallel import configured_jobs, map_ordered
 from sv.project import normalize_skill_name
 from sv.terminal import escape_terminal_controls
 from sv.skills import InvalidSkillError, parse_skill_file, parse_skill_text
@@ -20,7 +20,9 @@ SourceBackend = source_backends_pkg.SourceBackend
 SourceBackendError = source_backends_pkg.SourceBackendError
 SourceBackendFailure = source_backends_pkg.SourceBackendFailure
 LocalGitSourceBackend = source_backends_pkg.LocalGitSourceBackend
-reject_symlinked_source_cache_path = source_backends_pkg.reject_symlinked_source_cache_path
+reject_symlinked_source_cache_path = (
+    source_backends_pkg.reject_symlinked_source_cache_path
+)
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,20 @@ class SourceCatalogResult:
 class _BackendCatalogResult:
     entries: list[SourceSkill]
     index_hash: str | None
+
+
+@dataclass(frozen=True)
+class _CandidateSkillFile:
+    normalized_skill_file_path: str
+    expected_folder: str
+    source_relative_path: str
+
+
+@dataclass(frozen=True)
+class _CandidateSkillResult:
+    entry: SourceSkill | None = None
+    warning: str | None = None
+    error: SourceBackendError | None = None
 
 
 @dataclass(frozen=True)
@@ -240,6 +256,7 @@ def _catalog_from_one_repo_backends(
     paths: SvPaths,
     repo_aliases: tuple[str, ...],
     backends: Sequence[SourceBackend],
+    candidate_jobs: int,
 ) -> _RepoBackendCatalogResult:
     repo_path = paths.source_repo_for(repo.id)
     reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
@@ -269,6 +286,7 @@ def _catalog_from_one_repo_backends(
                 repo_aliases,
                 backend,
                 warnings.append,
+                candidate_jobs,
             )
         except SourceBackendError as exc:
             failures.append(
@@ -380,6 +398,8 @@ def build_source_catalog_from_backends(
         seen_repo_paths.add(repo_path)
         reject_symlinked_source_cache_path(repo_path, paths.sources_dir)
 
+    repo_jobs, candidate_jobs = _catalog_worker_counts(len(unique_repos), jobs)
+
     def worker(repo: RepoConfig) -> _RepoBackendCatalogResult:
         source_key = repo_source_key(repo.url)
         return _catalog_from_one_repo_backends(
@@ -387,9 +407,10 @@ def build_source_catalog_from_backends(
             paths,
             aliases_by_source[source_key],
             tuple(backends_by_repo.get(repo.id, ())),
+            candidate_jobs,
         )
 
-    repo_results = map_ordered(unique_repos, worker, jobs=jobs)
+    repo_results = map_ordered(unique_repos, worker, jobs=repo_jobs)
 
     entries: list[SourceSkill] = []
     failures: list[SourceBackendFailure] = []
@@ -429,12 +450,24 @@ def build_source_catalog_from_backends(
     )
 
 
+def _catalog_worker_counts(repo_count: int, jobs: int | None) -> tuple[int, int]:
+    total_jobs = configured_jobs() if jobs is None else jobs
+    if total_jobs < 1 or total_jobs > 64:
+        raise SvError("SV_JOBS must be an integer between 1 and 64.")
+    if repo_count <= 1:
+        return 1, total_jobs
+    repo_jobs = min(total_jobs, repo_count)
+    candidate_jobs = max(1, total_jobs // repo_jobs)
+    return repo_jobs, candidate_jobs
+
+
 def _catalog_entries_from_backend(
     repo: RepoConfig,
     repo_path: Path,
     repo_aliases: tuple[str, ...],
     backend: SourceBackend,
     warn: Callable[[str], None] | None,
+    candidate_jobs: int,
 ) -> _BackendCatalogResult:
     index_content = backend.read_index()
     materialize_lock = threading.RLock()
@@ -457,7 +490,36 @@ def _catalog_entries_from_backend(
             index_hash=f"sha256:{hashlib.sha256(index_content).hexdigest()}",
         )
 
+    candidate_files = _candidate_skill_files_from_backend(backend, repo)
+
+    results = map_ordered(
+        candidate_files,
+        lambda candidate: _catalog_entry_from_candidate(
+            repo,
+            repo_path,
+            repo_aliases,
+            backend,
+            candidate,
+            materialize_lock,
+        ),
+        jobs=candidate_jobs,
+    )
+
     entries: list[SourceSkill] = []
+    for result in results:
+        if result.warning is not None and warn is not None:
+            warn(result.warning)
+        if result.error is not None:
+            raise result.error
+        if result.entry is not None:
+            entries.append(result.entry)
+    return _BackendCatalogResult(entries=entries, index_hash=None)
+
+
+def _candidate_skill_files_from_backend(
+    backend: SourceBackend, repo: RepoConfig
+) -> list[_CandidateSkillFile]:
+    candidates: list[_CandidateSkillFile] = []
     for skill_file_path in backend.list_candidate_skill_files(repo.skills_paths):
         try:
             normalized_skill_file_path = normalize_source_relative_path(skill_file_path)
@@ -470,41 +532,71 @@ def _catalog_entries_from_backend(
             continue
         expected_folder = skill_file_parts[-2]
         source_relative_path = PurePosixPath(*skill_file_parts[:-1]).as_posix()
-        try:
-            skill_text = backend.read_file(normalized_skill_file_path).decode("utf-8")
-            metadata = parse_skill_text(skill_text, expected_folder=expected_folder)
-        except UnicodeDecodeError as exc:
-            raise SourceBackendError(
-                "reading candidate SKILL.md file",
-                f"Failed to read SKILL.md for skill '{expected_folder}': "
-                f"{normalized_skill_file_path} is not valid UTF-8",
-            ) from exc
-        except InvalidSkillError as exc:
-            _warn_invalid_skill(warn, PurePosixPath(source_relative_path), exc)
-            continue
-        source_path, source_root = _source_path_for_backend(
-            backend, repo_path, source_relative_path
-        )
-        _reject_symlinked_source_path_or_ancestors(
-            source_path, source_root, "Source skills path"
-        )
-        entries.append(
-            SourceSkill(
-                name=metadata.name,
-                description=metadata.description,
-                repo_id=repo.id,
-                repo_url=repo.url,
-                repo_path=repo_path,
-                source_path=source_path,
+        candidates.append(
+            _CandidateSkillFile(
+                normalized_skill_file_path=normalized_skill_file_path,
+                expected_folder=expected_folder,
                 source_relative_path=source_relative_path,
-                repo_aliases=repo_aliases,
-                source_backend=backend.name,
-                _materializer=_backend_materializer(
-                    backend, source_relative_path, materialize_lock
-                ),
             )
         )
-    return _BackendCatalogResult(entries=entries, index_hash=None)
+    return candidates
+
+
+def _catalog_entry_from_candidate(
+    repo: RepoConfig,
+    repo_path: Path,
+    repo_aliases: tuple[str, ...],
+    backend: SourceBackend,
+    candidate: _CandidateSkillFile,
+    materialize_lock: RLockType,
+) -> _CandidateSkillResult:
+    try:
+        skill_bytes = backend.read_file(candidate.normalized_skill_file_path)
+    except SourceBackendError as exc:
+        return _CandidateSkillResult(error=exc)
+    try:
+        skill_text = skill_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return _CandidateSkillResult(
+            error=SourceBackendError(
+                "reading candidate SKILL.md file",
+                f"Failed to read SKILL.md for skill '{candidate.expected_folder}': "
+                f"{candidate.normalized_skill_file_path} is not valid UTF-8",
+            )
+        )
+    try:
+        metadata = parse_skill_text(
+            skill_text, expected_folder=candidate.expected_folder
+        )
+    except InvalidSkillError as exc:
+        return _CandidateSkillResult(
+            warning=_invalid_skill_warning(
+                PurePosixPath(candidate.source_relative_path), exc
+            )
+        )
+
+    source_path, source_root = _source_path_for_backend(
+        backend, repo_path, candidate.source_relative_path
+    )
+    _reject_symlinked_source_path_or_ancestors(
+        source_path, source_root, "Source skills path"
+    )
+    return _CandidateSkillResult(
+        entry=SourceSkill(
+            name=metadata.name,
+            description=metadata.description,
+            repo_id=repo.id,
+            repo_url=repo.url,
+            repo_path=repo_path,
+            source_path=source_path,
+            source_relative_path=candidate.source_relative_path,
+            repo_aliases=repo_aliases,
+            source_backend=backend.name,
+            _materializer=_backend_materializer(
+                backend, candidate.source_relative_path, materialize_lock
+            ),
+        )
+    )
 
 
 def _catalog_entries_from_index(
@@ -632,6 +724,14 @@ def _contains_unicode_format_character(value: str) -> bool:
     return any(unicodedata.category(char) == "Cf" for char in value)
 
 
+def _invalid_skill_warning(skill_dir: Path | PurePosixPath, error: Exception) -> str:
+    return (
+        "warning: skipping invalid skill at "
+        f"{_escape_control_characters(str(skill_dir))}: "
+        f"{_escape_control_characters(str(error))}"
+    )
+
+
 def _warn_invalid_skill(
     warn: Callable[[str], None] | None,
     skill_dir: Path | PurePosixPath,
@@ -639,11 +739,7 @@ def _warn_invalid_skill(
 ) -> None:
     if warn is None:
         return
-    warn(
-        "warning: skipping invalid skill at "
-        f"{_escape_control_characters(str(skill_dir))}: "
-        f"{_escape_control_characters(str(error))}"
-    )
+    warn(_invalid_skill_warning(skill_dir, error))
 
 
 def _escape_control_characters(value: str) -> str:

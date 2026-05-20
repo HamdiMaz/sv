@@ -43,7 +43,7 @@ Global cache metadata and skill bodies live under:
 ~/.sv/cache/v1/
 ```
 
-Source metadata for normal browsing/install commands and default `sv status` checks is cached for 24 hours. `sv list`, `sv search`, TTY `sv repo list` nested skill browsing, all `sv add` modes, and plain `sv status` use fresh cached metadata when available and refresh lazily when metadata is missing or stale. Use `sv status --refresh` when you need an immediate current-source status check. `sv sync` and `sv update` still refresh metadata by default before changing local skills. `--cached` requires existing metadata and errors if metadata is missing. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization. If cached metadata points at a skill whose body is not cached, normal mode refreshes that repo before source materialization; `--cached` fails instead of refreshing.
+Source metadata for normal browsing/install commands and default `sv status` checks is cached locally for 24 hours. `sv list`, `sv search`, TTY `sv repo list` nested skill browsing, all `sv add` modes, and plain `sv status` use fresh cached metadata when available and refresh lazily when metadata is missing or stale. `sv repo add` and `svx` warm this same machine-local catalog cache by default; `--no-warm-cache` skips only that best-effort local warm step. Use `sv status --refresh` when you need an immediate current-source status check. `sv sync` and `sv update` still refresh metadata by default before changing local skills. `--cached` requires existing metadata and errors if metadata is missing. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization. If cached metadata points at a skill whose body is not cached, normal mode refreshes that repo before source materialization; `--cached` fails instead of refreshing.
 
 Project Pi skills live under:
 
@@ -53,17 +53,19 @@ Project Pi skills live under:
 
 ## Parallel work
 
-`sv` runs independent source refreshes, bulk skill materialization preparation, and read-only skill hashing in parallel by default. Visible output, manifest writes, final skill-folder replacement, and cache metadata writes remain deterministic and serialized. Set `SV_JOBS=1` to disable worker threads for debugging, or set `SV_JOBS=N` to choose a worker count from 1 through 64. The default is bounded to at most 8 workers.
+`sv` runs independent source refreshes, non-index fallback metadata reads, bulk skill materialization preparation, and read-only skill hashing in parallel by default. Visible output, manifest writes, final skill-folder replacement, and cache metadata writes remain deterministic and serialized. Set `SV_JOBS=1` to disable worker threads for debugging, or set `SV_JOBS=N` to choose a worker count from 1 through 64. The default is bounded to at most 8 workers.
 
 ## Source repo configuration
 
-`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, or if it only contains `schema_version`, `sv` does not assume any source repo. In an interactive TTY it can prompt you to add a recommended source; in non-interactive use it reports `No skill source repos are configured` and tells you to run `sv repo add <repo>`. After you run `sv repo add`, only repos recorded in the config are used. `sv repo add` accepts GitHub shorthand such as `owner/repo`, GitHub HTTPS/SSH URLs, and local Git repository paths. Existing bare relative paths, and paths starting with `./`, `../`, `/`, or `~`, are resolved to absolute paths before they are saved, so global configuration keeps working no matter which project directory you run `sv` from later. If a local path looks like GitHub shorthand, use an explicit path prefix such as `./owner/repo` or `../repo`. Use `sv repo list` to see the derived repo ID used by qualified skill references and `sv repo remove`.
+`sv` reads global repo configuration from `~/.sv/config.toml`. If that file is missing, or if it only contains `schema_version`, `sv` does not assume any source repo. In an interactive TTY it can prompt you to add a recommended source; in non-interactive use it reports `No skill source repos are configured` and tells you to run `sv repo add <repo>`. After you run `sv repo add`, only repos recorded in the config are used. `sv repo add` accepts GitHub shorthand such as `owner/repo`, GitHub HTTPS/SSH URLs, and local Git repository paths. It warms source metadata into the local catalog cache by default so listing, searching, and adding can start from cached metadata; pass `--no-warm-cache` when you only want to update config. Existing bare relative paths, and paths starting with `./`, `../`, `/`, or `~`, are resolved to absolute paths before they are saved, so global configuration keeps working no matter which project directory you run `sv` from later. If a local path looks like GitHub shorthand, use an explicit path prefix such as `./owner/repo` or `../repo`. Use `sv repo list` to see the derived repo ID used by qualified skill references and `sv repo remove`.
 
 To use the public HamdiMaz skills repo plus a team repo, add both explicitly:
 
 ```bash
 sv repo add HamdiMaz/Skills
 sv repo add SomeOrg/TeamSkills
+# Config-only/offline setup:
+sv repo add SomeOrg/TeamSkills --no-warm-cache
 ```
 
 Removing the last repo writes `repos = []`, which intentionally disables all sources until you add another repo. Removing `~/.sv/config.toml` returns to first-run behavior, not to an implicit default source. Repo IDs and aliases must stay unambiguous; `sv` rejects config loads and `sv repo add` attempts that would make one reference point at different source repos.
@@ -78,6 +80,8 @@ sv sync
 sv run -- <pi args>
 ```
 
+The first `sv repo add` warms the local catalog cache by default; use `--no-warm-cache` to skip that warm step for config-only or offline setup.
+
 ## Commands
 
 Manage source repos:
@@ -85,11 +89,12 @@ Manage source repos:
 ```bash
 sv repo add HamdiMaz/Skills
 sv repo add SomeOrg/TeamSkills
+sv repo add SomeOrg/TeamSkills --no-warm-cache
 sv repo list
 sv repo remove SomeOrg/TeamSkills
 ```
 
-`sv repo remove` updates global configuration only. It does not delete cached source clones or remove project skills that were already installed from that repo. In TTY `sv repo list`, Enter on a repo opens that repo's skill browser. In the repo skill browser, list-mode `a` adds all non-conflicting skills from that repo, Enter opens a detail page, detail-mode `a` adds only the shown skill and shows the add result/status, detail `q`/Esc returns to the repo skill list, and list `q`/Esc backtracks or exits.
+`sv repo add` and `svx <repo>` warm source metadata into the local catalog cache by default; `svx <repo> --no-warm-cache` and `sv repo add <repo> --no-warm-cache` skip that best-effort warm step. `sv repo remove` updates global configuration only. It does not delete cached source clones or remove project skills that were already installed from that repo. In TTY `sv repo list`, Enter on a repo opens that repo's skill browser. In the repo skill browser, list-mode `a` adds all non-conflicting skills from that repo, Enter opens a detail page, detail-mode `a` adds only the shown skill and shows the add result/status, detail `q`/Esc returns to the repo skill list, and list `q`/Esc backtracks or exits.
 
 List valid skills available in configured source repos:
 
@@ -164,7 +169,7 @@ sv sync
 
 `sv sync` refreshes configured sources, then replaces managed project skill folders with the source copy recorded in the manifest. Local edits inside synced managed skill folders are overwritten. Unmanaged local skill folders without manifest entries are not adopted automatically; unique matches and local-only folders are skipped as local-only, while ambiguous matches report the possible sources. Use `sv list` when you only want to refresh source caches before listing or choosing skills.
 
-Treat configured source repositories and their generated `.sv/index.toml` files as trusted inputs. When a refreshed source index reports the same content hash already recorded in the project manifest, `sv sync`/`sv update` can skip re-materializing that skill as an optimization; a stale or malicious index can therefore hide source changes until the index is regenerated or the source is removed and re-added.
+Treat configured source repositories and their source-published `.sv/index.toml` files as trusted inputs. When a refreshed source index reports the same content hash already recorded in the project manifest, `sv sync`/`sv update` can skip re-materializing that skill as an optimization; a stale or malicious index can therefore hide source changes until the index is regenerated or the source is removed and re-added.
 
 Run Pi with global skill discovery disabled and only project skills enabled:
 
@@ -177,7 +182,7 @@ sv run -- --model fast
 
 ## Source repo layout
 
-sv discovers skills in immediate folders under `skills/`, one-level nested `*/skills/` folders, repeatable repo-relative roots configured with `sv repo add --skills-path`, and arbitrary repo-relative paths published through `.sv/index.toml` generated by `sv index`. Each skill folder must contain `SKILL.md` with frontmatter:
+sv discovers skills in immediate folders under `skills/`, one-level nested `*/skills/` folders, repeatable repo-relative roots configured with `sv repo add --skills-path`, and arbitrary repo-relative paths published through a source repo's `.sv/index.toml` generated by `sv index`. The published `.sv/index.toml` is source metadata committed by the source maintainer and is the fastest path because `sv` reads one metadata file. The catalog cache under `~/.sv/cache/v1/` is separate machine-local metadata populated by source reads and repo-add warming. `sv repo add` does not mutate remote sources or create `.sv/index.toml`; run and commit `sv index` in the source repository when you want to publish an index. Each skill folder must contain `SKILL.md` with frontmatter:
 
 When `sv index` sees multiple valid skill folders with identical `content_hash` and `skill_file_hash` values, it writes only one entry for that content. The retained entry is the skill closest to the repository root, with lexicographic `source_path` order as the tie-breaker. Skills that share a name but have different hashes remain separate path-aware entries.
 
