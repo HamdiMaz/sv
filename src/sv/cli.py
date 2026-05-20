@@ -100,6 +100,10 @@ from sv.ui import (
 SkillSelector = Callable[..., list[Any]]
 SkillChooser = Callable[[Sequence[SourceSkill]], SourceSkill | None]
 _PROJECT_STATE_IN_GLOBAL_MANIFEST = "must not contain project skill state"
+_TTY_DETAIL_RESET = "\x1b[0m"
+_TTY_DETAIL_BOLD = "\x1b[1m"
+_TTY_DETAIL_HEADER = "\x1b[38;5;183m"
+_TTY_DETAIL_RULE = "\x1b[38;5;60m"
 
 
 @dataclass(frozen=True)
@@ -1630,6 +1634,22 @@ def _display_width(value: str) -> int:
     return sum(_character_width(char) for char in value)
 
 
+def _print_tty_detail(title: str, rows: Sequence[tuple[str, str]]) -> None:
+    width = max(
+        [
+            _display_width(title),
+            *(_display_width(f"{label}: {value}") for label, value in rows),
+        ],
+        default=_display_width(title),
+    )
+    rule = "-" * width
+    print(f"{_TTY_DETAIL_RULE}{rule}{_TTY_DETAIL_RESET}")
+    print(f"{_TTY_DETAIL_HEADER}{_TTY_DETAIL_BOLD}{title}{_TTY_DETAIL_RESET}")
+    print(f"{_TTY_DETAIL_RULE}{rule}{_TTY_DETAIL_RESET}")
+    for label, value in rows:
+        print(f"{label}: {value}")
+
+
 def _character_width(char: str) -> int:
     if unicodedata.combining(char):
         return 0
@@ -2272,10 +2292,15 @@ def _entry_for_interactive_row(
 
 def _print_source_skill_detail(entry: SourceSkill) -> None:
     print()
-    print(f"Skill: {_escape_control_characters(entry.name)}")
-    print(f"Source: {_escape_control_characters(entry.repo_id)}")
-    print(f"Path: {_escape_control_characters(entry.source_relative_path)}")
-    print(f"Description: {_escape_control_characters(entry.description)}")
+    _print_tty_detail(
+        "Skill details",
+        [
+            ("Skill", _escape_control_characters(entry.name)),
+            ("Source", _escape_control_characters(entry.repo_id)),
+            ("Path", _escape_control_characters(entry.source_relative_path)),
+            ("Description", _escape_control_characters(entry.description)),
+        ],
+    )
 
 
 def _browse_tty_table(headers: Sequence[str], rows: Sequence[Sequence[str]], **kwargs):
