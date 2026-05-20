@@ -12,6 +12,9 @@ dist/
 # Virtual environments
 .venv
 
-# Dcos
+# Docs
 plans/
+
+# Local agent/brainstorming artifacts
+.superpowers/
 .worktrees
