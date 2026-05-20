@@ -379,3 +379,16 @@ def test_repo_cache_flags_are_rejected_for_non_list_subcommands(tmp_path: Path, 
 
     assert result.exit_code == 1
     assert "Use --refresh/--cached only with 'sv repo list' or 'sv repo -l'." in result.stderr
+
+
+def test_repo_list_rejects_conflicting_parent_and_subcommand_cache_flags(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["repo", "--refresh", "list", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Use either --refresh or --cached, not both." in result.stderr

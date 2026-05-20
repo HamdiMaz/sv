@@ -1930,6 +1930,8 @@ def _handle_repo(
         raise SvError("Use --refresh/--cached only with 'sv repo list' or 'sv repo -l'.")
     if repo_list_alias and args.repo_command not in {None, "list"}:
         raise SvError("Use 'sv repo -l' by itself or use a repo subcommand.")
+    if repo_is_list_command:
+        _repo_cache_policy_from_args(args)
 
     if args.repo_command == "add":
         try:
