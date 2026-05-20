@@ -350,6 +350,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Alias for 'sv repo list'; browse configured skill source repos in a TTY.",
     )
+    repo_cache_group = repo_parser.add_mutually_exclusive_group()
+    repo_cache_group.add_argument(
+        "--refresh",
+        dest="repo_refresh",
+        action="store_true",
+        help="Force refresh source metadata before browsing repos with 'sv repo -l'.",
+    )
+    repo_cache_group.add_argument(
+        "--cached",
+        dest="repo_cached",
+        action="store_true",
+        help="Use cached source metadata only when browsing repos with 'sv repo -l'.",
+    )
     repo_subparsers = repo_parser.add_subparsers(dest="repo_command", required=False)
     repo_add_parser = repo_subparsers.add_parser(
         "add",
@@ -390,7 +403,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Confirm selected repo removals without prompting.",
     )
-    repo_subparsers.add_parser("list", help="List configured skill source repos.")
+    repo_list_parser = repo_subparsers.add_parser(
+        "list",
+        help="List configured skill source repos.",
+        description=(
+            "List configured skill source repos. In a TTY, Enter on a repo opens "
+            "that repo's skills using cached metadata unless --refresh is used."
+        ),
+    )
+    _add_cache_policy_args(repo_list_parser)
 
     return parser
 
@@ -1874,6 +1895,25 @@ def _handle_cache(args: argparse.Namespace, paths: SvPaths) -> int:
     raise SvError(f"Unknown cache command: {args.cache_command}")
 
 
+def _repo_cache_flag_used(args: argparse.Namespace) -> bool:
+    return any(
+        getattr(args, name, False)
+        for name in ("repo_refresh", "repo_cached", "refresh", "cached")
+    )
+
+
+def _repo_cache_policy_from_args(args: argparse.Namespace) -> CachePolicy:
+    refresh = getattr(args, "repo_refresh", False) or getattr(args, "refresh", False)
+    cached = getattr(args, "repo_cached", False) or getattr(args, "cached", False)
+    if refresh and cached:
+        raise SvError("Use either --refresh or --cached, not both.")
+    if refresh:
+        return CachePolicy.force_refresh()
+    if cached:
+        return CachePolicy.cache_only()
+    return CachePolicy()
+
+
 def _handle_repo(
     args: argparse.Namespace,
     paths: SvPaths,
@@ -1885,6 +1925,9 @@ def _handle_repo(
     record_global_source_state: bool = True,
 ) -> int:
     repo_list_alias = getattr(args, "repo_list_alias", False)
+    repo_is_list_command = args.repo_command == "list" or repo_list_alias
+    if _repo_cache_flag_used(args) and not repo_is_list_command:
+        raise SvError("Use --refresh/--cached only with 'sv repo list' or 'sv repo -l'.")
     if repo_list_alias and args.repo_command not in {None, "list"}:
         raise SvError("Use 'sv repo -l' by itself or use a repo subcommand.")
 

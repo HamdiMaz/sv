@@ -368,3 +368,14 @@ def test_tty_repo_l_alias_cached_flag_uses_fresh_cached_metadata_when_opening_re
     assert ["alpha", repo_id, "Alpha skill."] in skill_rows
     assert ["beta", repo_id, "Beta skill."] in skill_rows
     assert ["gamma", repo_id, "Gamma skill."] not in skill_rows
+
+
+def test_repo_cache_flags_are_rejected_for_non_list_subcommands(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["repo", "--refresh", "add", "owner/repo"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Use --refresh/--cached only with 'sv repo list' or 'sv repo -l'." in result.stderr
