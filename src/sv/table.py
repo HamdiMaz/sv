@@ -21,7 +21,9 @@ VIEWPORT_SIZE = 5
 _RESET = "\x1b[0m"
 _BOLD = "\x1b[1m"
 _FG_CURSOR = "\x1b[38;5;231m"
+_FG_HEADER = "\x1b[38;5;183m"
 _FG_MUTED = "\x1b[38;5;245m"
+_FG_RULE = "\x1b[38;5;60m"
 _BG_CURSOR = "\x1b[48;5;24m"
 _HIDE_CURSOR = "\x1b[?25l"
 _SHOW_CURSOR = "\x1b[?25h"
@@ -263,13 +265,12 @@ def _render_interactive_table(
     terminal_width = _terminal_width()
     widths = _interactive_column_widths(state, terminal_width)
     separator = _column_separator(widths, terminal_width)
-    lines = [
-        _fit_text(_format_interactive_row(state.headers, widths, separator), terminal_width),
-        _fit_text(
-            _format_interactive_row(["-" * width for width in widths], widths, separator),
-            terminal_width,
-        ),
-    ]
+    lines = _format_interactive_header_lines(
+        state.headers,
+        widths,
+        separator,
+        terminal_width,
+    )
     if not state.visible_rows():
         lines.append(_fit_text("No rows to show", terminal_width))
     for row_index, row in state.visible_rows():
@@ -295,6 +296,20 @@ def _interactive_column_widths(state: TableState, terminal_width: int) -> list[i
     return _column_widths(headers, rows, None, None, terminal_width)
 
 
+def _interactive_column_widths_for_rows(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    terminal_width: int,
+) -> list[int]:
+    sanitized_headers = tuple(_sanitize_cell(header) for header in headers)
+    sanitized_rows = [tuple(_sanitize_cell(cell) for cell in row) for row in rows]
+    return _column_widths(sanitized_headers, sanitized_rows, None, None, terminal_width)
+
+
+def _interactive_column_separator(widths: Sequence[int], terminal_width: int) -> str:
+    return _column_separator(widths, terminal_width)
+
+
 def _format_interactive_row(
     row: Sequence[str], widths: Sequence[int], separator: str
 ) -> str:
@@ -303,6 +318,27 @@ def _format_interactive_row(
         value = _sanitize_cell(row[index]) if index < len(row) else ""
         cells.append(_pad_to_width(_fit_text(value, width), width))
     return separator.join(cells).rstrip()
+
+
+def _format_interactive_header_lines(
+    headers: Sequence[str],
+    widths: Sequence[int],
+    separator: str,
+    terminal_width: int,
+) -> list[str]:
+    rule = _fit_text(
+        _format_interactive_row(["-" * width for width in widths], widths, separator),
+        terminal_width,
+    )
+    header = _fit_text(
+        _format_interactive_row(headers, widths, separator),
+        terminal_width,
+    )
+    return [
+        f"{_FG_RULE}{rule}{_RESET}",
+        f"{_FG_HEADER}{_BOLD}{header}{_RESET}",
+        f"{_FG_RULE}{rule}{_RESET}",
+    ]
 
 
 def _fit_text(value: str, max_width: int) -> str:
