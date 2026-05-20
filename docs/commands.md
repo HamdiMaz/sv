@@ -31,13 +31,13 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv repo add <owner/repo>` | Add a GitHub source repo. |
 | `sv repo add <path-or-url>` | Add a local or Git URL source repo. |
 | `sv repo add <repo> --skills-path <path>` | Add a source repo with one bounded discovery root. Repeat `--skills-path` to scan multiple repo-relative skill roots. |
-| `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skills; Enter on a skill installs it; `a` installs all non-conflicting skills from that repo. |
-| `sv repo -l` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
+| `sv repo list [--refresh/--cached]` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skills using fresh cached metadata when available; Enter on a skill installs it; `a` installs all non-conflicting skills from that repo. Use `--refresh` to force a metadata refresh before opening repo skills, or `--cached` to avoid network and Git refreshes. |
+| `sv repo -l [--refresh/--cached]` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
 | `sv repo remove -l` | Choose one or more source repos to remove from an interactive list. Use `--yes` to skip the confirmation prompt. |
 | `svx <repo>` | console script alias for `sv repo add <repo>`; passes through repeatable `--skills-path` values. |
 
-`sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful.
+`sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. Use `sv repo -l` as a shorter spelling of `sv repo list`; it accepts the same cache flags. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful.
 
 ## Index publishing
 
@@ -86,7 +86,7 @@ Sources can publish skills under `skills/<name>`, one-level `*/skills/<name>` fo
 
 ## Global cache
 
-`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, and all `sv add` modes, including `sv add`, `sv add -l`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
+`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, TTY `sv repo list` nested skill browsing, and all `sv add` modes, including `sv add`, `sv add -l`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
 
 `sv sync`, `sv update`, and source-aware `sv status` are refresh-first by default so they continue to report and apply current source changes. They still use the cache manager for `--cached`, cache writes, body-cache reuse, and cache-only error handling, but they do not silently trust 24-hour-old metadata by default.
 

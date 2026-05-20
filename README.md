@@ -43,7 +43,7 @@ Global cache metadata and skill bodies live under:
 ~/.sv/cache/v1/
 ```
 
-Source metadata for normal browsing/install commands is cached for 24 hours. `sv sync`, `sv update`, and source-aware `sv status` refresh metadata by default to preserve current-source semantics. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization. If cached metadata points at a skill whose body is not cached, normal mode refreshes that repo before source materialization; `--cached` fails instead of refreshing.
+Source metadata for normal browsing/install commands is cached for 24 hours, including TTY `sv repo list` nested skill browsing. `sv sync`, `sv update`, and source-aware `sv status` refresh metadata by default to preserve current-source semantics. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization. If cached metadata points at a skill whose body is not cached, normal mode refreshes that repo before source materialization; `--cached` fails instead of refreshing.
 
 Project Pi skills live under:
 
