@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Unified interactive TTY browser and picker output around a framed table shell, with renderer-owned `Sel` columns for structured pickers, command-specific picker footers, and refreshed skill details.
 - Hardened skill materialization to reject nested source path names containing terminal control characters or Unicode format controls before copying them into projects, and made local Git source materialization preserve newly introduced symlinks until post-copy validation can reject them.
 - Hardened atomic TOML writes, project skill targets, and local materialization sources to reject symlinked destination paths or symlinked ancestors before writing/copying state.
 - Hardened `sv index` repository scans with a directory-depth limit so deeply nested non-skill trees fail closed before unbounded traversal.

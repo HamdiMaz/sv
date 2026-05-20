@@ -38,7 +38,7 @@ If your config accidentally repeats the same repo entry, the same repo URL, or a
 
 ## Tables and narrow terminals
 
-Tables wrap long values to fit the current terminal width. This keeps important columns visible when repo IDs, cache paths, or descriptions are long. Wrapped cell lines are indented under their original column. Repo-like values such as `owner/repo`, `repo:skill`, and `repo:path/to/skill` prefer clean wrap points at `/` and `:` so duplicate-source references stay easier to read and copy. In very narrow terminals, sv tightens column spacing and hard-wraps only as a last resort so table lines stay within the available width. Wide Unicode characters are measured by display width, so CJK characters and emoji do not unexpectedly overflow the table.
+Tables wrap long values to fit the current terminal width. This keeps important columns visible when repo IDs, cache paths, or descriptions are long. Wrapped cell lines are indented under their original column. Repo-like values such as `owner/repo`, `repo:skill`, and `repo:path/to/skill` prefer clean wrap points at `/` and `:` so duplicate-source references stay easier to read and copy. In very narrow terminals, sv tightens column spacing and hard-wraps only as a last resort so table lines stay within the available width. Wide Unicode characters are measured by display width, so CJK characters and emoji do not unexpectedly overflow the table. Non-interactive output stays plain text without ANSI styling and keeps the script-friendly table shape shown above.
 
 Example shape:
 
@@ -55,11 +55,15 @@ Terminal control characters from repo metadata or skill descriptions are escaped
 
 ## Interactive table browser
 
-`sv list`, `sv search`, and TTY `sv repo list` output use the same inline table browser when stdin and stdout are interactive. Use ↑/↓ to move, ←/→ to page when available, `/` to filter rows, Enter to open details or the highlighted action, and `q` or Esc to go back. `sv list` and `sv search` details show focused skill metadata such as source, path, and description; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts.
+Interactive TTY browsers render a compact table with a muted rule above and below the header row. Header labels use the interactive accent color, the current row keeps the blue highlight, and the footer lists the active keys. Browse-mode Enter opens details or runs the highlighted row action; `q` or Esc goes back.
+
+`sv list`, `sv search`, and TTY `sv repo list` use this browser when stdin and stdout are interactive. Use ↑/↓ to move, ←/→ to page when available, and `/` to filter rows. `sv list` and `sv search` details show focused skill metadata such as source, path, and description; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts. Long values are truncated to the current terminal width, and control characters from source names or descriptions are escaped before display.
 
 ## Interactive picker output
 
-`sv add -l` uses an inline picker instead of a full-screen interface. Each row is kept to one terminal line so arrow-key navigation remains predictable. A muted help line shows the visible range and controls: ↑/↓ move, ←/→ page, Space select, Enter confirm, and `q` cancel. Long skill labels and the help line are truncated to the current terminal width, and control characters from source names or descriptions are escaped before display.
+Interactive TTY pickers use the same table shell as browsers. Multi-select pickers add a first `Sel` column whose cells are `[ ]` and `[x]`. Space toggles the highlighted row, Enter confirms the selected rows for the command action, `/` filters, and `q` cancels.
+
+`sv add -l`, `sv remove -l`, and duplicate-source choices use inline pickers instead of a full-screen interface. Each row is kept to one terminal line so arrow-key navigation remains predictable. Command-specific footers list the available controls, including ↑/↓ movement and ←/→ paging when available. Long skill labels and footer text are truncated to the current terminal width, and control characters from source names or descriptions are escaped before display.
 
 ## Duplicate-name guidance
 
