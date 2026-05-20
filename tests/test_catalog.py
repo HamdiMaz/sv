@@ -4,6 +4,7 @@ import threading
 
 import pytest
 
+import sv.catalog as catalog_module
 from sv.catalog import (
     SourceSkill,
     build_source_catalog,
@@ -99,7 +100,9 @@ class BackendCallSentinel:
 
     def read_index(self) -> bytes | None:
         self.called.set()
-        raise AssertionError("safe backend should not start when another repo cache path is unsafe")
+        raise AssertionError(
+            "safe backend should not start when another repo cache path is unsafe"
+        )
 
     def list_candidate_skill_files(self, configured_skills_paths=()):
         raise AssertionError("safe backend should not list files")
@@ -109,6 +112,64 @@ class BackendCallSentinel:
 
     def materialize_folder(self, source_path: str, destination: Path) -> None:
         raise AssertionError("safe backend should not materialize folders")
+
+
+class PeerWaitingReadBackend:
+    name = "peer-waiting-read"
+
+    def __init__(self, first_started, second_started):
+        self.first_started = first_started
+        self.second_started = second_started
+
+    def read_index(self) -> bytes | None:
+        return None
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        return ["skills/alpha/SKILL.md", "skills/beta/SKILL.md"]
+
+    def read_file(self, path: str) -> bytes:
+        if path == "skills/alpha/SKILL.md":
+            self.first_started.set()
+            assert self.second_started.wait(2), (
+                "beta SKILL.md read did not start concurrently"
+            )
+            return b"---\nname: alpha\ndescription: Alpha skill.\n---\n"
+        if path == "skills/beta/SKILL.md":
+            self.second_started.set()
+            assert self.first_started.wait(2), (
+                "alpha SKILL.md read did not start concurrently"
+            )
+            return b"---\nname: beta\ndescription: Beta skill.\n---\n"
+        raise AssertionError(f"unexpected read_file path: {path}")
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("catalog discovery must not materialize folders")
+
+
+class OutOfOrderInvalidSkillBackend:
+    name = "out-of-order-invalid"
+
+    def read_index(self) -> bytes | None:
+        return None
+
+    def list_candidate_skill_files(self, configured_skills_paths=()):
+        return [
+            "skills/first/SKILL.md",
+            "skills/second/SKILL.md",
+            "skills/valid/SKILL.md",
+        ]
+
+    def read_file(self, path: str) -> bytes:
+        if path == "skills/first/SKILL.md":
+            return b"---\nname: other\ndescription: Wrong folder.\n---\n"
+        if path == "skills/second/SKILL.md":
+            return b"---\nname: second\n---\n"
+        if path == "skills/valid/SKILL.md":
+            return b"---\nname: valid\ndescription: Valid skill.\n---\n"
+        raise AssertionError(f"unexpected read_file path: {path}")
+
+    def materialize_folder(self, source_path: str, destination: Path) -> None:
+        raise AssertionError("catalog discovery must not materialize folders")
 
 
 class PeerWaitingBackend:
@@ -141,6 +202,91 @@ class PeerWaitingBackend:
 
     def materialize_folder(self, source_path: str, destination: Path) -> None:
         raise AssertionError("catalog discovery must not materialize folders")
+
+
+def test_build_source_catalog_from_backend_reads_candidate_skill_files_in_parallel(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    first_started = threading.Event()
+    second_started = threading.Event()
+
+    result = build_source_catalog_from_backends(
+        [repo],
+        paths,
+        {repo.id: (PeerWaitingReadBackend(first_started, second_started),)},
+        jobs=2,
+    )
+
+    assert [(entry.name, entry.repo_id) for entry in result.entries] == [
+        ("alpha", "Org/Skills"),
+        ("beta", "Org/Skills"),
+    ]
+    assert result.failures == ()
+
+
+def test_build_source_catalog_from_backend_emits_parallel_warnings_in_candidate_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    warnings: list[str] = []
+    second_completed = threading.Event()
+    completion_order: list[str] = []
+    completion_order_lock = threading.Lock()
+    original_catalog_entry_from_candidate = catalog_module._catalog_entry_from_candidate
+
+    def record_catalog_entry_from_candidate(
+        repo,
+        repo_path,
+        repo_aliases,
+        backend,
+        candidate,
+        materialize_lock,
+    ):
+        if candidate.source_relative_path == "skills/first":
+            assert second_completed.wait(2), (
+                "second candidate worker did not complete before first"
+            )
+
+        result = original_catalog_entry_from_candidate(
+            repo,
+            repo_path,
+            repo_aliases,
+            backend,
+            candidate,
+            materialize_lock,
+        )
+
+        with completion_order_lock:
+            completion_order.append(candidate.source_relative_path)
+        if candidate.source_relative_path == "skills/second":
+            second_completed.set()
+        return result
+
+    monkeypatch.setattr(
+        catalog_module,
+        "_catalog_entry_from_candidate",
+        record_catalog_entry_from_candidate,
+    )
+
+    result = build_source_catalog_from_backends(
+        [repo],
+        paths,
+        {repo.id: (OutOfOrderInvalidSkillBackend(),)},
+        warn=warnings.append,
+        jobs=2,
+    )
+
+    assert [(entry.name, entry.source_relative_path) for entry in result.entries] == [
+        ("valid", "skills/valid"),
+    ]
+    assert result.failures == ()
+    assert len(warnings) == 2
+    assert "skills/first" in warnings[0]
+    assert "skills/second" in warnings[1]
+    assert completion_order.index("skills/second") < completion_order.index("skills/first")
 
 
 def test_build_source_catalog_from_backends_rejects_unsafe_alias_cache_paths_before_backend_work(
