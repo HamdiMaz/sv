@@ -484,7 +484,8 @@ def _format_help_line(
         text = f"Showing {state.viewport_start + 1}-{state.visible_end} of {filtered_count}"
         if state.filter_query:
             text += f" matching {len(state.items)} • filter: {state.filter_query}"
-        text += f" • ↑/↓ move • ←/→ page • Space select • Enter {enter_action_label} • / filter • q cancel"
+        safe_enter_action_label = _sanitize_label(enter_action_label)
+        text += f" • ↑/↓ move • ←/→ page • Space select • Enter {safe_enter_action_label} • / filter • q cancel"
     elif state.items:
         text = f"Showing 0-0 of 0 matching {len(state.items)}"
         if state.filter_query:

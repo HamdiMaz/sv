@@ -294,6 +294,17 @@ def test_render_escapes_control_characters_in_item_labels():
     assert "alpha\\x1b[2J" in output
 
 
+def test_render_escapes_enter_action_label_in_footer():
+    state = SelectionState(["alpha"])
+    stdout = StringIO()
+
+    _render(state, stdout, enter_action_label="\x1b[2J")
+
+    output = stdout.getvalue()
+    assert "\x1b[2J" not in output
+    assert "Enter \\x1b[2J" in output
+
+
 def test_render_truncates_long_labels_and_footer_to_terminal_width(monkeypatch):
     monkeypatch.setenv("COLUMNS", "32")
     state = SelectionState(["alpha " + "description " * 10])

@@ -259,10 +259,16 @@ def test_add_same_repo_duplicates_in_tty_shows_paths_and_accepts_checkbox_select
     capsys.readouterr()
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    chooser_calls = []
+
+    def choose_second(matches, **kwargs):
+        chooser_calls.append((matches, kwargs))
+        return [matches[1]]
+
     monkeypatch.setattr(
         cli_module,
         "select_skills",
-        lambda matches, **kwargs: [matches[1]],
+        choose_second,
     )
 
     exit_code = handle(
@@ -276,14 +282,17 @@ def test_add_same_repo_duplicates_in_tty_shows_paths_and_accepts_checkbox_select
     output = capsys.readouterr().out
     chooser_output = output.split("Added Pi skill", maxsplit=1)[0]
     assert "Multiple source skills match 'alpha'" in chooser_output
-    assert "Repo" in chooser_output
-    assert "Path" in chooser_output
-    assert "Description" in chooser_output
-    assert "Add as" in chooser_output
-    assert "skills/alpha" in chooser_output
-    assert "team/skills/alpha" in chooser_output
-    assert f"{repo_id}:alpha" in chooser_output
-    assert f"{repo_id}:team/skills/alpha" in chooser_output
+    assert "Add as" not in chooser_output
+    assert len(chooser_calls) == 1
+    matches, kwargs = chooser_calls[0]
+    assert kwargs["enter_action_label"] == "choose"
+    assert kwargs["header_columns"] == ["Skill", "Source", "Description"]
+    assert kwargs["item_columns"](matches[0]) == ["alpha", repo_id, "Alpha skill."]
+    assert kwargs["item_columns"](matches[1]) == [
+        "alpha",
+        f"{repo_id}:team/skills/alpha",
+        "Team alpha.",
+    ]
     assert (
         project / ".pi" / "skills" / "alpha" / "notes.md"
     ).read_text() == "alpha from team\n"

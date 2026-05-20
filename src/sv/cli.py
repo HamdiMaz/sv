@@ -2354,7 +2354,8 @@ def _handle_add(
         raise SvError(_ambiguous_skill_error(skill_reference, matches))
 
     print(f"Multiple source skills match '{skill_reference}':")
-    print(_format_source_skill_choices(matches))
+    if _source_choice_table_needed(skill_chooser):
+        print(_format_source_skill_choices(matches))
     chosen = skill_chooser(matches)
     if chosen is None:
         print(
@@ -3465,7 +3466,8 @@ def _resolve_selected_duplicate_source_skills(
                 "Use repo:skill with 'sv add' when you need a specific source."
             )
         print(f"Multiple selected sources provide '{skill_name}':")
-        print(_format_source_skill_choices(entries))
+        if _source_choice_table_needed(skill_chooser):
+            print(_format_source_skill_choices(entries))
         chosen = skill_chooser(entries)
         if chosen is None:
             print(f"No skill selected for duplicate '{skill_name}'. No skills added.")
@@ -3497,6 +3499,10 @@ def _selected_duplicate_source_skill_groups(
 
 def _can_prompt_for_skill_choice() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _source_choice_table_needed(skill_chooser: SkillChooser) -> bool:
+    return skill_chooser is not _choose_skill or not _can_prompt_for_skill_choice()
 
 
 def _can_browse_tty() -> bool:

@@ -67,7 +67,7 @@ Interactive TTY pickers use the same table shell as browsers. Multi-select picke
 
 ## Duplicate-name guidance
 
-When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the duplicate section. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` shows a source-choice table with repo, description, and `Add as` columns, then asks you to choose one.
+When duplicate skill names exist across repos, `sv list` prints a wrapped tip below the duplicate section. In non-interactive shells, use the qualified `Add as` value. In an interactive terminal, `sv add <skill>` opens a framed source chooser with `Skill`, `Source`, and `Description` columns, then asks you to choose one.
 
 `sv add --all` is intentionally strict: it stops before copying anything if duplicate skill names exist. Add those skills explicitly with the exact `Add as` value so one source cannot overwrite another by accident.
 
