@@ -2481,6 +2481,12 @@ def _format_source_skill_detail(entry: SourceSkill, status: str | None = None) -
     return "\n".join(lines)
 
 
+def _source_skill_detail_status_style(status: str) -> str:
+    if status.startswith(("Added ", "Replaced ")):
+        return "success"
+    return ""
+
+
 def _format_source_skill_detail_card(
     entry: SourceSkill, status: str | None = None
 ) -> list[DetailLine]:
@@ -2497,7 +2503,12 @@ def _format_source_skill_detail_card(
             [
                 detail_line(""),
                 detail_line("Status", style="accent"),
-                detail_line(status, wrap=True, indent=2),
+                detail_line(
+                    status,
+                    style=_source_skill_detail_status_style(status),
+                    wrap=True,
+                    indent=2,
+                ),
             ]
         )
     return lines

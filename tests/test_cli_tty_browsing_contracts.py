@@ -476,7 +476,11 @@ def test_tty_detail_add_reports_escaped_refresh_errors(
         raise SvError("refresh\x1b failed")
 
     def fake_browse(_headers, rows, **kwargs):
-        statuses.append(kwargs["detail_actions"]["a"](rows[0]))
+        status = kwargs["detail_actions"]["a"](rows[0])
+        statuses.append(status)
+        detail = kwargs["detail_renderer"](rows[0], status)
+        assert getattr(detail[-1], "text") == "refresh\\x1b failed"
+        assert getattr(detail[-1], "style") == ""
         return None
 
     monkeypatch.setattr(cli_module, "_refresh_local_index_if_needed", fail_refresh)
@@ -668,6 +672,9 @@ def test_tty_repo_skill_browser_detail_action_installs_one_skill(
             assert not (project / ".pi" / "skills" / "alpha").exists()
             status = kwargs["detail_actions"]["a"](rows[0])
             assert "Added Pi skill 'alpha'" in status
+            status_detail = kwargs["detail_renderer"](rows[0], status)
+            assert getattr(status_detail[-1], "text") == status
+            assert getattr(status_detail[-1], "style") == "success"
         return None
 
     monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
