@@ -101,6 +101,8 @@ from tests.helpers import parse_sv
             ["repo", "list", "--help"],
             [
                 "usage: sv repo list",
+                "--refresh",
+                "--cached",
             ],
         ),
         (

@@ -31,13 +31,13 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv repo add <owner/repo>` | Add a GitHub source repo. |
 | `sv repo add <path-or-url>` | Add a local or Git URL source repo. |
 | `sv repo add <repo> --skills-path <path>` | Add a source repo with one bounded discovery root. Repeat `--skills-path` to scan multiple repo-relative skill roots. |
-| `sv repo list` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skill browser. In the repo skill browser, list-mode `a` remains add-all for non-conflicting skills from that repo; Enter opens a detail page, detail-mode `a` adds only the shown skill and shows the add result/status, detail `q`/Esc returns to the repo skill list, and list `q`/Esc backtracks or exits. |
-| `sv repo -l` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
+| `sv repo list [--refresh/--cached]` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skill browser using fresh cached metadata when available; `--refresh` forces a metadata refresh before opening repo skills, and `--cached` requires existing cached metadata while avoiding network and Git refreshes. In the repo skill browser, list-mode `a` remains add-all for non-conflicting skills from that repo; Enter opens a detail page, detail-mode `a` adds only the shown skill and shows the add result/status, detail `q`/Esc returns to the repo skill list, and list `q`/Esc backtracks or exits. |
+| `sv repo -l [--refresh/--cached]` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
 | `sv repo remove -l` | Choose one or more source repos to remove from an interactive list. Use `--yes` to skip the confirmation prompt. |
 | `svx <repo>` | console script alias for `sv repo add <repo>`; passes through repeatable `--skills-path` values. |
 
-`sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful.
+`sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. Use `sv repo -l` as a shorter spelling of `sv repo list`; it accepts the same cache flags. In non-TTY output, repo-list cache flags parse successfully but the plain repo table does not load source metadata. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful.
 
 ## Index publishing
 
@@ -86,13 +86,13 @@ Sources can publish skills under `skills/<name>`, one-level `*/skills/<name>` fo
 
 ## Global cache
 
-`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, and all `sv add` modes, including `sv add`, `sv add -l`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
+`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, TTY `sv repo list` nested skill browsing, and all `sv add` modes, including `sv add`, `sv add -l`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
 
 `sv sync`, `sv update`, and source-aware `sv status` are refresh-first by default so they continue to report and apply current source changes. They still use the cache manager for `--cached`, cache writes, body-cache reuse, and cache-only error handling, but they do not silently trust 24-hour-old metadata by default.
 
 Materialized skill folders are cached by content hash. Indexed sources provide the content hash in source metadata; non-index sources learn and record the hash after the first successful add/sync/update materialization. Reinstalling or syncing a skill can reuse a cached skill body when the cached hash matches the source metadata. If normal mode has cached metadata but no matching cached body, `sv` refreshes that repo's metadata before materializing from source, so stale metadata is not paired with a newer source body. Cached skill bodies are pruned lazily after cache writes: entries unused for more than 30 days are removed, and the cache is reduced to 256 MiB when it grows beyond that size.
 
-Use `--refresh` on source-reading commands to force metadata refresh. Use `--cached` to avoid network and Git refreshes. Commands that need to materialize a skill with `--cached` require a cached skill body; if the body is missing, rerun once without `--cached` to populate it. Use `sv cache status` to inspect cache usage and `sv cache clean` to prune cached skill bodies immediately.
+Use `--refresh` on source-reading commands to force metadata refresh. Use `--cached` to avoid network and Git refreshes; cached mode requires existing metadata and errors if that metadata is missing. Commands that need to materialize a skill with `--cached` also require a cached skill body; if the body is missing, rerun once without `--cached` to populate it. Use `sv cache status` to inspect cache usage and `sv cache clean` to prune cached skill bodies immediately.
 
 ## Parallelism
 
