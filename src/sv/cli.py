@@ -1544,7 +1544,7 @@ def _git_source_metadata(repo_path: Path) -> tuple[str | None, str | None]:
 def _run_git_metadata(command: list[str], repo_path: Path) -> str | None:
     try:
         result = default_runner(command, repo_path)
-    except OSError, SvError:
+    except (OSError, SvError):
         return None
     if result.returncode != 0:
         return None
@@ -2100,6 +2100,7 @@ def _handle_repo_browser(
         ["Repo", "URL", "Cache"],
         rows,
         on_detail=open_repo_skills,
+        search_title="Search repositories",
     )
     return 0
 
@@ -2135,6 +2136,7 @@ def _browse_repo_source_skills(
         key_help="a add all",
         clear_on_exit=True,
         row_ranker=_source_skill_ranker(entries),
+        search_title="Search skills",
     )
 
 
@@ -2155,6 +2157,7 @@ def _handle_repo_remove_interactive(
         skill_selector,
         repo_ids,
         item_label=lambda repo_id: _repo_removal_label(repos_by_id[repo_id]),
+        search_title="Search repositories",
     )
     if not selected_repo_ids:
         print("No repos selected.")
@@ -2397,6 +2400,7 @@ def _browse_source_skills(
         detail_renderer=render_detail,
         detail_actions={"a": add_detail},
         detail_key_help="a add skill • q back",
+        search_title="Search skills",
     )
     return 0
 
@@ -2640,6 +2644,7 @@ def _handle_add_interactive(
         header_columns=["Skill", "Source", "Description"],
         item_ranker=_source_skill_ranker(catalog),
         enter_action_label="add",
+        search_title="Search skills",
     )
     if not selected_skills:
         print("No skills selected.")
@@ -2951,6 +2956,7 @@ def _handle_remove_interactive(
         item_columns=lambda skill: _skill_removal_columns(entries_by_name[skill]),
         header_columns=["Skill", "Target", "Source/Status"],
         enter_action_label="remove",
+        search_title="Search skills",
     )
     if not selected_skills:
         print("No skills selected.")
@@ -3066,7 +3072,7 @@ def _selector_accepts_keyword_arguments(
 ) -> bool:
     try:
         signature = inspect.signature(selector)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return True
 
     parameters = signature.parameters
@@ -3085,7 +3091,7 @@ def _selector_accepts_keyword_arguments(
 def _selector_accepts_items_only(selector: SkillSelector) -> bool:
     try:
         inspect.signature(selector).bind(object())
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return False
     return True
 
@@ -3782,7 +3788,7 @@ def _can_browse_tty(stdin=None, stdout=None) -> bool:
     try:
         stdin.fileno()
         stdout.fileno()
-    except AttributeError, OSError:
+    except (AttributeError, OSError):
         return False
     return True
 
@@ -3936,6 +3942,7 @@ def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:
             header_columns=["Skill", "Source", "Description"],
             item_ranker=_source_skill_ranker(matches),
             enter_action_label="choose",
+            search_title="Search skills",
         )
         if not selected:
             return None

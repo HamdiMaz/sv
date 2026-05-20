@@ -216,6 +216,7 @@ def test_repo_remove_interactive_removes_selected_repos_with_confirmation(
     selector_calls = []
 
     def repo_selector(repos, **kwargs):
+        assert kwargs["search_title"] == "Search repositories"
         selector_calls.append((repos, kwargs))
         return ["owner/two"]
 

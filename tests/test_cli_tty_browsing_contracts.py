@@ -84,6 +84,7 @@ def test_tty_list_browses_source_skills_with_details_by_default(
         assert headers == ["Skill", "Source", "Description"]
         assert callable(kwargs.get("detail_renderer"))
         assert callable(kwargs.get("detail_actions", {}).get("a"))
+        assert kwargs["search_title"] == "Search skills"
         assert kwargs.get("on_detail") is None
         detail_text = kwargs["detail_renderer"](rows[0], None)
         assert "Skill: alpha" in detail_text
@@ -371,6 +372,7 @@ def test_tty_search_browses_ranked_matches_with_details_by_default(
         assert headers == ["Skill", "Source", "Description"]
         assert callable(kwargs.get("detail_renderer"))
         assert callable(kwargs.get("detail_actions", {}).get("a"))
+        assert kwargs["search_title"] == "Search skills"
         assert kwargs.get("on_detail") is None
         detail_text = kwargs["detail_renderer"](rows[0], None)
         assert "Skill: docs" in detail_text
@@ -583,6 +585,7 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
         elif headers == ["Skill", "Source", "Description"]:
             assert callable(kwargs.get("detail_renderer"))
             assert callable(kwargs.get("detail_actions", {}).get("a"))
+            assert kwargs["search_title"] == "Search skills"
             assert callable(kwargs.get("key_actions", {}).get("a"))
             assert kwargs.get("key_help") == "a add all"
             assert kwargs.get("clear_on_exit") is True
@@ -599,6 +602,8 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
         ["Repo", "URL", "Cache"],
         ["Skill", "Source", "Description"],
     ]
+    assert browse_calls[0][2]["search_title"] == "Search repositories"
+    assert browse_calls[1][2]["search_title"] == "Search skills"
     repo_rows = browse_calls[0][1]
     skill_rows = browse_calls[1][1]
     assert repo_rows[0][0] == repo_id
