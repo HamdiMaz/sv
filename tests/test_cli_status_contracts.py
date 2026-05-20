@@ -4,7 +4,7 @@ import shutil
 import pytest
 
 from sv.catalog import SourceSkill
-from sv.config import SvPaths
+from sv.config import SvPaths, load_config
 from sv.manifest import (
     GlobalSourceState,
     ManifestEntry,
@@ -14,6 +14,7 @@ from sv.manifest import (
 )
 from sv.project import add_project_skill
 from sv.source import default_runner
+from sv.source_cache import catalog_cache_path
 from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
@@ -117,7 +118,7 @@ def test_status_in_normal_project_shows_managed_pi_skill_states_and_excludes_man
 
     nested = project / "src" / "package"
     nested.mkdir(parents=True)
-    result = run_sv(["status"], cwd=nested, home=home, git_runner=default_runner)
+    result = run_sv(["status", "--refresh"], cwd=nested, home=home, git_runner=default_runner)
 
     assert result.exit_code == 0
     assert "Project sv-managed Pi skills" in result.stdout
@@ -286,7 +287,7 @@ def test_status_in_skill_vault_shows_vault_states_index_and_readme_freshness(
 
     nested = vault / "docs" / "examples"
     nested.mkdir(parents=True)
-    result = run_sv(["status"], cwd=nested, home=home, git_runner=default_runner)
+    result = run_sv(["status", "--refresh"], cwd=nested, home=home, git_runner=default_runner)
 
     assert result.exit_code == 0
     assert "Skill-vault sv-managed skills" in result.stdout
@@ -818,7 +819,40 @@ def test_status_in_empty_project_does_not_refresh_unreachable_sources(
     assert_no_raw_control_characters(result.stderr)
 
 
-def test_status_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path: Path, run_sv):
+def test_status_uses_fresh_cached_metadata_without_refreshing_source(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    shutil.rmtree(source / ".git")
+
+    def fail_git(args, cwd=None):
+        raise AssertionError(f"plain status with fresh cache must not refresh source: {args}")
+
+    result = run_sv(["status"], cwd=project, home=home, git_runner=fail_git)
+
+    assert result.exit_code == 0
+    assert "Project sv-managed Pi skills" in result.stdout
+    assert "alpha" in result.stdout
+    assert "update available" not in result.stdout
+    assert "orphan" not in result.stdout
+    manifest = load_manifest(project / ".pi" / "skills")
+    assert manifest["alpha"].update_available is False
+    assert manifest["alpha"].orphan is False
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_refresh_flag_refreshes_sources_even_when_metadata_cache_is_fresh(
+    tmp_path: Path, run_sv
+):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -830,11 +864,45 @@ def test_status_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path: Pa
     run_git(["add", "skills/alpha"], source)
     run_git(["commit", "-m", "update alpha"], source)
 
+    result = run_sv(["status", "--refresh"], cwd=project, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert "alpha" in result.stdout
+    assert "update available" in result.stdout
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
+
+
+def test_status_refreshes_source_when_metadata_cache_is_missing(
+    tmp_path: Path, run_sv
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+
+    assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
+    paths = SvPaths.from_home(home)
+    repo = load_config(paths).repos[0]
+    catalog_cache_path(paths, repo).unlink()
+    write_source_skill(source, "alpha", "Alpha skill.", "alpha v2\n")
+    run_git(["add", "skills/alpha"], source)
+    run_git(["commit", "-m", "update alpha"], source)
+
     result = run_sv(["status"], cwd=project, home=home, git_runner=default_runner)
 
     assert result.exit_code == 0
     assert "alpha" in result.stdout
     assert "update available" in result.stdout
+    manifest = load_manifest(project / ".pi" / "skills")
+    assert manifest["alpha"].update_available is True
+    assert_no_traceback(result.stdout)
+    assert_no_traceback(result.stderr)
+    assert_no_raw_control_characters(result.stdout)
+    assert_no_raw_control_characters(result.stderr)
 
 
 def test_status_cached_does_not_refresh_source(tmp_path: Path, run_sv):
