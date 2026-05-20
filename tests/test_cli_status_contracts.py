@@ -307,23 +307,24 @@ def test_status_in_skill_vault_shows_vault_states_index_and_readme_freshness(
     assert_no_raw_control_characters(result.stderr)
 
 
-def test_init_folder_inside_git_worktree_creates_detectable_nested_vault(
+def test_init_from_git_subdirectory_creates_detectable_root_vault(
     tmp_path: Path, run_sv
 ):
     home = tmp_path / "home"
-    parent = tmp_path / "parent"
-    parent.mkdir()
-    run_git(["init"], parent)
-
-    result = run_sv(["init", "vault"], cwd=parent, home=home, git_runner=default_runner)
-
-    vault = parent / "vault"
-    assert result.exit_code == 0
-    assert (vault / ".git").exists()
-    assert (vault / ".sv" / "index.toml").exists()
-
-    nested = vault / "docs" / "nested"
+    root = tmp_path / "parent"
+    nested = root / "docs" / "nested"
     nested.mkdir(parents=True)
+    run_git(["init"], root)
+
+    result = run_sv(["init"], cwd=nested, home=home, git_runner=default_runner)
+
+    assert result.exit_code == 0
+    assert (root / ".git").exists()
+    assert (root / ".sv" / "index.toml").exists()
+    assert (root / "skills").is_dir()
+    assert not (nested / ".sv").exists()
+    assert not (nested / "skills").exists()
+
     status = run_sv(["status"], cwd=nested, home=home, git_runner=default_runner)
 
     assert status.exit_code == 0

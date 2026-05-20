@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Redesigned interactive source skill detail pages as framed, color-accented cards with wrapped descriptions, safe styled metadata, status feedback, and the concise footer `a add • q back`.
+- Fixed `sv init` to target the enclosing repository root when run without a folder and reject `sv init <folder>` inside existing Git or sv-managed repositories instead of creating nested vaults.
 - Added visible ranked `/` search to interactive table browsers and multi-select pickers, including source-skill-aware ordering that matches `sv search` in source skill lists.
 - Unified interactive TTY browser and picker output around a framed table shell, with renderer-owned `Sel` columns for structured pickers, command-specific picker footers, and refreshed skill details.
 - Added inline skill detail pages for TTY list/search/repo browsing, including detail-level single-skill add actions while preserving repo list-mode add-all.
@@ -74,7 +75,6 @@
 - Fixed `sv add --all` to resolve duplicate source skills through the interactive duplicate chooser before copying, while preserving non-TTY duplicate failures.
 - Fixed project commands run from Git subdirectories to target the detected repository root instead of creating nested `.pi`/`.sv` state under the current subdirectory.
 - Fixed the TTY browsing contract test lint failure by removing an unused `SvPaths` import.
-- Fixed `sv init <folder>` inside an existing Git worktree to create a nested, detectable skill-vault Git repository and marked the PLAN alignment review item fixed.
 - Fixed `sv status` outside a project to show `unknown` for legacy global source states without a recorded backend instead of crashing.
 - Added CI release-readiness checks for linting, type checking, coverage, package builds, and built-wheel smoke validation.
 - Added a 95% coverage gate with documented full-release, fast local, integration, and security test commands.

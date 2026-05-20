@@ -191,7 +191,10 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "folder",
         nargs="?",
-        help="Target folder to initialize. Defaults to the current directory.",
+        help=(
+            "Target folder for a standalone vault when outside an existing repository. "
+            "Without a folder, initializes the enclosing repository root or current directory."
+        ),
     )
     index_parser = subparsers.add_parser(
         "index",
@@ -471,7 +474,12 @@ def handle(
             )
 
         if args.command == "init":
-            return _handle_init(args.folder, cwd=cwd, git_runner=git_runner)
+            return _handle_init(
+                args.folder,
+                cwd=cwd,
+                git_runner=git_runner,
+                global_manifest_file=paths.global_manifest_file,
+            )
 
         if args.command == "index":
             return _handle_index(cwd, args=args)
@@ -1712,14 +1720,22 @@ def _character_width(char: str) -> int:
     return 1
 
 
-def _handle_init(folder: str | None, cwd: Path, git_runner) -> int:
-    target = cwd if folder is None else cwd / folder
+def _handle_init(
+    folder: str | None,
+    cwd: Path,
+    git_runner,
+    *,
+    global_manifest_file: Path | None = None,
+) -> int:
+    target = _resolve_init_target(
+        folder, cwd, global_manifest_file=global_manifest_file
+    )
     _prepare_init_target(target)
+    _reject_symlinked_init_metadata_dir(target)
+    document, should_write_index = _init_index_document(target)
+
     _ensure_init_git_repo(target, git_runner)
     _ensure_init_directory(target / "skills", "skills directory")
-    _reject_symlinked_init_metadata_dir(target)
-
-    document, should_write_index = _init_index_document(target)
     update_readme_skill_table(readme_path(target), document)
     if should_write_index:
         save_index(index_path(target), document)
@@ -1727,6 +1743,65 @@ def _handle_init(folder: str | None, cwd: Path, git_runner) -> int:
 
     print(f"Initialized skill-vault repo at {_escape_output_path(target)}")
     return 0
+
+
+def _resolve_init_target(
+    folder: str | None, cwd: Path, *, global_manifest_file: Path | None = None
+) -> Path:
+    existing_root = _find_nearest_init_root(
+        cwd, global_manifest_file=global_manifest_file
+    )
+    if folder is None:
+        return existing_root or cwd
+    if existing_root is not None:
+        raise SvError(
+            "Refusing to initialize a nested skill-vault inside an existing repository. "
+            "Run 'sv init' to target the existing repository root, or run 'sv init <folder>' "
+            "from outside a repository to create a standalone vault."
+        )
+    return cwd / folder
+
+
+def _find_nearest_init_root(
+    cwd: Path, *, global_manifest_file: Path | None = None
+) -> Path | None:
+    git_root = _find_nearest_git_root(cwd)
+    if git_root is not None:
+        return git_root
+    return _find_nearest_sv_metadata_root(
+        cwd, global_manifest_file=global_manifest_file
+    )
+
+
+def _find_nearest_sv_metadata_root(
+    cwd: Path, *, global_manifest_file: Path | None = None
+) -> Path | None:
+    current = cwd.resolve()
+    for candidate in (current, *current.parents):
+        metadata_dir = candidate / ".sv"
+        if metadata_dir.is_symlink():
+            raise SvError(
+                "Refusing to use symlinked sv metadata directory at "
+                f"{_escape_output_path(metadata_dir)}."
+            )
+        path = index_path(candidate)
+        if path.is_symlink():
+            raise SvError(
+                f"Refusing to use symlinked sv index at {_escape_output_path(path)}."
+            )
+        if path.is_file():
+            load_index(path)
+            return candidate
+        manifest = project_manifest_path(candidate)
+        if manifest.is_symlink():
+            raise SvError(
+                f"Refusing to use symlinked sv manifest at {_escape_output_path(manifest)}."
+            )
+        if manifest.is_file() and _is_non_git_project_manifest(
+            manifest, global_manifest_file=global_manifest_file
+        ):
+            return candidate
+    return None
 
 
 def _prepare_init_target(target: Path) -> None:
