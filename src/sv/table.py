@@ -104,7 +104,6 @@ class TableState:
         self.cursor = 0
         self.viewport_start = 0
         self._clamp_view()
-        self._visible_indices_cache = None
 
     def set_filter(self, query: str) -> None:
         self.set_search(query)

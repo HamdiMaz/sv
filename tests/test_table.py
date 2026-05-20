@@ -228,7 +228,7 @@ def test_table_state_accepts_custom_row_ranker_with_original_indices():
     assert state.current_row() == ["find-docs"]
 
 
-def test_render_interactive_table_reuses_ranked_visible_indices(monkeypatch):
+def test_render_interactive_table_reuses_ranked_visible_indices_from_set_search(monkeypatch):
     monkeypatch.setenv("COLUMNS", "90")
     call_count = 0
 
@@ -243,9 +243,8 @@ def test_render_interactive_table_reuses_ranked_visible_indices(monkeypatch):
         [["alpha"], ["docs"], ["docs-helper"]],
         row_ranker=ranker,
     )
-    state.set_search("docs")
-    call_count = 0
 
+    state.set_search("docs")
     _render_interactive_table(state, StringIO())
 
     assert call_count == 1
