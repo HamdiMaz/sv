@@ -153,6 +153,26 @@ def test_scan_repo_for_index_deduplicates_overlapping_include_paths(tmp_path: Pa
     ]
 
 
+def test_scan_repo_for_index_deduplicates_identical_hashes_and_prefers_shallowest_path(
+    tmp_path: Path,
+) -> None:
+    _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
+    _write_skill(
+        tmp_path / "packages" / "agents" / "skills" / "alpha",
+        "alpha",
+        "Alpha skill.",
+    )
+
+    document = scan_repo_for_index(
+        tmp_path,
+        generated_at="2026-05-15T00:00:00Z",
+    )
+
+    assert [(entry.name, entry.source_path) for entry in document.skills] == [
+        ("alpha", "skills/alpha"),
+    ]
+
+
 def test_scan_repo_for_index_ignores_unrelated_unicode_format_paths(tmp_path: Path):
     _write_skill(tmp_path / "skills" / "alpha", "alpha", "Alpha skill.")
     (tmp_path / "notes\u202e.md").write_text("not a skill\n", encoding="utf-8")
