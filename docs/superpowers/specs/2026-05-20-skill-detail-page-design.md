@@ -60,7 +60,7 @@ Footer help should distinguish contexts clearly. For example:
 
 - Skill list footer: `Enter details • q back`
 - Repo skill list footer: `Enter details • a add all • q back`
-- Detail footer: `a add skill • q back`
+- Detail footer: `a add • q back`
 
 ## CLI behavior
 
