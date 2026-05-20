@@ -604,7 +604,7 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
             )
-            return _handle_list(catalog)
+            return _handle_list(catalog, cwd=cwd, adapter=adapter)
 
         if args.command == "search":
             config = _load_config_for_source_command(paths)
@@ -619,7 +619,7 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
             )
-            return _handle_search(args.query, catalog)
+            return _handle_search(args.query, catalog, cwd=cwd, adapter=adapter)
 
         if args.command == "sync":
             local_context = _detect_local_context(cwd)
@@ -2120,7 +2120,14 @@ def _escape_output_path(path: Path) -> str:
     return _escape_control_characters(str(path))
 
 
-def _handle_search(query: str, catalog: Sequence[SourceSkill]) -> int:
+def _handle_search(
+    query: str,
+    catalog: Sequence[SourceSkill],
+    *,
+    cwd: Path | None = None,
+    adapter: PiAdapter | None = None,
+    context: LocalContext | None = None,
+) -> int:
     if not catalog:
         print("No valid skills found in configured source repos.")
         return 0
@@ -2132,8 +2139,12 @@ def _handle_search(query: str, catalog: Sequence[SourceSkill]) -> int:
         return 0
 
     if _can_browse_tty():
+        if adapter is None or (context is None and cwd is None):
+            raise SvError("Interactive skill browsing requires a local context.")
         try:
-            return _browse_source_skills(matches)
+            return _browse_source_skills(
+                matches, cwd=cwd, adapter=adapter, context=context
+            )
         except SvError as exc:
             if not _is_tty_browser_unavailable_error(exc):
                 raise
@@ -2172,14 +2183,24 @@ def _handle_search(query: str, catalog: Sequence[SourceSkill]) -> int:
     return 0
 
 
-def _handle_list(catalog: Sequence[SourceSkill]) -> int:
+def _handle_list(
+    catalog: Sequence[SourceSkill],
+    *,
+    cwd: Path | None = None,
+    adapter: PiAdapter | None = None,
+    context: LocalContext | None = None,
+) -> int:
     if not catalog:
         print("No valid skills found in configured source repos.")
         return 0
 
     if _can_browse_tty():
+        if adapter is None or (context is None and cwd is None):
+            raise SvError("Interactive skill browsing requires a local context.")
         try:
-            return _browse_source_skills(catalog)
+            return _browse_source_skills(
+                catalog, cwd=cwd, adapter=adapter, context=context
+            )
         except SvError as exc:
             if not _is_tty_browser_unavailable_error(exc):
                 raise
@@ -2225,15 +2246,33 @@ def _handle_list(catalog: Sequence[SourceSkill]) -> int:
     return 0
 
 
-def _browse_source_skills(catalog: Sequence[SourceSkill]) -> int:
+def _browse_source_skills(
+    catalog: Sequence[SourceSkill],
+    *,
+    cwd: Path | None = None,
+    adapter: PiAdapter,
+    context: LocalContext | None = None,
+) -> int:
     rows, entries = _interactive_source_skill_rows(catalog)
 
-    def show_details(row: Sequence[str]) -> None:
+    def render_detail(row: Sequence[str], status: str | None) -> str:
         entry = _entry_for_interactive_row(row, rows, entries)
-        if entry is not None:
-            _print_source_skill_detail(entry)
+        if entry is None:
+            return _format_source_skill_unavailable_detail(status)
+        return _format_source_skill_detail(entry, status=status)
 
-    _browse_tty_table(_source_skill_headers(), rows, on_detail=show_details)
+    def add_detail(row: Sequence[str]) -> str:
+        return _source_skill_detail_action(
+            row, rows, entries, cwd=cwd, adapter=adapter, context=context
+        )
+
+    _browse_tty_table(
+        _source_skill_headers(),
+        rows,
+        detail_renderer=render_detail,
+        detail_actions={"a": add_detail},
+        detail_key_help="a add skill • q back",
+    )
     return 0
 
 
@@ -2270,12 +2309,50 @@ def _entry_for_interactive_row(
     return None
 
 
+def _format_source_skill_detail(entry: SourceSkill, status: str | None = None) -> str:
+    lines = [
+        f"Skill: {_escape_control_characters(entry.name)}",
+        f"Source: {_escape_control_characters(entry.repo_id)}",
+        f"Path: {_escape_control_characters(entry.source_relative_path)}",
+        f"Description: {_escape_control_characters(entry.description)}",
+    ]
+    if status is not None:
+        lines.append(f"Status: {_escape_control_characters(status)}")
+    return "\n".join(lines)
+
+
+def _format_source_skill_unavailable_detail(status: str | None = None) -> str:
+    safe_status = status or "Selected skill is no longer available."
+    return f"Status: {_escape_control_characters(safe_status)}"
+
+
+def _source_skill_detail_action(
+    row: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    entries: Sequence[SourceSkill],
+    *,
+    cwd: Path | None = None,
+    adapter: PiAdapter,
+    context: LocalContext | None = None,
+) -> str:
+    entry = _entry_for_interactive_row(row, rows, entries)
+    if entry is None:
+        return "Selected skill is no longer available."
+    try:
+        if context is None:
+            if cwd is None:
+                raise SvError("Interactive skill add requires a local context.")
+            context = _detect_local_context(cwd)
+        result = _add_skill_to_context(entry, adapter, context, allow_prompt=False)
+        _refresh_local_index_if_needed(context)
+    except SvError as exc:
+        return _escape_control_characters(str(exc))
+    return _format_add_result(result)
+
+
 def _print_source_skill_detail(entry: SourceSkill) -> None:
     print()
-    print(f"Skill: {_escape_control_characters(entry.name)}")
-    print(f"Source: {_escape_control_characters(entry.repo_id)}")
-    print(f"Path: {_escape_control_characters(entry.source_relative_path)}")
-    print(f"Description: {_escape_control_characters(entry.description)}")
+    print(_format_source_skill_detail(entry))
 
 
 def _browse_tty_table(headers: Sequence[str], rows: Sequence[Sequence[str]], **kwargs):
@@ -2430,11 +2507,15 @@ def _add_skill_to_context(
     context: LocalContext,
     *,
     replace_existing: bool = False,
+    allow_prompt: bool = True,
 ) -> AddSkillResult:
     _validate_local_index_refresh_config(context)
     if context.is_skill_vault:
         should_replace = _resolve_vault_replacement(
-            entry, context.vault_skills_dir, replace_existing=replace_existing
+            entry,
+            context.vault_skills_dir,
+            replace_existing=replace_existing,
+            allow_prompt=allow_prompt,
         )
         return add_vault_skill(
             entry, context.vault_skills_dir, replace_existing=should_replace
@@ -2474,7 +2555,11 @@ def _project_skills_dir(adapter: PiAdapter, context: LocalContext) -> Path:
 
 
 def _resolve_vault_replacement(
-    entry: SourceSkill, vault_skills_dir: Path, *, replace_existing: bool
+    entry: SourceSkill,
+    vault_skills_dir: Path,
+    *,
+    replace_existing: bool,
+    allow_prompt: bool = True,
 ) -> bool:
     _ensure_safe_vault_skills_dir_for_replacement(vault_skills_dir)
     skill_name = normalize_skill_name(entry.name)
@@ -2488,7 +2573,7 @@ def _resolve_vault_replacement(
         _warn_if_vault_skill_has_local_edits(skill_name, target, vault_skills_dir)
         return True
 
-    if not _can_prompt_for_vault_replacement():
+    if not allow_prompt or not _can_prompt_for_vault_replacement():
         raise SvError(
             f"Vault skill '{skill_name}' already exists at {_escape_output_path(target)}. "
             "Use --replace to replace it."
@@ -2574,7 +2659,7 @@ def _refresh_local_index_if_needed(context: LocalContext) -> None:
         update_readme_skill_table(readme_path(context.repo_root), document)
 
 
-def _print_add_result(result: AddSkillResult) -> None:
+def _format_add_result(result: AddSkillResult) -> str:
     requested_repo = (
         _escape_control_characters(result.repo_id) if result.repo_id else None
     )
@@ -2610,14 +2695,16 @@ def _print_add_result(result: AddSkillResult) -> None:
                 f" (no sv origin recorded; requested {requested_source}). "
                 f"Run 'sv remove {result.skill}' first if you want to replace it."
             )
-        print(message)
-        return
+        return message
 
     if result.status == "replaced":
-        print(f"Replaced {skill_label} '{result.skill}'{source} at {target}")
-        return
+        return f"Replaced {skill_label} '{result.skill}'{source} at {target}"
 
-    print(f"Added {skill_label} '{result.skill}'{source} to {target}")
+    return f"Added {skill_label} '{result.skill}'{source} to {target}"
+
+
+def _print_add_result(result: AddSkillResult) -> None:
+    print(_format_add_result(result))
 
 
 def _result_skill_label(target_kind: str) -> str:
