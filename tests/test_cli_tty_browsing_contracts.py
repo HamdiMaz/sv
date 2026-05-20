@@ -1,10 +1,13 @@
 from pathlib import Path
+import io
+import os
 import sys
 
 import pytest
 
 from sv import cli as cli_module
 from sv.config import derive_repo_id
+from sv.runtime import Runtime
 from tests.helpers import configure_source, make_source_repo, write_source_skill, run_git
 
 
@@ -23,6 +26,22 @@ class _TtyProxy:
 
     def fileno(self):
         return 0
+
+
+class _NonTty(io.StringIO):
+    def isatty(self):
+        return False
+
+
+def _non_tty_runtime(*, cwd: Path, home: Path) -> Runtime:
+    return Runtime(
+        cwd=cwd,
+        home=home,
+        env=os.environ,
+        stdin=_NonTty(),
+        stdout=_NonTty(),
+        stderr=_NonTty(),
+    )
 
 
 @pytest.mark.integration
@@ -72,6 +91,108 @@ def test_tty_list_browses_source_skills_with_details_by_default(
     assert "Source: " in result.stdout
     assert "Description: Alpha skill." in result.stdout
     assert "Add as:" not in result.stdout
+
+
+@pytest.mark.integration
+def test_list_uses_runtime_streams_for_browse_detection(
+    tmp_path: Path, capsys, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    browse_calls = []
+
+    def fake_browse(*_args, **_kwargs):
+        browse_calls.append((_args, _kwargs))
+        raise AssertionError("runtime non-TTY streams should disable browsing")
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+    capsys.readouterr()
+
+    result = cli_module.handle(
+        cli_module.build_parser().parse_args(["list"]),
+        cwd=project,
+        home=home,
+        runtime=_non_tty_runtime(cwd=project, home=home),
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert browse_calls == []
+    assert "Skill" in captured.out
+    assert "alpha" in captured.out
+
+
+@pytest.mark.integration
+def test_search_uses_runtime_streams_for_browse_detection(
+    tmp_path: Path, capsys, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    browse_calls = []
+
+    def fake_browse(*_args, **_kwargs):
+        browse_calls.append((_args, _kwargs))
+        raise AssertionError("runtime non-TTY streams should disable browsing")
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+    capsys.readouterr()
+
+    result = cli_module.handle(
+        cli_module.build_parser().parse_args(["search", "alpha"]),
+        cwd=project,
+        home=home,
+        runtime=_non_tty_runtime(cwd=project, home=home),
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert browse_calls == []
+    assert "Rank" in captured.out
+    assert "alpha" in captured.out
+
+
+@pytest.mark.integration
+def test_repo_list_uses_runtime_streams_for_browse_detection(
+    tmp_path: Path, capsys, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    browse_calls = []
+
+    def fake_browse(*_args, **_kwargs):
+        browse_calls.append((_args, _kwargs))
+        raise AssertionError("runtime non-TTY streams should disable browsing")
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+    capsys.readouterr()
+
+    result = cli_module.handle(
+        cli_module.build_parser().parse_args(["repo", "list"]),
+        cwd=project,
+        home=home,
+        runtime=_non_tty_runtime(cwd=project, home=home),
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert browse_calls == []
+    assert "Repo" in captured.out
+    assert derive_repo_id(str(source)) in captured.out
 
 
 @pytest.mark.integration

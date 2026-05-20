@@ -441,6 +441,7 @@ def handle(
                 git_runner=git_runner,
                 skill_selector=skill_selector,
                 record_global_source_state=record_global_source_state,
+                can_browse_tty=_can_browse_tty(runtime.stdin, runtime.stdout),
             )
 
         if args.command == "init":
@@ -605,7 +606,10 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
             )
-            return _handle_list(catalog)
+            return _handle_list(
+                catalog,
+                can_browse_tty=_can_browse_tty(runtime.stdin, runtime.stdout),
+            )
 
         if args.command == "search":
             config = _load_config_for_source_command(paths)
@@ -620,7 +624,11 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
             )
-            return _handle_search(args.query, catalog)
+            return _handle_search(
+                args.query,
+                catalog,
+                can_browse_tty=_can_browse_tty(runtime.stdin, runtime.stdout),
+            )
 
         if args.command == "sync":
             local_context = _detect_local_context(cwd)
@@ -1884,6 +1892,7 @@ def _handle_repo(
     git_runner,
     skill_selector: SkillSelector = select_skills,
     record_global_source_state: bool = True,
+    can_browse_tty: bool | None = None,
 ) -> int:
     repo_list_alias = getattr(args, "repo_list_alias", False)
     if repo_list_alias and args.repo_command not in {None, "list"}:
@@ -1922,7 +1931,9 @@ def _handle_repo(
             _print_no_source_repos_configured()
             return 0
 
-        if _can_browse_tty():
+        if can_browse_tty is None:
+            can_browse_tty = _can_browse_tty()
+        if can_browse_tty:
             try:
                 return _handle_repo_browser(
                     config.repos,
@@ -2122,7 +2133,12 @@ def _escape_output_path(path: Path) -> str:
     return _escape_control_characters(str(path))
 
 
-def _handle_search(query: str, catalog: Sequence[SourceSkill]) -> int:
+def _handle_search(
+    query: str,
+    catalog: Sequence[SourceSkill],
+    *,
+    can_browse_tty: bool | None = None,
+) -> int:
     if not catalog:
         print("No valid skills found in configured source repos.")
         return 0
@@ -2133,7 +2149,9 @@ def _handle_search(query: str, catalog: Sequence[SourceSkill]) -> int:
         print(f"No matching skills found for '{safe_query}'.")
         return 0
 
-    if _can_browse_tty():
+    if can_browse_tty is None:
+        can_browse_tty = _can_browse_tty()
+    if can_browse_tty:
         try:
             return _browse_source_skills(matches)
         except SvError as exc:
@@ -2174,12 +2192,16 @@ def _handle_search(query: str, catalog: Sequence[SourceSkill]) -> int:
     return 0
 
 
-def _handle_list(catalog: Sequence[SourceSkill]) -> int:
+def _handle_list(
+    catalog: Sequence[SourceSkill], *, can_browse_tty: bool | None = None
+) -> int:
     if not catalog:
         print("No valid skills found in configured source repos.")
         return 0
 
-    if _can_browse_tty():
+    if can_browse_tty is None:
+        can_browse_tty = _can_browse_tty()
+    if can_browse_tty:
         try:
             return _browse_source_skills(catalog)
         except SvError as exc:
@@ -3535,12 +3557,14 @@ def _can_prompt_for_skill_choice() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _can_browse_tty() -> bool:
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+def _can_browse_tty(stdin=None, stdout=None) -> bool:
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    if not (stdin.isatty() and stdout.isatty()):
         return False
     try:
-        sys.stdin.fileno()
-        sys.stdout.fileno()
+        stdin.fileno()
+        stdout.fileno()
     except (AttributeError, OSError):
         return False
     return True
