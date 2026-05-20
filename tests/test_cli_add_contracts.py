@@ -88,8 +88,9 @@ def _source_skill(tmp_path: Path, name: str, repo_id: str, description: str) -> 
 
 def test_add_list_picker_provides_structured_skill_source_description_columns(tmp_path):
     matches = [
-        _source_skill(tmp_path, "alpha", "Org/Short", "First alpha."),
-        _source_skill(tmp_path, "beta", "LongerOrg/Skills", "Second beta."),
+        _source_skill(tmp_path, "alpha-docs", "Org/Short", "First alpha docs."),
+        _source_skill(tmp_path, "docs", "LongerOrg/Skills", "Second docs."),
+        _source_skill(tmp_path, "beta", "Org/Short", "docs in description."),
     ]
     selector_calls = []
 
@@ -108,12 +109,19 @@ def test_add_list_picker_provides_structured_skill_source_description_columns(tm
     assert selector_calls[0][0] == matches
     kwargs = selector_calls[0][1]
     assert kwargs["header_columns"] == ["Skill", "Source", "Description"]
-    assert kwargs["item_columns"](matches[0]) == ["alpha", "Org/Short", "First alpha."]
-    assert kwargs["item_columns"](matches[1]) == [
-        "beta",
-        "LongerOrg/Skills",
-        "Second beta.",
+    assert kwargs["item_columns"](matches[0]) == [
+        "alpha-docs",
+        "Org/Short",
+        "First alpha docs.",
     ]
+    assert kwargs["item_columns"](matches[1]) == [
+        "docs",
+        "LongerOrg/Skills",
+        "Second docs.",
+    ]
+    ranker = kwargs["item_ranker"]
+    assert callable(ranker)
+    assert ranker("docs") == [1, 0, 2]
 
 
 def test_add_list_picker_keeps_one_argument_selector_compatibility(tmp_path):
@@ -157,6 +165,9 @@ def test_duplicate_source_chooser_uses_aligned_source_table(monkeypatch, tmp_pat
     assert header_label.index("Source") == first_label.index(matches[0].repo_id)
     assert header_label.index("Description") == first_label.index(matches[0].description)
     assert first_label.index(matches[0].description) == second_label.index(matches[1].description)
+    ranker = kwargs["item_ranker"]
+    assert callable(ranker)
+    assert ranker("alpha") == [0, 1]
 
 
 @pytest.mark.integration

@@ -2021,6 +2021,7 @@ def _browse_repo_source_skills(
         key_actions={"a": install_all},
         key_help="a install all",
         clear_on_exit=True,
+        row_ranker=_source_skill_ranker(entries),
     )
 
 
@@ -2233,8 +2234,33 @@ def _browse_source_skills(catalog: Sequence[SourceSkill]) -> int:
         if entry is not None:
             _print_source_skill_detail(entry)
 
-    _browse_tty_table(_source_skill_headers(), rows, on_detail=show_details)
+    _browse_tty_table(
+        _source_skill_headers(),
+        rows,
+        on_detail=show_details,
+        row_ranker=_source_skill_ranker(entries),
+    )
     return 0
+
+
+def _source_skill_ranker(entries: Sequence[SourceSkill]) -> Callable[[str], list[int]]:
+    positions_by_id: dict[int, list[int]] = {}
+    for index, entry in enumerate(entries):
+        positions_by_id.setdefault(id(entry), []).append(index)
+
+    def rank(query: str) -> list[int]:
+        used_by_id: dict[int, int] = {}
+        ranked_indices: list[int] = []
+        for entry in search_source_catalog(entries, query):
+            entry_id = id(entry)
+            used = used_by_id.get(entry_id, 0)
+            positions = positions_by_id.get(entry_id, [])
+            if used < len(positions):
+                ranked_indices.append(positions[used])
+                used_by_id[entry_id] = used + 1
+        return ranked_indices
+
+    return rank
 
 
 def _interactive_source_skill_rows(
@@ -2404,6 +2430,7 @@ def _handle_add_interactive(
         header_label=_source_skill_picker_header_label(catalog),
         item_columns=_source_skill_picker_columns,
         header_columns=["Skill", "Source", "Description"],
+        item_ranker=_source_skill_ranker(catalog),
     )
     if not selected_skills:
         print("No skills selected.")
@@ -3701,6 +3728,7 @@ def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:
             header_label=_source_skill_picker_header_label(matches),
             item_columns=_source_skill_picker_columns,
             header_columns=["Skill", "Source", "Description"],
+            item_ranker=_source_skill_ranker(matches),
         )
         if not selected:
             return None
