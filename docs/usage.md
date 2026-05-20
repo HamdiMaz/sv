@@ -52,7 +52,7 @@ Use `--cached` to avoid network and Git refreshes. Cached mode requires existing
 
 If no source repos are configured, `sv list` tells you to add one with `sv repo add <owner/repo>` instead of showing an empty skill table.
 
-In an interactive terminal, `sv list` opens an interactive browser. Use ↑/↓ to move and `/` to open a visible ranked search prompt. Enter opens an inline detail page with focused skill metadata such as source, path, and description. On the detail page, `a` adds the shown skill, shows the add result/status, and `q` or Esc returns to the list. In the list, `q` or Esc exits the browser.
+In an interactive terminal, `sv list` opens an interactive browser. Use ↑/↓ to move and `/` to open a visible ranked search prompt. Enter opens an inline detail card with the skill name, source, path, wrapped description, and concise footer `a add • q back`. On the detail page, `a` adds the shown skill, shows the add result/status, and `q` or Esc returns to the list. In the list, `q` or Esc exits the browser.
 
 In non-interactive output, or when the browser is unavailable, `sv list` prints a compact table with one row per skill name:
 
