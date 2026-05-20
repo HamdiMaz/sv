@@ -661,11 +661,12 @@ def test_selector_empty_and_filtered_interactive_paths(monkeypatch):
     empty = SelectionState([])
     assert "No skills to show" in _format_help_line(empty)
     filtered = SelectionState(["alpha", "beta"])
-    filtered.set_filter("missing")
+    filtered.set_search("missing")
     assert "0-0 of 0 matching 2" in _format_help_line(filtered)
+    assert "search: missing" in _format_help_line(filtered)
 
     output = _TtyStream()
-    key_inputs = iter(["filter:zz", "enter", "quit"])
+    key_inputs = iter(["search:zz", "enter", "quit"])
     monkeypatch.setitem(sys.modules, "termios", _FakeTermios)
     monkeypatch.setitem(sys.modules, "tty", _FakeTty)
     monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
@@ -680,11 +681,11 @@ def test_selector_empty_and_filtered_interactive_paths(monkeypatch):
     monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(confirm_keys))
     assert select_skills(["alpha"], stdin=_TtyStream(), stdout=confirm_output) == ["alpha"]
 
-    filter_output = _TtyStream()
-    filter_keys = iter(["filter", "enter"])
-    monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(filter_keys))
-    monkeypatch.setattr("sv.selector._read_filter_query", lambda _fd: "alpha")
-    assert select_skills(["alpha"], stdin=_TtyStream(), stdout=filter_output) == []
+    search_output = _TtyStream()
+    search_keys = iter(["search", "enter"])
+    monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(search_keys))
+    monkeypatch.setattr("sv.selector._read_search_query", lambda *_args: "alpha")
+    assert select_skills(["alpha"], stdin=_TtyStream(), stdout=search_output) == []
 
 
 def test_table_remaining_interactive_branches(monkeypatch):

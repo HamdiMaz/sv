@@ -8,7 +8,7 @@ import unicodedata
 import pytest
 
 from sv.errors import SvError
-from sv.selector import SelectionState, _read_key, _render, select_skills
+from sv.selector import SelectionState, _read_key, _read_search_query, _render, select_skills
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -151,7 +151,7 @@ def test_render_can_remove_cursor_highlight_after_selection_finishes():
     assert stdout.getvalue().splitlines() == [
         "\x1b[38;5;220m\x1b[1m[x] alpha\x1b[0m",
         "\x1b[38;5;252m[ ]\x1b[0m beta",
-        "\x1b[38;5;245mShowing 1-2 of 2 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel\x1b[0m",
+        "\x1b[38;5;245mShowing 1-2 of 2 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / search • q cancel\x1b[0m",
     ]
 
 
@@ -172,7 +172,7 @@ def test_render_outputs_inline_colored_five_item_list_without_alternate_screen()
         "\x1b[38;5;252m[ ]\x1b[0m skill 3",
         "\x1b[38;5;252m[ ]\x1b[0m skill 4",
         "\x1b[38;5;252m[ ]\x1b[0m skill 5",
-        "\x1b[38;5;245mShowing 1-5 of 6 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel\x1b[0m",
+        "\x1b[38;5;245mShowing 1-5 of 6 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / search • q cancel\x1b[0m",
     ]
 
 
@@ -561,26 +561,50 @@ def test_read_key_returns_unknown_for_regular_characters():
     assert _read_key_from_bytes(b"x") == "unknown"
 
 
-def test_read_key_starts_slash_filtering():
-    assert _read_key_from_bytes(b"/") == "filter"
+def test_read_key_starts_slash_searching():
+    assert _read_key_from_bytes(b"/") == "search"
 
 
-def test_selection_state_filters_visible_items_without_losing_selection():
+def test_selection_state_ranks_visible_items_for_search():
+    state = SelectionState(["alpha", "docs", "docs-helper", "find-docs"])
+
+    state.set_search("docs")
+
+    assert [item for _, item in state.visible_items()] == [
+        "docs",
+        "docs-helper",
+        "find-docs",
+    ]
+
+
+def test_selection_state_searches_visible_items_without_losing_selection():
     state = SelectionState(["alpha", "beta", "gamma"])
     state.move_down()
     state.toggle_current()
 
-    state.set_filter("ga")
+    state.set_search("ga")
 
+    assert state.search_query == "ga"
     assert state.filter_query == "ga"
     assert state.cursor == 0
     assert [skill for _, skill in state.visible_items()] == ["gamma"]
     assert state.selected_items() == ["beta"]
 
 
-def test_render_footer_shows_slash_filter_query():
+def test_selection_state_uses_item_ranker_when_provided():
+    state = SelectionState(
+        ["alpha", "docs", "docs-helper", "find-docs"],
+        item_ranker=lambda query: [3, 1] if query == "docs" else [],
+    )
+
+    state.set_search("docs")
+
+    assert [item for _, item in state.visible_items()] == ["find-docs", "docs"]
+
+
+def test_render_footer_shows_slash_search_query():
     state = SelectionState(["alpha", "beta", "gamma"])
-    state.set_filter("ga")
+    state.set_search("ga")
     stdout = StringIO()
 
     _render(state, stdout)
@@ -588,13 +612,90 @@ def test_render_footer_shows_slash_filter_query():
     lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
     assert lines == [
         "[ ] gamma",
-        "Showing 1-1 of 1 matching 3 • filter: ga • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel",
+        "Showing 1-1 of 1 matching 3 • search: ga • ↑/↓ move • ←/→ page • Space select • Enter confirm • / search • q cancel",
     ]
 
 
-def test_select_skills_applies_slash_filter_key(monkeypatch):
+def test_render_footer_shows_stable_no_match_search_query():
+    state = SelectionState(["alpha", "beta", "gamma"])
+    state.set_search("missing")
+    stdout = StringIO()
+
+    _render(state, stdout)
+
+    lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert lines == [
+        "Showing 0-0 of 0 matching 3 • search: missing • / search • q cancel",
+    ]
+
+
+def test_read_search_query_renders_visible_prompt_and_escapes_controls():
+    stdout = StringIO()
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"docs\x01\n")
+        os.close(write_fd)
+        write_fd = -1
+
+        query = _read_search_query(read_fd, stdout)
+    finally:
+        os.close(read_fd)
+        if write_fd != -1:
+            os.close(write_fd)
+
+    assert query == "docs\x01"
+    rendered = stdout.getvalue()
+    assert "Search: docs\\x01" in rendered
+    assert "docs\x01" not in rendered
+
+
+def test_read_search_query_applies_eof_input_and_clears_empty_eof():
+    stdout = StringIO()
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"docs")
+        os.close(write_fd)
+        write_fd = -1
+        query = _read_search_query(read_fd, stdout)
+    finally:
+        os.close(read_fd)
+        if write_fd != -1:
+            os.close(write_fd)
+
+    assert query == "docs"
+
+    empty_stdout = StringIO()
+    empty_read_fd, empty_write_fd = os.pipe()
+    try:
+        os.close(empty_write_fd)
+        empty_query = _read_search_query(empty_read_fd, empty_stdout)
+    finally:
+        os.close(empty_read_fd)
+
+    assert empty_query == ""
+
+
+def test_set_filter_and_filter_synthetic_key_remain_compatible(monkeypatch):
+    state = SelectionState(["alpha", "beta", "gamma"])
+    state.set_filter("ga")
+
+    assert state.search_query == "ga"
+    assert [skill for _, skill in state.visible_items()] == ["gamma"]
+
     output = TtyStream()
     key_inputs = iter(["filter:ga", "space", "enter"])
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
+
+    assert select_skills(["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output) == [
+        "gamma"
+    ]
+
+
+def test_select_skills_applies_slash_search_key(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["search:ga", "space", "enter"])
 
     def _fake_read_key(_fd):
         return next(key_inputs)
@@ -602,6 +703,23 @@ def test_select_skills_applies_slash_filter_key(monkeypatch):
     monkeypatch.setitem(sys.modules, "termios", FakeTermios)
     monkeypatch.setitem(sys.modules, "tty", FakeTty)
     monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
+
+    selected = select_skills(
+        ["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output
+    )
+
+    assert selected == ["gamma"]
+
+
+def test_select_skills_escape_cancelled_search_preserves_previous_search(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["search:ga", "search", "space", "enter"])
+    cancelled = iter([None])
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
+    monkeypatch.setattr("sv.selector._read_search_query", lambda *_args: next(cancelled))
 
     selected = select_skills(
         ["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output

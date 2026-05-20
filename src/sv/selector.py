@@ -10,6 +10,7 @@ from typing import Generic, TextIO, TypeVar
 import unicodedata
 
 from sv.errors import SvError
+from sv.search import discard_last_utf8_character, read_search_prompt, ranked_search_indices
 from sv.terminal import escape_terminal_controls
 
 T = TypeVar("T")
@@ -38,14 +39,20 @@ class SelectionState(Generic[T]):
     cursor: int = 0
     viewport_start: int = 0
     selected: set[int] = field(default_factory=set)
+    search_query: str = ""
     filter_query: str = ""
     filter_text: Callable[[T], str] = str
+    item_ranker: Callable[[str], Sequence[int]] | None = None
+    _visible_indices_cache: list[int] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.viewport_size < 1:
             raise ValueError("viewport_size must be at least 1")
 
-        self.filter_query = _sanitize_label(self.filter_query).strip()
+        if not self.search_query and self.filter_query:
+            self.search_query = self.filter_query
+        self.search_query = _sanitize_label(self.search_query).strip()
+        self.filter_query = self.search_query
         self.selected = {
             index for index in self.selected if 0 <= index < len(self.items)
         }
@@ -103,11 +110,16 @@ class SelectionState(Generic[T]):
     def selected_items(self) -> list[T]:
         return [self.items[index] for index in sorted(self.selected)]
 
-    def set_filter(self, query: str) -> None:
-        self.filter_query = _sanitize_label(query).strip()
+    def set_search(self, query: str) -> None:
+        self.search_query = _sanitize_label(query).strip()
+        self.filter_query = self.search_query
+        self._visible_indices_cache = None
         self.cursor = 0
         self.viewport_start = 0
         self._clamp_view()
+
+    def set_filter(self, query: str) -> None:
+        self.set_search(query)
 
     def _current_item_index(self) -> int | None:
         filtered_indices = self._filtered_indices()
@@ -116,14 +128,25 @@ class SelectionState(Generic[T]):
         return filtered_indices[self.cursor]
 
     def _filtered_indices(self) -> list[int]:
-        query = self.filter_query.casefold()
-        if not query:
+        if self._visible_indices_cache is None:
+            self._visible_indices_cache = self._compute_filtered_indices()
+        return self._visible_indices_cache
+
+    def _compute_filtered_indices(self) -> list[int]:
+        if not self.search_query:
             return list(range(len(self.items)))
-        return [
-            index
-            for index, item in enumerate(self.items)
-            if query in _sanitize_label(self.filter_text(item)).casefold()
-        ]
+        if self.item_ranker is not None:
+            visible_indices: list[int] = []
+            seen: set[int] = set()
+            for index in self.item_ranker(self.search_query):
+                if 0 <= index < len(self.items) and index not in seen:
+                    visible_indices.append(index)
+                    seen.add(index)
+            return visible_indices
+        return ranked_search_indices(
+            self.search_query,
+            [(_sanitize_label(self.filter_text(item)),) for item in self.items],
+        )
 
     def _clamp_view(self) -> None:
         item_count = len(self._filtered_indices())
@@ -152,6 +175,7 @@ def select_skills(
     item_label: Callable[[T], str] = str,
     header_label: str | None = None,
     filter_text: Callable[[T], str] | None = None,
+    item_ranker: Callable[[str], Sequence[int]] | None = None,
     item_columns: Callable[[T], Sequence[str]] | None = None,
     header_columns: Sequence[str] | None = None,
 ) -> list[T]:
@@ -185,6 +209,7 @@ def select_skills(
         skills,
         viewport_size=viewport_size,
         filter_text=effective_filter_text,
+        item_ranker=item_ranker,
     )
     try:
         fd = input_stream.fileno()
@@ -222,8 +247,15 @@ def select_skills(
                 state.page_next()
             elif key == "space":
                 state.toggle_current()
+            elif key == "search":
+                query = _read_search_query(fd, output_stream, rendered_lines)
+                rendered_lines = 1
+                if query is not None:
+                    state.set_search(query)
             elif key == "filter":
                 state.set_filter(_read_filter_query(fd))
+            elif key.startswith("search:"):
+                state.set_search(key.partition(":")[2])
             elif key.startswith("filter:"):
                 state.set_filter(key.partition(":")[2])
             elif key == "enter":
@@ -364,14 +396,14 @@ def _format_help_line(state: SelectionState[T]) -> str:
     filtered_count = len(state._filtered_indices())
     if state.items and filtered_count:
         text = f"Showing {state.viewport_start + 1}-{state.visible_end} of {filtered_count}"
-        if state.filter_query:
-            text += f" matching {len(state.items)} • filter: {state.filter_query}"
-        text += " • ↑/↓ move • ←/→ page • Space select • Enter confirm • / filter • q cancel"
+        if state.search_query:
+            text += f" matching {len(state.items)} • search: {state.search_query}"
+        text += " • ↑/↓ move • ←/→ page • Space select • Enter confirm • / search • q cancel"
     elif state.items:
         text = f"Showing 0-0 of 0 matching {len(state.items)}"
-        if state.filter_query:
-            text += f" • filter: {state.filter_query}"
-        text += " • / filter • q cancel"
+        if state.search_query:
+            text += f" • search: {state.search_query}"
+        text += " • / search • q cancel"
     else:
         text = "No skills to show • q cancel"
     return f"{_FG_MUTED}{_fit_text(text, _terminal_width())}{_RESET}"
@@ -459,12 +491,28 @@ def _read_key(fd: int) -> str:
     if char == b" ":
         return "space"
     if char == b"/":
-        return "filter"
+        return "search"
     if char.lower() == b"q":
         return "quit"
     if char == b"\x1b":
         return _read_escape_sequence(fd)
     return "unknown"
+
+
+def _read_search_query(
+    fd: int,
+    stdout: TextIO,
+    previous_line_count: int = 0,
+) -> str | None:
+    result = read_search_prompt(
+        fd,
+        stdout,
+        lambda query: f"Search: {query}",
+        previous_line_count=previous_line_count,
+    )
+    if not result.applied:
+        return None
+    return result.query
 
 
 def _read_filter_query(fd: int) -> str:
@@ -476,8 +524,7 @@ def _read_filter_query(fd: int) -> str:
         if char == b"\x1b":
             return ""
         if char in {b"\x7f", b"\b"}:
-            if query:
-                query.pop()
+            discard_last_utf8_character(query)
             continue
         query.extend(char)
     return query.decode(errors="replace")
