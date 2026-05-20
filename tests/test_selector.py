@@ -257,7 +257,7 @@ def test_render_structured_picker_uses_framed_header_with_sel_column(monkeypatch
 
 
 def test_render_structured_footer_shows_filter_and_enter_action(monkeypatch):
-    monkeypatch.setenv("COLUMNS", "100")
+    monkeypatch.setenv("COLUMNS", "140")
     items = [
         {"skill": "alpha", "source": "Org/A", "description": "Alpha."},
         {"skill": "gamma", "source": "Org/G", "description": "Gamma."},
