@@ -12,6 +12,7 @@ from sv.table import (
     _read_escape_sequence,
     _read_filter_query,
     _read_key,
+    _read_key_from_bytes,
     _render_interactive_table,
     browse_table,
     format_table,
@@ -105,7 +106,7 @@ def test_interactive_table_renders_headers_highlighted_row_and_footer(monkeypatc
     assert visible_lines[2] == "alpha  Short."
     assert lines[2].startswith("\x1b[48;5;24m")
     assert visible_lines[3] == "beta   This description is intentionally very long."
-    assert visible_lines[4] == "Showing 1-2 of 2 • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
+    assert visible_lines[4] == "Showing 1-2 of 2 • ↑/↓ move • ←/→ page • / search • Enter details • q back"
 
 
 def test_interactive_table_truncates_every_line_when_columns_exceed_width(monkeypatch):
@@ -134,8 +135,8 @@ def test_interactive_table_truncates_rows_to_one_line(monkeypatch):
     assert visible_lines[2].endswith("...")
 
 
-def test_interactive_table_sanitizes_initial_filter_query_in_footer():
-    state = TableState(["Skill"], [["alpha"]], filter_query="\x1b[2J")
+def test_interactive_table_sanitizes_initial_search_query_in_footer():
+    state = TableState(["Skill"], [["alpha"]], search_query="\x1b[2J")
     stdout = StringIO()
 
     _render_interactive_table(state, stdout, highlight_cursor=False)
@@ -191,19 +192,40 @@ def test_table_state_navigation_pages_clamps_and_handles_empty_results():
     assert state.current_row() is None
 
 
-def test_table_state_slash_filtering_keeps_matching_rows_and_footer():
+def test_table_state_slash_search_keeps_matching_rows_and_footer():
     state = TableState(
         ["Skill", "Repo"],
         [["alpha", "Org/A"], ["beta", "Org/B"], ["gamma", "Org/C"]],
     )
 
-    state.set_filter("org/c")
+    state.set_search("org/c")
     stdout = StringIO()
     _render_interactive_table(state, stdout, highlight_cursor=False)
 
     visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
     assert visible_lines[2] == "gamma  Org/C"
-    assert visible_lines[-1] == "Showing 1-1 of 1 matching 3 • filter: org/c • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
+    assert visible_lines[-1] == "Showing 1-1 of 1 matching 3 • search: org/c • ↑/↓ move • ←/→ page • / search • Enter details • q back"
+
+
+def test_table_state_ranked_search_orders_visible_rows():
+    state = TableState(["Skill"], [["alpha"], ["docs"], ["docs-helper"], ["find-docs"]])
+
+    state.set_search("docs")
+
+    assert [row[0] for _, row in state.visible_rows()] == ["docs", "docs-helper", "find-docs"]
+
+
+def test_table_state_accepts_custom_row_ranker_with_original_indices():
+    state = TableState(
+        ["Skill"],
+        [["alpha"], ["docs"], ["docs-helper"], ["find-docs"]],
+        row_ranker=lambda query: [3, 1] if query == "docs" else [],
+    )
+
+    state.set_search("docs")
+
+    assert state.visible_rows() == [(3, ("find-docs",)), (1, ("docs",))]
+    assert state.current_row() == ["find-docs"]
 
 
 def test_browse_table_enter_invokes_detail_hook_and_q_goes_back(monkeypatch):
@@ -236,7 +258,7 @@ def test_browse_table_enter_invokes_detail_hook_and_q_goes_back(monkeypatch):
     assert "\x1b[5F\x1b[JDETAIL\n" in rendered
 
 
-def test_browse_table_applies_slash_filter_key(monkeypatch):
+def test_browse_table_applies_slash_search_key(monkeypatch):
     output = TtyStream()
     key_inputs = iter(["filter:ga", "enter"])
 
@@ -255,6 +277,41 @@ def test_browse_table_applies_slash_filter_key(monkeypatch):
     )
 
     assert selected == ["gamma"]
+
+
+def test_browse_table_visible_search_enter_applies_and_cancel_preserves(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["filter:alpha", "search", "search", "enter"])
+    prompt_results = iter([None, "docs"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    def _fake_read_search_query(_fd, stdout, previous_line_count=0):
+        result = next(prompt_results)
+        if result is None:
+            stdout.write("Search: ignored\n")
+            return None
+        stdout.write(f"Search: {result}\n")
+        return result
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+    monkeypatch.setattr("sv.table._read_search_query", _fake_read_search_query)
+
+    selected = browse_table(
+        ["Skill"],
+        [["alpha"], ["docs"], ["docs-helper"], ["find-docs"]],
+        stdin=TtyStream(),
+        stdout=output,
+    )
+
+    assert selected == ["docs"]
+    visible_output = visible_text(output.getvalue())
+    assert "Search: ignored" in visible_output
+    assert "Search: docs" in visible_output
+    assert "search: alpha" in visible_output
 
 
 def test_browse_table_runs_custom_key_actions_and_stays_in_view(monkeypatch):
@@ -329,6 +386,10 @@ def test_browse_table_reports_terminal_restore_errors(monkeypatch):
 
     with pytest.raises(SvError, match="could not restore terminal settings"):
         browse_table(["Skill"], [["alpha"]], stdin=TtyStream(), stdout=TtyStream())
+
+
+def test_read_key_from_bytes_decodes_slash_as_search():
+    assert _read_key_from_bytes(b"/") == "search"
 
 
 def test_read_key_decodes_actions_quit_enter_eof_unknown_and_invalid_utf8(monkeypatch):

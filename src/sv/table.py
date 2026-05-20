@@ -11,6 +11,7 @@ from typing import TextIO
 import unicodedata
 
 from sv.errors import SvError
+from sv.search import read_search_prompt, ranked_search_indices
 from sv.terminal import escape_terminal_controls
 
 
@@ -36,15 +37,20 @@ class TableState:
     viewport_size: int = VIEWPORT_SIZE
     cursor: int = 0
     viewport_start: int = 0
+    search_query: str = ""
     filter_query: str = ""
     key_help: str = ""
+    row_ranker: Callable[[str], Sequence[int]] | None = None
 
     def __post_init__(self) -> None:
         if self.viewport_size < 1:
             raise ValueError("viewport_size must be at least 1")
         self.headers = tuple(str(header) for header in self.headers)
         self.rows = [tuple(str(cell) for cell in row) for row in self.rows]
-        self.filter_query = _sanitize_cell(self.filter_query).strip()
+        if not self.search_query and self.filter_query:
+            self.search_query = self.filter_query
+        self.search_query = _sanitize_cell(self.search_query).strip()
+        self.filter_query = self.search_query
         self._clamp_view()
 
     @property
@@ -90,21 +96,28 @@ class TableState:
         self.cursor = min(self.cursor + self.viewport_size, last_index)
         self.viewport_start += self.viewport_size
 
-    def set_filter(self, query: str) -> None:
-        self.filter_query = _sanitize_cell(query).strip()
+    def set_search(self, query: str) -> None:
+        self.search_query = _sanitize_cell(query).strip()
+        self.filter_query = self.search_query
         self.cursor = 0
         self.viewport_start = 0
         self._clamp_view()
 
+    def set_filter(self, query: str) -> None:
+        self.set_search(query)
+
     def _filtered_indices(self) -> list[int]:
-        query = self.filter_query.casefold()
-        if not query:
+        if not self.search_query:
             return list(range(len(self.rows)))
-        return [
-            index
-            for index, row in enumerate(self.rows)
-            if query in " ".join(row).casefold()
-        ]
+        if self.row_ranker is not None:
+            visible_indices: list[int] = []
+            seen: set[int] = set()
+            for index in self.row_ranker(self.search_query):
+                if 0 <= index < len(self.rows) and index not in seen:
+                    visible_indices.append(index)
+                    seen.add(index)
+            return visible_indices
+        return ranked_search_indices(self.search_query, self.rows)
 
     def _clamp_view(self) -> None:
         row_count = len(self._filtered_indices())
@@ -134,10 +147,11 @@ def browse_table(
     key_actions: Mapping[str, Callable[[Sequence[str]], object]] | None = None,
     key_help: str = "",
     clear_on_exit: bool = False,
+    row_ranker: Callable[[str], Sequence[int]] | None = None,
 ) -> Sequence[str] | None:
     """Browse rows in a read-only TTY table.
 
-    Arrow keys move the highlighted current row, ``/`` filters, Enter returns the
+    Arrow keys move the highlighted current row, ``/`` searches, Enter returns the
     current row or invokes ``on_detail``, and ``q``/Escape goes back.
     """
     input_stream = sys.stdin if stdin is None else stdin
@@ -152,7 +166,13 @@ def browse_table(
     except ImportError as exc:
         raise SvError("Interactive table browsing requires a Unix-like terminal.") from exc
 
-    state = TableState(headers, rows, viewport_size=viewport_size, key_help=key_help)
+    state = TableState(
+        headers,
+        rows,
+        viewport_size=viewport_size,
+        key_help=key_help,
+        row_ranker=row_ranker,
+    )
     actions = {key.casefold(): action for key, action in (key_actions or {}).items()}
     try:
         fd = input_stream.fileno()
@@ -181,8 +201,14 @@ def browse_table(
                 state.page_previous()
             elif key == "right":
                 state.page_next()
+            elif key == "search":
+                query = _read_search_query(fd, output_stream, rendered_lines)
+                if query is not None:
+                    state.set_search(query)
             elif key == "filter":
                 state.set_filter(_read_filter_query(fd))
+            elif key.startswith("search:"):
+                state.set_search(key.partition(":")[2])
             elif key.startswith("filter:"):
                 state.set_filter(key.partition(":")[2])
             elif key == "enter":
@@ -337,9 +363,9 @@ def _format_table_help_line(state: TableState, terminal_width: int) -> str:
         text = f"Showing {state.viewport_start + 1}-{state.visible_end} of {filtered_count}"
     else:
         text = "Showing 0-0 of 0"
-    if state.filter_query:
-        text += f" matching {total_count} • filter: {state.filter_query}"
-    text += " • ↑/↓ move • ←/→ page • / filter • Enter details"
+    if state.search_query:
+        text += f" matching {total_count} • search: {state.search_query}"
+    text += " • ↑/↓ move • ←/→ page • / search • Enter details"
     if state.key_help:
         text += f" • {state.key_help}"
     text += " • q back"
@@ -357,7 +383,7 @@ def _read_key(fd: int) -> str:
     if char in {b"\r", b"\n"}:
         return "enter"
     if char == b"/":
-        return "filter"
+        return "search"
     if char.lower() == b"q":
         return "quit"
     if char == b"\x1b":
@@ -369,6 +395,22 @@ def _read_key(fd: int) -> str:
     if decoded.isprintable():
         return f"action:{decoded.casefold()}"
     return "unknown"
+
+
+def _read_search_query(
+    fd: int,
+    stdout: TextIO,
+    previous_line_count: int = 0,
+) -> str | None:
+    result = read_search_prompt(
+        fd,
+        stdout,
+        lambda query: f"Search: {query}",
+        previous_line_count=previous_line_count,
+    )
+    if not result.applied:
+        return None
+    return result.query
 
 
 def _read_filter_query(fd: int) -> str:
@@ -385,6 +427,29 @@ def _read_filter_query(fd: int) -> str:
             continue
         query.extend(char)
     return query.decode(errors="replace")
+
+
+def _read_key_from_bytes(data: bytes) -> str:
+    if data == b"":
+        return "eof"
+    if data in {b"\r", b"\n"}:
+        return "enter"
+    if data == b"/":
+        return "search"
+    if data.lower() == b"q":
+        return "quit"
+    if data == b"\x1b":
+        return "escape"
+    if data.startswith(b"\x1b[") and len(data) >= 3:
+        arrows = {b"A": "up", b"B": "down", b"C": "right", b"D": "left"}
+        return arrows.get(data[2:3], "unknown")
+    try:
+        decoded = data[:1].decode("utf-8")
+    except UnicodeDecodeError:
+        return "unknown"
+    if decoded.isprintable():
+        return f"action:{decoded.casefold()}"
+    return "unknown"
 
 
 def _read_escape_sequence(fd: int) -> str:
