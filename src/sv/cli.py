@@ -388,6 +388,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Relative POSIX path to a skills root in the repo. May be repeated.",
     )
+    repo_add_parser.add_argument(
+        "--no-warm-cache",
+        action="store_true",
+        help="Skip the default source metadata cache refresh after adding this repo.",
+    )
     repo_remove_parser = repo_subparsers.add_parser(
         "remove",
         help="Remove a skill source repo.",
@@ -725,6 +730,8 @@ def svx_main(argv: Sequence[str] | None = None) -> int:
     forwarded = ["repo", "add", svx_args.repo]
     for skills_path in svx_args.skills_paths:
         forwarded.extend(["--skills-path", skills_path])
+    if svx_args.no_warm_cache:
+        forwarded.append("--no-warm-cache")
     args = build_parser().parse_args(forwarded)
     runtime = Runtime.from_process()
     return handle(args, cwd=runtime.cwd, home=runtime.home, runtime=runtime)
@@ -744,6 +751,11 @@ def _build_svx_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Relative POSIX path to a skills root in the repo. May be repeated.",
+    )
+    parser.add_argument(
+        "--no-warm-cache",
+        action="store_true",
+        help="Skip the default source metadata cache refresh after adding this repo.",
     )
     return parser
 
@@ -916,6 +928,33 @@ def _print_repo_change_result(result: RepoChangeResult) -> None:
         print(f"Updated repo {repo_id} ({repo_url})")
     else:
         print(f"Added repo {repo_id} ({repo_url})")
+
+
+def _warm_repo_catalog_cache(
+    repo: RepoConfig,
+    paths: SvPaths,
+    git_runner,
+    *,
+    record_global_source_state: bool,
+) -> None:
+    try:
+        _catalog_for_source_command(
+            [repo],
+            paths,
+            git_runner,
+            policy=CachePolicy.force_refresh(),
+            record_global_source_state=record_global_source_state,
+            lightweight_discovery=True,
+            allow_partial_failures=False,
+            update=True,
+        )
+    except SvError as exc:
+        safe_repo_id = _escape_control_characters(repo.id)
+        safe_error = _escape_control_characters(str(exc))
+        print(
+            f"warning: could not warm source metadata cache for {safe_repo_id}: {safe_error}",
+            file=sys.stderr,
+        )
 
 
 def _update_sources_and_catalog(
@@ -1150,7 +1189,7 @@ def _catalog_for_source_command(
             record_global_source_state=record_global_source_state,
             lightweight_discovery=lightweight_discovery,
             allow_partial_failures=allow_partial_failures,
-            warn=lambda message: print(message, file=sys.stderr),
+            warn=_print_stderr_warning,
         )
 
     catalog = get_catalog_with_cache(
@@ -1159,7 +1198,7 @@ def _catalog_for_source_command(
         policy=policy,
         now=datetime.now(UTC),
         refresh_catalog=refresh,
-        warn=lambda message: print(message, file=sys.stderr),
+        warn=_print_stderr_warning,
     )
     allow_source_fallback = policy.mode is not CacheMode.CACHE_ONLY
     repos_by_id = {repo.id: repo for repo in repos}
@@ -1174,7 +1213,7 @@ def _catalog_for_source_command(
             policy=CachePolicy.force_refresh(allow_stale_on_error=False),
             now=datetime.now(UTC),
             refresh_catalog=refresh,
-            warn=lambda message: print(message, file=sys.stderr),
+            warn=_print_stderr_warning,
         )
         for candidate in refreshed_catalog:
             if (
@@ -1207,7 +1246,7 @@ def _catalog_for_source_command(
         refresh_entry_on_body_miss=(
             refresh_entry_on_body_miss if allow_source_fallback else None
         ),
-        warn=lambda message: print(message, file=sys.stderr),
+        warn=_print_stderr_warning,
     )
 
 
@@ -1988,7 +2027,7 @@ def _scan_repo_for_configured_index(
         repo_root,
         kind=kind,
         generated_at=_utc_now(),
-        warn=lambda message: print(message, file=sys.stderr),
+        warn=_print_stderr_warning,
         include_paths=(*scan_config.include_paths, *include_paths),
         exclude_paths=(*scan_config.exclude_paths, *exclude_paths),
     )
@@ -2079,6 +2118,13 @@ def _handle_repo(
         except ValueError as exc:
             raise SvError(str(exc)) from exc
         _print_repo_change_result(result)
+        if not args.no_warm_cache:
+            _warm_repo_catalog_cache(
+                result.repo,
+                paths,
+                git_runner,
+                record_global_source_state=record_global_source_state,
+            )
         return 0
 
     if args.repo_command == "remove":
@@ -2309,6 +2355,10 @@ def _handle_run(
 
 def _escape_control_characters(value: str) -> str:
     return escape_terminal_controls(value)
+
+
+def _print_stderr_warning(message: str) -> None:
+    print(_escape_control_characters(message), file=sys.stderr)
 
 
 def _escape_output_path(path: Path) -> str:

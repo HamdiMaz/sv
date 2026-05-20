@@ -1226,7 +1226,14 @@ def test_repo_list_table_fits_terminal_width(tmp_path: Path, capsys, monkeypatch
     source = tmp_path / "very-long-local-skill-source-name"
     source.mkdir()
 
-    assert handle(parse(["repo", "add", str(source)]), cwd=project, home=home) == 0
+    assert (
+        handle(
+            parse(["repo", "add", str(source), "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
     capsys.readouterr()
     monkeypatch.setenv("COLUMNS", "40")
 
@@ -1242,10 +1249,19 @@ def test_repo_add_and_list_use_multi_repo_config(tmp_path: Path, capsys):
     project.mkdir()
 
     assert (
-        handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
+        handle(
+            parse(["repo", "add", "HamdiMaz/Skills", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
     )
     assert (
-        handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home)
+        handle(
+            parse(["repo", "add", "SomeOrg/TeamSkills", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
         == 0
     )
     capsys.readouterr()
@@ -1268,11 +1284,18 @@ def test_repo_add_reports_existing_repo(tmp_path: Path, capsys):
     project.mkdir()
 
     assert (
-        handle(parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home) == 0
+        handle(
+            parse(["repo", "add", "HamdiMaz/Skills", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
     )
     capsys.readouterr()
     exit_code = handle(
-        parse(["repo", "add", "HamdiMaz/Skills"]), cwd=project, home=home
+        parse(["repo", "add", "HamdiMaz/Skills", "--no-warm-cache"]),
+        cwd=project,
+        home=home,
     )
 
     assert exit_code == 0
@@ -1322,7 +1345,11 @@ def test_repo_remove_updates_config_without_deleting_project_skills(
     skill.mkdir(parents=True)
 
     assert (
-        handle(parse(["repo", "add", "SomeOrg/TeamSkills"]), cwd=project, home=home)
+        handle(
+            parse(["repo", "add", "SomeOrg/TeamSkills", "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
         == 0
     )
     capsys.readouterr()
@@ -1441,6 +1468,7 @@ def test_svx_main_dispatches_to_repo_add_flow(monkeypatch, tmp_path: Path):
                 args.repo_command,
                 args.repo,
                 args.skills_paths,
+                args.no_warm_cache,
                 cwd,
                 home,
                 kwargs["runtime"],
@@ -1450,13 +1478,19 @@ def test_svx_main_dispatches_to_repo_add_flow(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(cli_module, "handle", fake_handle)
 
-    assert cli_module.svx_main(["owner/repo", "--skills-path", "custom/skills"]) == 0
+    assert (
+        cli_module.svx_main(
+            ["owner/repo", "--skills-path", "custom/skills", "--no-warm-cache"]
+        )
+        == 0
+    )
     assert parsed_calls == [
         (
             "repo",
             "add",
             "owner/repo",
             ["custom/skills"],
+            True,
             project,
             home,
             Namespace(cwd=project, home=home),
