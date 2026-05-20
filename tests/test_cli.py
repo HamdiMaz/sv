@@ -158,13 +158,42 @@ def test_init_command_does_not_reinitialize_existing_git_repo(
     assert (project / ".sv" / "index.toml").is_file()
 
 
-def test_init_command_initializes_nested_folder_inside_existing_worktree(
+def test_init_command_from_git_subdirectory_scaffolds_repository_root(
     tmp_path: Path, run_sv
 ):
     home = tmp_path / "home"
     project = tmp_path / "project"
-    target = project / "nested"
-    target.mkdir(parents=True)
+    nested = project / "docs" / "examples"
+    (project / ".git").mkdir(parents=True)
+    nested.mkdir(parents=True)
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        if list(args) == ["git", "rev-parse", "--is-inside-work-tree"]:
+            return subprocess.CompletedProcess(list(args), 0, "true\n", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init"]), cwd=nested, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 0
+    assert git_calls == [(["git", "rev-parse", "--is-inside-work-tree"], project)]
+    assert (project / "skills").is_dir()
+    assert (project / ".sv" / "index.toml").is_file()
+    assert not (nested / "skills").exists()
+    assert not (nested / ".sv").exists()
+
+
+def test_init_command_from_non_git_sv_subdirectory_scaffolds_sv_root(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    nested = project / "docs" / "examples"
+    manifest = project / ".sv" / "manifest.toml"
+    nested.mkdir(parents=True)
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("schema_version = 1\n", encoding="utf-8")
     git_calls = []
 
     def git_runner(args, cwd=None):
@@ -175,12 +204,127 @@ def test_init_command_initializes_nested_folder_inside_existing_worktree(
             return subprocess.CompletedProcess(list(args), 0, "", "")
         raise AssertionError(f"unexpected git call: {args}")
 
-    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(parse(["init"]), cwd=nested, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 0
+    assert git_calls == [(["git", "init"], project)]
+    assert (project / ".git").is_dir()
+    assert (project / "skills").is_dir()
+    assert (project / ".sv" / "index.toml").is_file()
+    assert not (nested / "skills").exists()
+    assert not (nested / ".sv").exists()
+
+
+def test_init_command_ignores_global_manifest_when_initializing_under_home(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    workspace = home / "workspace"
+    global_manifest = home / ".sv" / "manifest.toml"
+    workspace.mkdir(parents=True)
+    global_manifest.parent.mkdir(parents=True)
+    global_manifest.write_text("schema_version = 1\n", encoding="utf-8")
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        if list(args) == ["git", "init"]:
+            assert cwd is not None
+            (cwd / ".git").mkdir()
+            return subprocess.CompletedProcess(list(args), 0, "", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init"]), cwd=workspace, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 0
+    assert git_calls == [(["git", "init"], workspace)]
+    assert (workspace / ".git").is_dir()
+    assert (workspace / "skills").is_dir()
+    assert (workspace / ".sv" / "index.toml").is_file()
+    assert not (home / ".git").exists()
+    assert not (home / "skills").exists()
+
+
+def test_init_command_with_folder_ignores_global_manifest_when_under_home(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    workspace = home / "workspace"
+    target = workspace / "team-skills"
+    global_manifest = home / ".sv" / "manifest.toml"
+    workspace.mkdir(parents=True)
+    global_manifest.parent.mkdir(parents=True)
+    global_manifest.write_text("schema_version = 1\n", encoding="utf-8")
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        if list(args) == ["git", "init"]:
+            assert cwd is not None
+            (cwd / ".git").mkdir()
+            return subprocess.CompletedProcess(list(args), 0, "", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(
+        parse(["init", "team-skills"]), cwd=workspace, home=home, git_runner=git_runner
+    )
 
     assert result.exit_code == 0
     assert git_calls == [(["git", "init"], target)]
-    assert (target / ".git").exists()
+    assert target.is_dir()
+    assert (target / ".git").is_dir()
     assert (target / "skills").is_dir()
+    assert (target / ".sv" / "index.toml").is_file()
+    assert not (home / ".git").exists()
+    assert not (home / "skills").exists()
+
+
+def test_init_command_rejects_named_folder_inside_existing_git_worktree(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    target = project / "nested"
+    (project / ".git").mkdir(parents=True)
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 1
+    assert "Refusing to initialize a nested skill-vault" in result.stderr
+    assert "Run 'sv init' to target the existing repository root" in result.stderr
+    assert "run 'sv init <folder>' from outside a repository" in result.stderr
+    assert not target.exists()
+    assert git_calls == []
+
+
+def test_init_command_rejects_named_folder_inside_existing_sv_root(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    target = project / "nested"
+    manifest = project / ".sv" / "manifest.toml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("schema_version = 1\n", encoding="utf-8")
+    git_calls = []
+
+    def git_runner(args, cwd=None):
+        git_calls.append((list(args), cwd))
+        raise AssertionError(f"unexpected git call: {args}")
+
+    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+
+    assert result.exit_code == 1
+    assert "Refusing to initialize a nested skill-vault" in result.stderr
+    assert "Run 'sv init' to target the existing repository root" in result.stderr
+    assert "run 'sv init <folder>' from outside a repository" in result.stderr
+    assert not target.exists()
+    assert git_calls == []
 
 
 def test_init_command_does_not_overwrite_existing_manifest(tmp_path: Path, run_sv):
