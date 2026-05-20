@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from sv.errors import SvError
+from sv.search import SearchPromptResult
 from sv.table import (
     TableState,
     _read_escape_sequence,
@@ -285,6 +286,33 @@ def test_table_state_slash_search_keeps_matching_rows_and_footer():
         visible_lines[-1]
         == "Showing 1-1 of 1 matching 3 • search: org/c • ↑/↓ move • ←/→ page • / search • Enter details • q back"
     )
+
+
+def test_render_table_search_footer_styles_visible_search_text():
+    state = TableState(["Skill"], [["alpha"], ["beta"], ["gamma"]])
+    state.set_search("ga")
+    stdout = StringIO()
+
+    _render_interactive_table(state, stdout)
+
+    visible = visible_text(stdout.getvalue())
+    assert "Showing 1-1 of 1 matching 3" in visible
+    assert "search: ga" in visible
+    assert "↑/↓ move" in visible
+
+
+def test_render_table_no_match_names_query_and_hint():
+    state = TableState(["Skill"], [["alpha"], ["beta"], ["gamma"]])
+    state.set_search("missing")
+    stdout = StringIO()
+
+    _render_interactive_table(state, stdout)
+
+    visible = visible_text(stdout.getvalue())
+    assert "No matches for \"missing\"" in visible
+    assert "Try a different search term." in visible
+    assert "Showing 0-0 of 0 matching 3" in visible
+    assert "search: missing" in visible
 
 
 def test_table_state_ranked_search_orders_visible_rows():
@@ -643,15 +671,14 @@ def test_browse_table_visible_search_enter_applies_and_cancel_preserves(monkeypa
     def _fake_read_key(_fd):
         return next(key_inputs)
 
-    def _fake_read_search_query(_fd, stdout, previous_line_count=0):
+    def _fake_read_search_query(_fd, stdout, previous_line_count=0, **_kwargs):
         result = next(prompt_results)
         assert previous_line_count == 5
         stdout.write(f"\x1b[{previous_line_count}F\x1b[J")
+        stdout.write("╭search╮\n│prompt│\n│hint│\n╰end╯\n")
         if result is None:
-            stdout.write("Search: ignored\n")
-            return None
-        stdout.write(f"Search: {result}\n")
-        return result
+            return SearchPromptResult(applied=False, query="", rendered_line_count=4)
+        return SearchPromptResult(applied=True, query=result, rendered_line_count=4)
 
     monkeypatch.setitem(sys.modules, "termios", FakeTermios)
     monkeypatch.setitem(sys.modules, "tty", FakeTty)
@@ -667,12 +694,36 @@ def test_browse_table_visible_search_enter_applies_and_cancel_preserves(monkeypa
 
     assert selected == ["docs"]
     rendered = output.getvalue()
-    assert "Search: ignored\n\x1b[1F\x1b[J" in rendered
-    assert "Search: docs\n\x1b[1F\x1b[J" in rendered
+    assert "╰end╯\n\x1b[4F\x1b[J" in rendered
     visible_output = visible_text(rendered)
-    assert "Search: ignored" in visible_output
-    assert "Search: docs" in visible_output
     assert "search: alpha" in visible_output
+
+
+def test_browse_table_empty_enter_clears_previous_search(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["search:ga", "search", "enter"])
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", lambda _fd: next(key_inputs))
+    monkeypatch.setattr(
+        "sv.table._read_search_query",
+        lambda *_args, **_kwargs: SearchPromptResult(
+            applied=True,
+            query="",
+            rendered_line_count=4,
+        ),
+    )
+
+    selected = browse_table(
+        ["Skill"],
+        [["alpha"], ["beta"], ["gamma"]],
+        stdin=TtyStream(),
+        stdout=output,
+    )
+
+    assert selected == ["alpha"]
+    assert "search: ga" not in visible_text(output.getvalue()).splitlines()[-1]
 
 
 def test_browse_table_search_cancel_leaves_previous_result_selected(monkeypatch):
@@ -682,10 +733,10 @@ def test_browse_table_search_cancel_leaves_previous_result_selected(monkeypatch)
     def _fake_read_key(_fd):
         return next(key_inputs)
 
-    def _fake_read_search_query(_fd, stdout, previous_line_count=0):
+    def _fake_read_search_query(_fd, stdout, previous_line_count=0, **_kwargs):
         assert previous_line_count == 5
         stdout.write(f"\x1b[{previous_line_count}F\x1b[JSearch: ignored\n")
-        return None
+        return SearchPromptResult(applied=False, query="", rendered_line_count=1)
 
     monkeypatch.setitem(sys.modules, "termios", FakeTermios)
     monkeypatch.setitem(sys.modules, "tty", FakeTty)
@@ -799,6 +850,39 @@ def test_read_key_decodes_actions_quit_enter_eof_unknown_and_invalid_utf8(monkey
     assert _read_key(0) == "unknown"
 
 
+def test_table_read_search_query_renders_framed_prompt_and_escapes_controls():
+    stdout = StringIO()
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"docs\x01\n")
+        os.close(write_fd)
+        write_fd = -1
+
+        result = _read_search_query(
+            read_fd,
+            stdout,
+            search_title="Search rows",
+            count_label="3 rows",
+        )
+    finally:
+        os.close(read_fd)
+        if write_fd != -1:
+            os.close(write_fd)
+
+    assert result == SearchPromptResult(
+        applied=True,
+        query="docs\x01",
+        rendered_line_count=4,
+    )
+    rendered = stdout.getvalue()
+    visible = visible_text(rendered)
+    assert "Search rows" in visible
+    assert "3 rows" in visible
+    assert "⌕ docs\\x01" in visible
+    assert "Enter apply • empty Enter clear • Esc cancel" in visible
+    assert "docs\x01" not in rendered
+
+
 def test_read_search_query_returns_none_when_escape_cancels():
     stdout = StringIO()
     read_fd, write_fd = os.pipe()
@@ -806,13 +890,15 @@ def test_read_search_query_returns_none_when_escape_cancels():
         os.write(write_fd, b"\x1b")
         os.close(write_fd)
         write_fd = -1
-        query = _read_search_query(read_fd, stdout)
+        result = _read_search_query(read_fd, stdout)
     finally:
         os.close(read_fd)
         if write_fd != -1:
             os.close(write_fd)
 
-    assert query is None
+    assert result.applied is False
+    assert result.query == ""
+    assert result.rendered_line_count == 4
 
 
 def test_read_filter_query_handles_backspace_escape_and_replacement(monkeypatch):

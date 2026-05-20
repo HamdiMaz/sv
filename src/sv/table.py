@@ -12,9 +12,12 @@ import unicodedata
 
 from sv.errors import SvError
 from sv.search import (
+    SearchPromptConfig,
+    SearchPromptResult,
     discard_last_utf8_character,
     read_search_prompt,
     ranked_search_indices,
+    render_search_prompt,
 )
 from sv.terminal import escape_terminal_controls
 
@@ -171,6 +174,8 @@ def browse_table(
     | None = None,
     detail_actions: Mapping[str, Callable[[Sequence[str]], str | None]] | None = None,
     detail_key_help: str = "a add skill • q back",
+    search_title: str = "Search rows",
+    search_placeholder: str = "type to search…",
 ) -> Sequence[str] | None:
     """Browse rows in a read-only TTY table.
 
@@ -274,10 +279,17 @@ def browse_table(
             elif key == "right":
                 state.page_next()
             elif key == "search":
-                query = _read_search_query(fd, output_stream, rendered_lines)
-                rendered_lines = 1
-                if query is not None:
-                    state.set_search(query)
+                result = _read_search_query(
+                    fd,
+                    output_stream,
+                    rendered_lines,
+                    search_title=search_title,
+                    search_placeholder=search_placeholder,
+                    count_label=f"{len(state.rows)} rows",
+                )
+                rendered_lines = result.rendered_line_count
+                if result.applied:
+                    state.set_search(result.query)
             elif key == "filter":
                 state.set_filter(_read_filter_query(fd))
             elif key.startswith("search:"):
@@ -414,7 +426,7 @@ def _render_interactive_table(
         terminal_width,
     )
     if not state.visible_rows():
-        lines.append(_fit_text("No rows to show", terminal_width))
+        lines.extend(_format_no_match_lines(state, terminal_width))
     for row_index, row in state.visible_rows():
         line = _fit_text(
             _format_interactive_row(row, widths, separator), terminal_width
@@ -507,6 +519,16 @@ def _fit_text(value: str, max_width: int) -> str:
     return "".join(trimmed).rstrip() + ellipsis
 
 
+def _format_no_match_lines(state: TableState, terminal_width: int) -> list[str]:
+    if not state.search_query:
+        return [_fit_text("No rows to show", terminal_width)]
+    safe_query = _sanitize_cell(state.search_query)
+    return [
+        f"{_FG_MUTED}{_fit_text(f'No matches for \"{safe_query}\"', terminal_width)}{_RESET}",
+        f"{_FG_MUTED}{_fit_text('Try a different search term.', terminal_width)}{_RESET}",
+    ]
+
+
 def _format_table_help_line(state: TableState, terminal_width: int) -> str:
     filtered_count = len(state._filtered_indices())
     total_count = len(state.rows)
@@ -515,7 +537,8 @@ def _format_table_help_line(state: TableState, terminal_width: int) -> str:
     else:
         text = "Showing 0-0 of 0"
     if state.search_query:
-        text += f" matching {total_count} • search: {state.search_query}"
+        safe_query = _sanitize_cell(state.search_query)
+        text += f" matching {total_count} • search: {safe_query}"
     text += " • ↑/↓ move • ←/→ page • / search • Enter details"
     if state.key_help:
         text += f" • {state.key_help}"
@@ -552,16 +575,24 @@ def _read_search_query(
     fd: int,
     stdout: TextIO,
     previous_line_count: int = 0,
-) -> str | None:
-    result = read_search_prompt(
+    *,
+    search_title: str = "Search rows",
+    search_placeholder: str = "type to search…",
+    count_label: str = "",
+) -> SearchPromptResult:
+    return read_search_prompt(
         fd,
         stdout,
-        lambda query: f"Search: {query}",
+        lambda query: render_search_prompt(
+            query,
+            SearchPromptConfig(
+                title=search_title,
+                placeholder=search_placeholder,
+                count_label=count_label,
+            ),
+        ),
         previous_line_count=previous_line_count,
     )
-    if not result.applied:
-        return None
-    return result.query
 
 
 def _read_filter_query(fd: int) -> str:
