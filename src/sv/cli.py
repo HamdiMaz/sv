@@ -96,7 +96,9 @@ from sv.terminal import escape_terminal_controls
 from sv.tomlutil import load_toml_document
 from sv.ui import (
     CellWidths,
+    DetailLine,
     browse_tty_table,
+    detail_line,
     format_plain_table as format_table,
     select_tty_items as select_skills,
 )
@@ -2113,11 +2115,11 @@ def _browse_repo_source_skills(
 
     rows, entries = _interactive_source_skill_rows(catalog)
 
-    def render_detail(row: Sequence[str], status: str | None) -> str:
+    def render_detail(row: Sequence[str], status: str | None) -> list[DetailLine]:
         entry = _entry_for_interactive_row(row, rows, entries)
         if entry is None:
-            return _format_source_skill_unavailable_detail(status)
-        return _format_source_skill_detail(entry, status=status)
+            return _format_source_skill_unavailable_detail_card(status)
+        return _format_source_skill_detail_card(entry, status=status)
 
     def add_detail(row: Sequence[str]) -> str:
         return _source_skill_detail_action(row, rows, entries, cwd=cwd, adapter=adapter)
@@ -2379,11 +2381,11 @@ def _browse_source_skills(
 ) -> int:
     rows, entries = _interactive_source_skill_rows(catalog)
 
-    def render_detail(row: Sequence[str], status: str | None) -> str:
+    def render_detail(row: Sequence[str], status: str | None) -> list[DetailLine]:
         entry = _entry_for_interactive_row(row, rows, entries)
         if entry is None:
-            return _format_source_skill_unavailable_detail(status)
-        return _format_source_skill_detail(entry, status=status)
+            return _format_source_skill_unavailable_detail_card(status)
+        return _format_source_skill_detail_card(entry, status=status)
 
     def add_detail(row: Sequence[str]) -> str:
         return _source_skill_detail_action(
@@ -2396,7 +2398,7 @@ def _browse_source_skills(
         row_ranker=_source_skill_ranker(entries),
         detail_renderer=render_detail,
         detail_actions={"a": add_detail},
-        detail_key_help="a add skill • q back",
+        detail_key_help="a add • q back",
     )
     return 0
 
@@ -2477,6 +2479,38 @@ def _format_source_skill_detail(entry: SourceSkill, status: str | None = None) -
     if status is not None:
         lines.append(f"Status: {_escape_control_characters(status)}")
     return "\n".join(lines)
+
+
+def _format_source_skill_detail_card(
+    entry: SourceSkill, status: str | None = None
+) -> list[DetailLine]:
+    lines = [
+        detail_line("╭─ Skill" + "─" * 48, style="accent"),
+        detail_line(f"│ {entry.name} ● available", style="title"),
+        detail_line(f"│ Source  {entry.repo_id}"),
+        detail_line(f"│ Path    {entry.source_relative_path}"),
+        detail_line("├─ Description" + "─" * 42, style="accent"),
+        detail_line(entry.description, wrap=True, indent=2),
+    ]
+    if status is not None:
+        lines.extend(
+            [
+                detail_line(""),
+                detail_line("Status", style="accent"),
+                detail_line(status, wrap=True, indent=2),
+            ]
+        )
+    return lines
+
+
+def _format_source_skill_unavailable_detail_card(
+    status: str | None = None,
+) -> list[DetailLine]:
+    safe_status = status or "Selected skill is no longer available."
+    return [
+        detail_line("Status", style="accent"),
+        detail_line(f"  {safe_status}", wrap=True),
+    ]
 
 
 def _format_source_skill_unavailable_detail(status: str | None = None) -> str:

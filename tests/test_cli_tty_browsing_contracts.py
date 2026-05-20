@@ -50,6 +50,12 @@ class _NonTty(io.StringIO):
         return False
 
 
+def _detail_visible_text(detail) -> str:
+    if isinstance(detail, str):
+        return detail
+    return "\n".join(getattr(line, "text", str(line)) for line in detail)
+
+
 def _non_tty_runtime(*, cwd: Path, home: Path) -> Runtime:
     return Runtime(
         cwd=cwd,
@@ -85,11 +91,15 @@ def test_tty_list_browses_source_skills_with_details_by_default(
         assert callable(kwargs.get("detail_renderer"))
         assert callable(kwargs.get("detail_actions", {}).get("a"))
         assert kwargs.get("on_detail") is None
-        detail_text = kwargs["detail_renderer"](rows[0], None)
-        assert "Skill: alpha" in detail_text
-        assert "Source: " in detail_text
-        assert "Path: " in detail_text
-        assert "Description: Alpha skill." in detail_text
+        detail = kwargs["detail_renderer"](rows[0], None)
+        detail_text = _detail_visible_text(detail)
+        assert "╭─ Skill" in detail_text
+        assert "alpha ● available" in detail_text
+        assert "Source  " in detail_text
+        assert "Path    " in detail_text
+        assert "├─ Description" in detail_text
+        assert "Alpha skill." in detail_text
+        assert kwargs["detail_key_help"] == "a add • q back"
         status = kwargs["detail_actions"]["a"](rows[0])
         assert "Added Pi skill 'alpha'" in status
         return None
@@ -372,11 +382,15 @@ def test_tty_search_browses_ranked_matches_with_details_by_default(
         assert callable(kwargs.get("detail_renderer"))
         assert callable(kwargs.get("detail_actions", {}).get("a"))
         assert kwargs.get("on_detail") is None
-        detail_text = kwargs["detail_renderer"](rows[0], None)
-        assert "Skill: docs" in detail_text
-        assert "Source: " in detail_text
-        assert "Path: " in detail_text
-        assert "Description: Docs skill." in detail_text
+        detail = kwargs["detail_renderer"](rows[0], None)
+        detail_text = _detail_visible_text(detail)
+        assert "╭─ Skill" in detail_text
+        assert "docs ● available" in detail_text
+        assert "Source  " in detail_text
+        assert "Path    " in detail_text
+        assert "├─ Description" in detail_text
+        assert "Docs skill." in detail_text
+        assert kwargs["detail_key_help"] == "a add • q back"
         status = kwargs["detail_actions"]["a"](rows[0])
         assert "Added Pi skill 'docs'" in status
         return None
@@ -523,7 +537,9 @@ def test_tty_detail_renderer_with_stale_row_preserves_status_line(
     result = run_sv(["list"], cwd=project, home=home)
 
     assert result.exit_code == 0
-    assert detail_texts == ["Status: Still open"]
+    assert [_detail_visible_text(detail) for detail in detail_texts] == [
+        "Status\n  Still open"
+    ]
 
 
 @pytest.mark.integration
@@ -635,9 +651,12 @@ def test_tty_repo_skill_browser_detail_action_installs_one_skill(
         if headers == ["Repo", "URL", "Cache"]:
             kwargs["on_detail"](rows[0])
         elif headers == ["Skill", "Source", "Description"]:
-            detail_text = kwargs["detail_renderer"](rows[0], None)
-            assert "Skill: alpha" in detail_text
-            assert "Description: Alpha skill." in detail_text
+            detail = kwargs["detail_renderer"](rows[0], None)
+            detail_text = _detail_visible_text(detail)
+            assert "╭─ Skill" in detail_text
+            assert "alpha ● available" in detail_text
+            assert "Description" in detail_text
+            assert "Alpha skill." in detail_text
             assert not (project / ".pi" / "skills" / "alpha").exists()
             status = kwargs["detail_actions"]["a"](rows[0])
             assert "Added Pi skill 'alpha'" in status
@@ -669,8 +688,10 @@ def test_tty_repo_skill_browser_detail_render_does_not_install_skill(
         if headers == ["Repo", "URL", "Cache"]:
             kwargs["on_detail"](rows[0])
         elif headers == ["Skill", "Source", "Description"]:
-            detail_text = kwargs["detail_renderer"](rows[0], None)
-            assert "Skill: alpha" in detail_text
+            detail = kwargs["detail_renderer"](rows[0], None)
+            detail_text = _detail_visible_text(detail)
+            assert "╭─ Skill" in detail_text
+            assert "alpha ● available" in detail_text
         return None
 
     monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
