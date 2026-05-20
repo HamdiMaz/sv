@@ -5,6 +5,7 @@ import pytest
 
 from sv import cli as cli_module
 from sv.config import derive_repo_id
+from sv.errors import SvError
 from tests.helpers import configure_source, make_source_repo, write_source_skill, run_git
 
 
@@ -305,8 +306,6 @@ def test_tty_detail_add_reports_escaped_refresh_errors(
     statuses = []
 
     def fail_refresh(_context):
-        from sv.errors import SvError
-
         raise SvError("refresh\x1b failed")
 
     def fake_browse(_headers, rows, **kwargs):
@@ -322,6 +321,89 @@ def test_tty_detail_add_reports_escaped_refresh_errors(
     assert statuses == ["refresh\\x1b failed"]
     assert "refresh\\x1b failed" in statuses[0]
     assert "refresh\x1b failed" not in result.stderr
+
+
+@pytest.mark.integration
+def test_tty_detail_add_with_stale_row_reports_unavailable_without_installing(
+    tmp_path: Path, run_sv, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    statuses = []
+
+    def fake_browse(_headers, _rows, **kwargs):
+        statuses.append(kwargs["detail_actions"]["a"](["missing", "repo", "Gone."]))
+        return None
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+
+    result = run_sv(["list"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert statuses == ["Selected skill is no longer available."]
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+
+
+@pytest.mark.integration
+def test_tty_detail_renderer_with_stale_row_preserves_status_line(
+    tmp_path: Path, run_sv, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    detail_texts = []
+
+    def fake_browse(_headers, _rows, **kwargs):
+        detail_texts.append(
+            kwargs["detail_renderer"](["missing", "repo", "Gone."], "Still open")
+        )
+        return None
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+
+    result = run_sv(["list"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert detail_texts == ["Status: Still open"]
+
+
+@pytest.mark.integration
+def test_tty_detail_add_reports_escaped_context_detection_errors(
+    tmp_path: Path, run_sv, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    statuses = []
+
+    def fail_context(_cwd):
+        raise SvError("context\x1b failed")
+
+    def fake_browse(_headers, rows, **kwargs):
+        statuses.append(kwargs["detail_actions"]["a"](rows[0]))
+        return None
+
+    monkeypatch.setattr(cli_module, "_detect_local_context", fail_context)
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+
+    result = run_sv(["list"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert statuses == ["context\\x1b failed"]
+    assert "context\x1b failed" not in result.stderr
 
 
 @pytest.mark.integration

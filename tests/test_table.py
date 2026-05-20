@@ -367,6 +367,90 @@ def test_browse_table_detail_action_none_clears_previous_status(monkeypatch):
     assert rendered_statuses == [None, "Added alpha", None]
 
 
+def test_browse_table_detail_ignores_unmapped_action_until_quit(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter", "action:x", "enter", "quit", "quit"])
+    rendered_statuses: list[str | None] = []
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    def render_detail(row, status):
+        rendered_statuses.append(status)
+        return f"DETAIL {row[0]}"
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        detail_renderer=render_detail,
+        detail_actions={"a": lambda _row: "Added alpha"},
+    )
+
+    assert selected is None
+    assert rendered_statuses == [None]
+    rendered = visible_text(output.getvalue())
+    assert "DETAIL alpha" in rendered
+    assert rendered.count("Skill  Description") >= 3
+
+
+def test_browse_table_detail_eof_renders_final_table_without_clear(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter", "eof"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        detail_renderer=lambda row, status: f"DETAIL {row[0]}",
+    )
+
+    assert selected is None
+    rendered = visible_text(output.getvalue())
+    assert "DETAIL alpha" in rendered
+    assert rendered.count("Skill  Description") >= 2
+    assert rendered.rstrip().endswith("q back")
+    assert output.getvalue().endswith("\x1b[?25h")
+
+
+def test_browse_table_detail_eof_clears_without_final_table_when_clear_on_exit(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter", "eof"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        clear_on_exit=True,
+        detail_renderer=lambda row, status: f"DETAIL {row[0]}",
+    )
+
+    assert selected is None
+    assert "DETAIL alpha" in visible_text(output.getvalue())
+    assert output.getvalue().endswith("\x1b[2F\x1b[J\x1b[?25h")
+
+
 def test_browse_table_escape_returns_from_detail_to_list_then_exits(monkeypatch):
     output = TtyStream()
     key_inputs = iter(["enter", "escape", "quit"])
