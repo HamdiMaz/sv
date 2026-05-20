@@ -4,11 +4,11 @@
 
 Change `sv status` so its default source lookup uses the normal metadata cache policy instead of forcing a source refresh on every run. Fresh cached metadata should make repeated status checks fast. Users who need a current-source check can run `sv status --refresh`; users who need strict offline/cache-only behavior can continue using `sv status --cached`.
 
-## Problem
+## Background
 
-`sv status` currently passes `CacheMode.FORCE_REFRESH` as its default cache policy. In a GitHub-backed source without a generated `.sv/index.toml`, that causes a full remote discovery every time status runs. On this worktree, default status took about 9 seconds, while `sv status --cached` took about 0.12 seconds.
+Before this change, `sv status` passed `CacheMode.FORCE_REFRESH` as its default cache policy. In a GitHub-backed source without a generated `.sv/index.toml`, that caused a full remote discovery every time status ran. On this worktree, default status took about 9 seconds, while `sv status --cached` took about 0.12 seconds.
 
-The current behavior optimizes for up-to-the-moment source state, but it makes a common diagnostic command feel slow. The command name and user expectation are closer to a quick local/project health check, with explicit opt-in for network freshness.
+That previous behavior optimized for up-to-the-moment source state, but it made a common diagnostic command feel slow. The command name and user expectation are closer to a quick local/project health check, with explicit opt-in for network freshness.
 
 ## Goals
 
@@ -25,11 +25,11 @@ The current behavior optimizes for up-to-the-moment source state, but it makes a
 - Do not change manifest schema or cache file formats.
 - Do not change `sv list`, `sv add`, `sv sync`, or `sv update` cache semantics.
 
-## Proposed behavior
+## Current behavior
 
 ### Default `sv status`
 
-Default status should use `CacheMode.NORMAL`:
+Default status uses `CacheMode.NORMAL`:
 
 1. Load project or vault manifest entries as it does today.
 2. If there are no managed entries, print the existing no-skills message and do not refresh sources.
@@ -44,7 +44,7 @@ This means default status may not show source changes made after the last fresh 
 
 ### `sv status --refresh`
 
-`--refresh` should retain the current force-refresh semantics:
+`--refresh` retains force-refresh semantics:
 
 - always attempt a source metadata refresh before computing source-aware status;
 - fail if the refresh fails, rather than falling back to stale cached metadata;
@@ -52,7 +52,7 @@ This means default status may not show source changes made after the last fresh 
 
 ### `sv status --cached`
 
-`--cached` should keep its current meaning:
+`--cached` keeps its current meaning:
 
 - never call Git, GitHub, or source backends;
 - require existing cached metadata when source-aware status is needed;
@@ -60,7 +60,9 @@ This means default status may not show source changes made after the last fresh 
 
 ## Implementation outline
 
-- In `src/sv/cli.py`, change the status command policy construction from force-refresh default to normal default:
+This change was implemented by updating the status policy construction while leaving the surrounding status flow intact.
+
+- In `src/sv/cli.py`, the status command policy construction uses normal cache mode by default:
 
   ```python
   status_policy = _cache_policy_from_args(
@@ -70,10 +72,10 @@ This means default status may not show source changes made after the last fresh 
   )
   ```
 
-- Keep passing this policy into `_handle_status` and `_handle_vault_status` unchanged.
-- Keep `_status_catalog_if_configured` accepting the supplied policy. It should not create a force-refresh policy unless no policy is passed by an internal caller.
-- Do not change `_entries_require_source_status_refresh`; status should still compute source-aware flags when managed entries are available.
-- Update user-facing docs that currently say source-aware `sv status` refreshes metadata by default.
+- This policy is still passed into `_handle_status` and `_handle_vault_status` unchanged.
+- `_status_catalog_if_configured` still accepts the supplied policy. It does not create a force-refresh policy unless no policy is passed by an internal caller.
+- `_entries_require_source_status_refresh` is unchanged; status still computes source-aware flags when managed entries are available.
+- User-facing docs describe the new default status cache contract.
 
 ## Tests
 

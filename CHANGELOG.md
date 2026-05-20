@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Changed plain `sv status` to use fresh cached source metadata by default for faster repeated checks, while keeping `sv status --refresh` for immediate current-source checks and `sv status --cached` for strict cache-only status.
 - Added visible ranked `/` search to interactive table browsers and multi-select pickers, including source-skill-aware ordering that matches `sv search` in source skill lists.
 - Unified interactive TTY browser and picker output around a framed table shell, with renderer-owned `Sel` columns for structured pickers, command-specific picker footers, and refreshed skill details.
 - Added inline skill detail pages for TTY list/search/repo browsing, including detail-level single-skill add actions while preserving repo list-mode add-all.
