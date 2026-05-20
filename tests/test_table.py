@@ -12,6 +12,7 @@ from sv.table import (
     _read_escape_sequence,
     _read_filter_query,
     _read_key,
+    _render_interactive_detail,
     _render_interactive_table,
     browse_table,
     format_table,
@@ -145,6 +146,66 @@ def test_interactive_table_sanitizes_initial_filter_query_in_footer():
     assert "\\x1b[2J" in output
 
 
+def test_interactive_detail_sanitizes_and_fits_lines(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "20")
+    stdout = StringIO()
+
+    line_count = _render_interactive_detail(
+        ["alpha"],
+        lambda row, status: ["Skill: " + row[0], "one\ntwo\x1b[2J", "x" * 80],
+        None,
+        stdout,
+        previous_line_count=3,
+        detail_key_help="a add skill • q back",
+    )
+
+    output = stdout.getvalue()
+    visible_lines = [visible_text(line) for line in output.splitlines()]
+    assert output.startswith("\x1b[3F\x1b[J")
+    assert line_count == 4
+    assert "\x1b[2J" not in output
+    assert "one\\x0atwo\\x1b[2J" in output
+    assert all(display_width(line) <= 20 for line in visible_lines)
+    assert visible_lines[-1].startswith("a add skill")
+
+
+def test_interactive_detail_splits_string_output_into_physical_lines(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "80")
+    stdout = StringIO()
+
+    line_count = _render_interactive_detail(
+        ["alpha"],
+        lambda row, status: "Skill: " + row[0] + "\none\ntwo\x1b[2J",
+        None,
+        stdout,
+        detail_key_help="q back",
+    )
+
+    output = stdout.getvalue()
+    visible_lines = [visible_text(line) for line in output.splitlines()]
+    assert line_count == 4
+    assert "\\x0a" not in output
+    assert "\x1b[2J" not in output
+    assert visible_lines == ["Skill: alpha", "one", "two\\x1b[2J", "q back"]
+
+
+def test_interactive_detail_trims_trailing_empty_sequence_lines_before_footer(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "80")
+    stdout = StringIO()
+
+    line_count = _render_interactive_detail(
+        ["alpha"],
+        lambda row, status: ["Skill: " + row[0], status or ""],
+        None,
+        stdout,
+        detail_key_help="q back",
+    )
+
+    visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert line_count == 2
+    assert visible_lines == ["Skill: alpha", "q back"]
+
+
 def test_table_state_keeps_raw_rows_for_details_while_rendering_safely():
     state = TableState(["Skill", "Description"], [["alpha", "line one\nline two"]])
     stdout = StringIO()
@@ -204,6 +265,132 @@ def test_table_state_slash_filtering_keeps_matching_rows_and_footer():
     visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
     assert visible_lines[2] == "gamma  Org/C"
     assert visible_lines[-1] == "Showing 1-1 of 1 matching 3 • filter: org/c • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
+
+
+def test_browse_table_enter_with_detail_renderer_opens_detail_q_returns_to_list_then_exits(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter", "quit", "quit"])
+    rendered_rows: list[list[str]] = []
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        detail_renderer=lambda row, status: rendered_rows.append(list(row)) or "DETAIL alpha",
+    )
+
+    assert selected is None
+    assert rendered_rows == [["alpha", "Short."]]
+    rendered = visible_text(output.getvalue())
+    assert "DETAIL alpha" in rendered
+    assert rendered.count("Skill  Description") >= 3
+    assert rendered.rstrip().endswith("q back")
+
+
+def test_browse_table_detail_action_renders_status_and_stays_in_detail(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter", "action:a", "quit", "quit"])
+    actions: list[list[str]] = []
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    def render_detail(row, status):
+        lines = [f"DETAIL {row[0]}"]
+        if status:
+            lines.append(f"Status: {status}")
+        return lines
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        detail_renderer=render_detail,
+        detail_actions={"a": lambda row: actions.append(list(row)) or "Added alpha"},
+    )
+
+    assert selected is None
+    assert actions == [["alpha", "Short."]]
+    rendered = visible_text(output.getvalue())
+    assert "DETAIL alpha" in rendered
+    assert "Status: Added alpha" in rendered
+    assert rendered.count("DETAIL alpha") >= 2
+
+
+def test_browse_table_detail_action_none_clears_previous_status(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter", "action:a", "action:b", "quit", "quit"])
+    actions: list[str] = []
+    rendered_statuses: list[str | None] = []
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    def render_detail(row, status):
+        rendered_statuses.append(status)
+        lines = [f"DETAIL {row[0]}"]
+        if status is not None:
+            lines.append(f"Status: {status}")
+        return lines
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        detail_renderer=render_detail,
+        detail_actions={
+            "a": lambda row: actions.append("a") or "Added alpha",
+            "b": lambda row: actions.append("b") or None,
+        },
+    )
+
+    assert selected is None
+    assert actions == ["a", "b"]
+    assert rendered_statuses == [None, "Added alpha", None]
+
+
+def test_browse_table_escape_returns_from_detail_to_list_then_exits(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["enter", "escape", "quit"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill", "Description"],
+        [["alpha", "Short."]],
+        stdin=TtyStream(),
+        stdout=output,
+        detail_renderer=lambda row, status: f"DETAIL {row[0]}",
+    )
+
+    assert selected is None
+    rendered = visible_text(output.getvalue())
+    assert "DETAIL alpha" in rendered
+    assert rendered.count("Skill  Description") >= 3
+    assert rendered.rstrip().endswith("q back")
 
 
 def test_browse_table_enter_invokes_detail_hook_and_q_goes_back(monkeypatch):

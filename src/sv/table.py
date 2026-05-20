@@ -134,6 +134,9 @@ def browse_table(
     key_actions: Mapping[str, Callable[[Sequence[str]], object]] | None = None,
     key_help: str = "",
     clear_on_exit: bool = False,
+    detail_renderer: Callable[[Sequence[str], str | None], str | Sequence[str]] | None = None,
+    detail_actions: Mapping[str, Callable[[Sequence[str]], str | None]] | None = None,
+    detail_key_help: str = "a add skill • q back",
 ) -> Sequence[str] | None:
     """Browse rows in a read-only TTY table.
 
@@ -154,6 +157,9 @@ def browse_table(
 
     state = TableState(headers, rows, viewport_size=viewport_size, key_help=key_help)
     actions = {key.casefold(): action for key, action in (key_actions or {}).items()}
+    detail_mode_actions = {
+        key.casefold(): action for key, action in (detail_actions or {}).items()
+    }
     try:
         fd = input_stream.fileno()
         original_settings = termios.tcgetattr(fd)
@@ -170,9 +176,51 @@ def browse_table(
         output_stream.write(_HIDE_CURSOR)
         output_stream.flush()
         rendered_lines = _render_interactive_table(state, output_stream)
+        mode = "list"
+        detail_row: Sequence[str] | None = None
+        detail_status: str | None = None
 
         while True:
             key = _read_key(fd)
+            if mode == "detail":
+                if key in {"escape", "quit"}:
+                    mode = "list"
+                    detail_row = None
+                    detail_status = None
+                    rendered_lines = _render_interactive_table(
+                        state,
+                        output_stream,
+                        previous_line_count=rendered_lines,
+                    )
+                    continue
+                if key == "eof":
+                    if clear_on_exit:
+                        _clear_rendered_table(output_stream, rendered_lines)
+                    else:
+                        _render_interactive_table(
+                            state,
+                            output_stream,
+                            previous_line_count=rendered_lines,
+                            highlight_cursor=False,
+                        )
+                    return None
+                if key.startswith("action:") and detail_row is not None:
+                    action_key = key.partition(":")[2].casefold()
+                    action = detail_mode_actions.get(action_key)
+                    if action is not None:
+                        status = action(detail_row)
+                        detail_status = str(status) if status is not None else None
+                        rendered_lines = _render_interactive_detail(
+                            detail_row,
+                            detail_renderer,
+                            detail_status,
+                            output_stream,
+                            previous_line_count=rendered_lines,
+                            detail_key_help=detail_key_help,
+                        )
+                    continue
+                continue
+
             if key == "up":
                 state.move_up()
             elif key == "down":
@@ -188,6 +236,19 @@ def browse_table(
             elif key == "enter":
                 row = state.current_row()
                 if row is None:
+                    continue
+                if detail_renderer is not None:
+                    mode = "detail"
+                    detail_row = list(row)
+                    detail_status = None
+                    rendered_lines = _render_interactive_detail(
+                        detail_row,
+                        detail_renderer,
+                        detail_status,
+                        output_stream,
+                        previous_line_count=rendered_lines,
+                        detail_key_help=detail_key_help,
+                    )
                     continue
                 if on_detail is None:
                     _render_interactive_table(
@@ -247,6 +308,36 @@ def _clear_rendered_table(stdout: TextIO, rendered_lines: int) -> None:
         stdout.write(f"\x1b[{rendered_lines}F")
         stdout.write("\x1b[J")
         stdout.flush()
+
+
+def _render_interactive_detail(
+    row: Sequence[str],
+    detail_renderer: Callable[[Sequence[str], str | None], str | Sequence[str]] | None,
+    status: str | None,
+    stdout: TextIO,
+    *,
+    previous_line_count: int = 0,
+    detail_key_help: str = "a add skill • q back",
+) -> int:
+    if previous_line_count:
+        stdout.write(f"\x1b[{previous_line_count}F")
+        stdout.write("\x1b[J")
+
+    terminal_width = _terminal_width()
+    rendered = detail_renderer(row, status) if detail_renderer is not None else ""
+    if isinstance(rendered, str):
+        content_lines = rendered.splitlines() or [""]
+    else:
+        content_lines = [str(line) for line in rendered]
+    lines = [_fit_text(_sanitize_cell(line), terminal_width) for line in content_lines]
+    while lines and lines[-1] == "":
+        lines.pop()
+    lines.append(f"{_FG_MUTED}{_fit_text(_sanitize_cell(detail_key_help), terminal_width)}{_RESET}")
+
+    stdout.write("\n".join(lines))
+    stdout.write("\n")
+    stdout.flush()
+    return len(lines)
 
 
 def _render_interactive_table(
