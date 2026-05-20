@@ -218,6 +218,71 @@ def test_render_can_show_a_header_aligned_after_checkbox_prefix():
     assert lines[1] == "[ ] alpha  RepoA  First skill"
 
 
+def test_render_structured_picker_uses_framed_header_with_sel_column(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "100")
+    items = [
+        {"skill": "a", "source": "Org/A", "description": "Alpha."},
+        {"skill": "longer", "source": "Org/Longer", "description": "Longer."},
+    ]
+    state = SelectionState(items)
+    state.selected.add(1)
+    stdout = StringIO()
+
+    line_count = _render(
+        state,
+        stdout,
+        highlight_cursor=False,
+        item_columns=lambda item: [
+            item["skill"],
+            item["source"],
+            item["description"],
+        ],
+        header_columns=["Skill", "Source", "Description"],
+        enter_action_label="add",
+    )
+
+    lines = stdout.getvalue().splitlines()
+    visible_lines = [visible_text(line) for line in lines]
+    assert line_count == 6
+    assert visible_lines[:3] == [
+        "---  ------  ----------  -----------",
+        "Sel  Skill   Source      Description",
+        "---  ------  ----------  -----------",
+    ]
+    assert lines[0].startswith("\x1b[38;5;60m")
+    assert lines[1].startswith("\x1b[38;5;183m\x1b[1m")
+    assert visible_lines[3] == "[ ]  a       Org/A       Alpha."
+    assert visible_lines[4] == "[x]  longer  Org/Longer  Longer."
+    assert visible_lines[5] == "Showing 1-2 of 2 • ↑/↓ move • ←/→ page • Space select • Enter add • / filter • q cancel"
+
+
+def test_render_structured_footer_shows_filter_and_enter_action(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "100")
+    items = [
+        {"skill": "alpha", "source": "Org/A", "description": "Alpha."},
+        {"skill": "gamma", "source": "Org/G", "description": "Gamma."},
+    ]
+    state = SelectionState(items, filter_text=lambda item: item["skill"])
+    state.set_filter("ga")
+    stdout = StringIO()
+
+    _render(
+        state,
+        stdout,
+        highlight_cursor=False,
+        item_columns=lambda item: [
+            item["skill"],
+            item["source"],
+            item["description"],
+        ],
+        header_columns=["Skill", "Source", "Description"],
+        enter_action_label="remove",
+    )
+
+    lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert lines[-1] == "Showing 1-1 of 1 matching 2 • filter: ga • ↑/↓ move • ←/→ page • Space select • Enter remove • / filter • q cancel"
+
+
 def test_render_escapes_control_characters_in_item_labels():
     state = SelectionState(["alpha\x1b[2J"])
     stdout = StringIO()
@@ -379,9 +444,9 @@ def test_select_skills_renders_structured_columns_with_aligned_header(monkeypatc
     )
 
     lines = [visible_text(line) for line in output.getvalue().splitlines()]
-    assert "    Skill   Source      Description" in lines
-    assert "[ ] a       Org/A       Alpha." in lines
-    assert "[ ] longer  Org/Longer  Longer." in lines
+    assert "Sel  Skill   Source      Description" in lines
+    assert "[ ]  a       Org/A       Alpha." in lines
+    assert "[ ]  longer  Org/Longer  Longer." in lines
 
 
 def test_select_skills_returns_empty_when_cancelled(monkeypatch):
