@@ -55,11 +55,11 @@ Terminal control characters from repo metadata or skill descriptions are escaped
 
 ## Interactive table browser
 
-`sv list`, `sv search`, and TTY `sv repo list` output use the same inline table browser when stdin and stdout are interactive. Use ↑/↓ to move, ←/→ to page when available, `/` to filter rows, Enter to open details or the highlighted action, and `q` or Esc to go back. `sv list` and `sv search` details show focused skill metadata such as source, path, and description; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts.
+`sv list`, `sv search`, and TTY `sv repo list` output use the same inline table browser when stdin and stdout are interactive. Use ↑/↓ to move, ←/→ to page when available, `/` to open a visible ranked search prompt, Enter to open details or the highlighted action, and `q` or Esc to go back. `sv list` and `sv search` details show focused skill metadata such as source, path, and description; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts.
 
 ## Interactive picker output
 
-`sv add -l` uses an inline picker instead of a full-screen interface. Each row is kept to one terminal line so arrow-key navigation remains predictable. A muted help line shows the visible range and controls: ↑/↓ move, ←/→ page, Space select, Enter confirm, and `q` cancel. Long skill labels and the help line are truncated to the current terminal width, and control characters from source names or descriptions are escaped before display.
+`sv add -l` uses an inline picker instead of a full-screen interface. Each row is kept to one terminal line so arrow-key navigation remains predictable. A muted help line shows the visible range and controls: ↑/↓ move, ←/→ page, `/` search, Space select, Enter confirm, and `q` cancel. Pressing `/` opens a visible `Search:` prompt and applies ranked results after Enter. Long skill labels and the help line are truncated to the current terminal width, and control characters from source names or descriptions are escaped before display.
 
 ## Duplicate-name guidance
 

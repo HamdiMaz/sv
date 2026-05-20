@@ -52,7 +52,7 @@ Use `--cached` to avoid network and Git refreshes. Cached mode requires existing
 
 If no source repos are configured, `sv list` tells you to add one with `sv repo add <owner/repo>` instead of showing an empty skill table.
 
-In an interactive terminal, `sv list` opens a read-only browser. Use ↑/↓ to move, `/` to filter the visible rows, Enter to view skill details, and `q` to quit. The detail view shows focused skill metadata such as source, path, and description.
+In an interactive terminal, `sv list` opens a read-only browser. Use ↑/↓ to move, `/` to open a visible ranked search prompt, Enter to view skill details, and `q` to quit. The detail view shows focused skill metadata such as source, path, and description.
 
 In non-interactive output, or when the browser is unavailable, `sv list` prints a compact table with one row per skill name:
 
@@ -68,7 +68,7 @@ When two repos contain the same skill name, non-interactive `sv list` output gro
 
 - `sv add <skill>` installs the skill when exactly one configured repo provides that name. When multiple repos match in an interactive terminal, it shows a compact source-choice table with repo, description, and `Add as` columns before asking you to pick one.
 - `sv add <repo>:<skill>` installs from one exact source in the normal `skills/<name>` layout. Path-aware `Add as` values such as `sv add <repo>:<path/to/skill>` install indexed or non-default source paths.
-- `sv add -l` opens an interactive picker. The picker labels each row with its source repo ID so duplicate names are easy to distinguish without repeating the skill name twice. A help line keeps the controls visible while you move through the list. Long labels and the help line are shortened to your terminal width, and control characters in source metadata are printed as escaped text so the inline picker does not jump or clear the screen.
+- `sv add -l` opens an interactive picker. The picker labels each row with its source repo ID so duplicate names are easy to distinguish without repeating the skill name twice. Use `/` to open a visible ranked search prompt; source skill lists use the same source-aware ordering as `sv search`. A help line keeps the controls visible while you move through the list. Long labels and the help line are shortened to your terminal width, and control characters in source metadata are printed as escaped text so the inline picker does not jump or clear the screen.
 - `sv add --all` installs every valid skill only when there are no duplicate skill names across configured repos.
 
 `sv` never overwrites an existing project skill during add. If the skill folder already exists, it reports that the skill is already present and leaves local files unchanged. When origin metadata is available, the message also tells you whether the existing skill came from the same repo or a different repo than the one you requested. In a skill-vault repository, `sv add --replace <skill>` can intentionally replace an existing vault skill; non-interactive vault replacement requires `--replace`.
