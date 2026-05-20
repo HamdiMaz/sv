@@ -48,6 +48,16 @@ def test_read_search_prompt_escape_cancels_without_query(monkeypatch):
     )
 
 
+def test_read_search_prompt_backspace_removes_complete_multibyte_character(monkeypatch):
+    values = iter([b"\xc3", b"\xa9", b"\x7f", b"\n"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(values))
+
+    assert read_search_prompt(0, StringIO(), lambda query: query) == SearchPromptResult(
+        applied=True,
+        query="",
+    )
+
+
 def test_read_search_prompt_eof_applies_captured_or_empty_query(monkeypatch):
     values = iter([b"d", b""])
     monkeypatch.setattr("os.read", lambda _fd, _count: next(values))

@@ -228,6 +228,29 @@ def test_table_state_accepts_custom_row_ranker_with_original_indices():
     assert state.current_row() == ["find-docs"]
 
 
+def test_render_interactive_table_reuses_ranked_visible_indices(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "90")
+    call_count = 0
+
+    def ranker(query):
+        nonlocal call_count
+        call_count += 1
+        assert query == "docs"
+        return [1, 2]
+
+    state = TableState(
+        ["Skill"],
+        [["alpha"], ["docs"], ["docs-helper"]],
+        row_ranker=ranker,
+    )
+    state.set_search("docs")
+    call_count = 0
+
+    _render_interactive_table(state, StringIO())
+
+    assert call_count == 1
+
+
 def test_browse_table_enter_invokes_detail_hook_and_q_goes_back(monkeypatch):
     output = TtyStream()
     key_inputs = iter(["down", "enter", "quit"])
@@ -445,6 +468,13 @@ def test_read_filter_query_handles_backspace_escape_and_replacement(monkeypatch)
 
     escape_values = iter([b"a", b"\x1b", b"ignored"])
     monkeypatch.setattr("os.read", lambda _fd, _count: next(escape_values))
+
+    assert _read_filter_query(0) == ""
+
+
+def test_read_filter_query_backspace_removes_complete_multibyte_character(monkeypatch):
+    values = iter([b"\xc3", b"\xa9", b"\x7f", b"\n"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(values))
 
     assert _read_filter_query(0) == ""
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import select
 import shutil
@@ -11,7 +11,7 @@ from typing import TextIO
 import unicodedata
 
 from sv.errors import SvError
-from sv.search import read_search_prompt, ranked_search_indices
+from sv.search import discard_last_utf8_character, read_search_prompt, ranked_search_indices
 from sv.terminal import escape_terminal_controls
 
 
@@ -41,6 +41,7 @@ class TableState:
     filter_query: str = ""
     key_help: str = ""
     row_ranker: Callable[[str], Sequence[int]] | None = None
+    _visible_indices_cache: list[int] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.viewport_size < 1:
@@ -99,14 +100,21 @@ class TableState:
     def set_search(self, query: str) -> None:
         self.search_query = _sanitize_cell(query).strip()
         self.filter_query = self.search_query
+        self._visible_indices_cache = None
         self.cursor = 0
         self.viewport_start = 0
         self._clamp_view()
+        self._visible_indices_cache = None
 
     def set_filter(self, query: str) -> None:
         self.set_search(query)
 
     def _filtered_indices(self) -> list[int]:
+        if self._visible_indices_cache is None:
+            self._visible_indices_cache = self._compute_filtered_indices()
+        return self._visible_indices_cache
+
+    def _compute_filtered_indices(self) -> list[int]:
         if not self.search_query:
             return list(range(len(self.rows)))
         if self.row_ranker is not None:
@@ -423,8 +431,7 @@ def _read_filter_query(fd: int) -> str:
         if char == b"\x1b":
             return ""
         if char in {b"\x7f", b"\b"}:
-            if query:
-                query.pop()
+            discard_last_utf8_character(query)
             continue
         query.extend(char)
     return query.decode(errors="replace")

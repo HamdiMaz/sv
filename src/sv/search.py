@@ -74,6 +74,18 @@ def _fuzzy_score(term: str, value: str) -> int | None:
     return 100 + positions[0] + gaps
 
 
+def discard_last_utf8_character(query: bytearray) -> None:
+    """Remove the last complete UTF-8 character, or one byte if invalid."""
+    if not query:
+        return
+    try:
+        decoded = query.decode("utf-8")
+    except UnicodeDecodeError:
+        query.pop()
+        return
+    query[:] = decoded[:-1].encode("utf-8")
+
+
 def read_search_prompt(
     fd: int,
     stdout: TextIO,
@@ -97,8 +109,7 @@ def read_search_prompt(
             return SearchPromptResult(applied=False, query="")
         captured_input = True
         if char in {b"\x7f", b"\b"}:
-            if query:
-                query.pop()
+            discard_last_utf8_character(query)
         else:
             query.extend(char)
         _render_prompt(stdout, render_prompt, query, 1)
