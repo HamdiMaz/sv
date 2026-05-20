@@ -1926,12 +1926,13 @@ def _handle_repo(
 ) -> int:
     repo_list_alias = getattr(args, "repo_list_alias", False)
     repo_is_list_command = args.repo_command == "list" or repo_list_alias
+    repo_cache_policy = CachePolicy()
     if _repo_cache_flag_used(args) and not repo_is_list_command:
         raise SvError("Use --refresh/--cached only with 'sv repo list' or 'sv repo -l'.")
     if repo_list_alias and args.repo_command not in {None, "list"}:
         raise SvError("Use 'sv repo -l' by itself or use a repo subcommand.")
     if repo_is_list_command:
-        _repo_cache_policy_from_args(args)
+        repo_cache_policy = _repo_cache_policy_from_args(args)
 
     if args.repo_command == "add":
         try:
@@ -1974,6 +1975,7 @@ def _handle_repo(
                     cwd=cwd,
                     adapter=adapter,
                     git_runner=git_runner,
+                    cache_policy=repo_cache_policy,
                     record_global_source_state=record_global_source_state,
                 )
             except SvError as exc:
@@ -2009,6 +2011,7 @@ def _handle_repo_browser(
     cwd: Path,
     adapter: PiAdapter,
     git_runner,
+    cache_policy: CachePolicy,
     record_global_source_state: bool,
 ) -> int:
     rows = [[repo.id, repo.url, str(paths.source_repo_for(repo.id))] for repo in repos]
@@ -2019,14 +2022,13 @@ def _handle_repo_browser(
         repo = repos_by_id.get(repo_id)
         if repo is None:
             return
-        catalog = _update_sources_and_catalog_from_repos(
+        catalog = _catalog_for_source_command(
             [repo],
             paths,
             git_runner,
-            update=True,
+            policy=cache_policy,
             record_global_source_state=record_global_source_state,
             lightweight_discovery=True,
-            warn=lambda message: print(message, file=sys.stderr),
         )
         _browse_repo_source_skills(catalog, cwd=cwd, adapter=adapter)
 
