@@ -4,6 +4,7 @@
 
 - Added visible ranked `/` search to interactive table browsers and multi-select pickers, including source-skill-aware ordering that matches `sv search` in source skill lists.
 - Unified interactive TTY browser and picker output around a framed table shell, with renderer-owned `Sel` columns for structured pickers, command-specific picker footers, and refreshed skill details.
+- Added inline skill detail pages for TTY list/search/repo browsing, including detail-level single-skill add actions while preserving repo list-mode add-all.
 - Hardened skill materialization to reject nested source path names containing terminal control characters or Unicode format controls before copying them into projects, and made local Git source materialization preserve newly introduced symlinks until post-copy validation can reject them.
 - Hardened atomic TOML writes, project skill targets, and local materialization sources to reject symlinked destination paths or symlinked ancestors before writing/copying state.
 - Hardened `sv index` repository scans with a directory-depth limit so deeply nested non-skill trees fail closed before unbounded traversal.

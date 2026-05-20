@@ -89,7 +89,7 @@ sv repo list
 sv repo remove SomeOrg/TeamSkills
 ```
 
-`sv repo remove` updates global configuration only. It does not delete cached source clones or remove project skills that were already installed from that repo.
+`sv repo remove` updates global configuration only. It does not delete cached source clones or remove project skills that were already installed from that repo. In TTY `sv repo list`, Enter on a repo opens that repo's skill browser. In the repo skill browser, list-mode `a` adds all non-conflicting skills from that repo, Enter opens a detail page, detail-mode `a` adds only the shown skill and shows the add result/status, detail `q`/Esc returns to the repo skill list, and list `q`/Esc backtracks or exits.
 
 List valid skills available in configured source repos:
 
@@ -97,7 +97,7 @@ List valid skills available in configured source repos:
 sv list
 ```
 
-`sv list` uses fresh cached source metadata when available, refreshes lazily when metadata expires, and supports `--refresh` to force a source refresh. In an interactive terminal it opens a read-only browser with `Skill`, `Source`, and `Description` columns; use ↑/↓ to move, `/` to open a visible ranked search prompt, Enter for details, and `q` to quit. In non-interactive output, or when the browser is unavailable, it prints the same compact columns as a table. When duplicate skill names exist across repos, the table groups that name into one `N sources` row and prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value to copy; each duplicate group shows the skill name once to keep the choices easy to scan. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. See [reading sv output](docs/output.md) for examples.
+`sv list` uses fresh cached source metadata when available, refreshes lazily when metadata expires, and supports `--refresh` to force a source refresh. In an interactive terminal it opens an interactive browser with `Skill`, `Source`, and `Description` columns; use ↑/↓ to move, `/` to open a visible ranked search prompt, Enter to open an inline detail page, detail `a` to add the shown skill and show the add result/status, and detail `q`/Esc to return to the list. List `q`/Esc exits the browser. In non-interactive output, or when the browser is unavailable, it prints the same compact columns as a table. When duplicate skill names exist across repos, the table groups that name into one `N sources` row and prints a separate `Duplicate skill names` section with each repo, description, and exact `Add as` value to copy; each duplicate group shows the skill name once to keep the choices easy to scan. Tables wrap to the current terminal width so long repo IDs, cache paths, and descriptions stay readable; repo-like values prefer clean wrap points at `/` and `:` before falling back to hard wrapping. If a config accidentally repeats the same repo entry, the same repo URL, or an equivalent GitHub URL under different IDs, `sv` coalesces it while reading the config so the same source skill is not listed twice. See [reading sv output](docs/output.md) for examples.
 
 Add a skill to the current project:
 

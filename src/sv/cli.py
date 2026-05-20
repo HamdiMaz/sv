@@ -77,7 +77,10 @@ from sv.project import (
 )
 from sv.source_backends.factory import source_backends_for_repo
 from sv.stores import ConfigStore, GlobalManifestStore, ProjectManifestStore
-from sv.source_backends.git import ensure_source_repo, reject_symlinked_source_cache_path
+from sv.source_backends.git import (
+    ensure_source_repo,
+    reject_symlinked_source_cache_path,
+)
 from sv.source_cache import (
     cache_summary,
     clean_cache,
@@ -280,9 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
             "from skills/<name>. Manual/unmanaged skills are not removed by --all."
         ),
     )
-    remove_parser.add_argument(
-        "skill", nargs="?", help="Skill name to remove."
-    )
+    remove_parser.add_argument("skill", nargs="?", help="Skill name to remove.")
     remove_parser.add_argument(
         "-l",
         "--list",
@@ -332,9 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inspect or clean the global sv cache.",
         description="Inspect or clean the global sv cache.",
     )
-    cache_subparsers = cache_parser.add_subparsers(
-        dest="cache_command", required=True
-    )
+    cache_subparsers = cache_parser.add_subparsers(dest="cache_command", required=True)
     cache_subparsers.add_parser("status", help="Show global cache usage.")
     cache_subparsers.add_parser(
         "clean", help="Prune expired and over-budget cached skill bodies."
@@ -517,7 +516,9 @@ def handle(
                 selected_repos = config.repos
                 if args.repo_id is not None:
                     safe_repo_id = _escape_control_characters(args.repo_id)
-                    selected_repos = [repo for repo in config.repos if repo.id == args.repo_id]
+                    selected_repos = [
+                        repo for repo in config.repos if repo.id == args.repo_id
+                    ]
                     if not selected_repos:
                         raise SvError(
                             f"Repo '{safe_repo_id}' was not found in configured source repos."
@@ -612,6 +613,8 @@ def handle(
             )
             return _handle_list(
                 catalog,
+                cwd=cwd,
+                adapter=adapter,
                 can_browse_tty=_can_browse_tty(runtime.stdin, runtime.stdout),
             )
 
@@ -631,6 +634,8 @@ def handle(
             return _handle_search(
                 args.query,
                 catalog,
+                cwd=cwd,
+                adapter=adapter,
                 can_browse_tty=_can_browse_tty(runtime.stdin, runtime.stdout),
             )
 
@@ -650,7 +655,9 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 allow_partial_failures=False,
             )
-            return _handle_sync(catalog, cwd=cwd, adapter=adapter, context=local_context)
+            return _handle_sync(
+                catalog, cwd=cwd, adapter=adapter, context=local_context
+            )
 
         if args.command == "update":
             local_context = _detect_local_context(cwd)
@@ -725,7 +732,9 @@ def _detect_local_context(
     _reject_symlinked_sv_metadata_dir(repo_root)
     path = index_path(repo_root)
     if path.is_symlink():
-        raise SvError(f"Refusing to use symlinked sv index at {_escape_output_path(path)}.")
+        raise SvError(
+            f"Refusing to use symlinked sv index at {_escape_output_path(path)}."
+        )
     if not path.is_file():
         return LocalContext(repo_root=repo_root)
     return LocalContext(repo_root=repo_root, index_kind=load_index(path).kind)
@@ -743,7 +752,9 @@ def _find_nearest_non_git_project_context(
             )
         path = index_path(candidate)
         if path.is_symlink():
-            raise SvError(f"Refusing to use symlinked sv index at {_escape_output_path(path)}.")
+            raise SvError(
+                f"Refusing to use symlinked sv index at {_escape_output_path(path)}."
+            )
         if path.is_file():
             index = load_index(path)
             if index.kind == "project-index":
@@ -916,7 +927,9 @@ def _update_sources_and_catalog_for_add_all(
     config = _load_config_for_source_command(paths)
     repos = [repo for repo in config.repos if repo.id == repo_id]
     if not repos:
-        raise SvError(f"Repo '{safe_repo_id}' was not found in configured source repos.")
+        raise SvError(
+            f"Repo '{safe_repo_id}' was not found in configured source repos."
+        )
     return _update_sources_and_catalog_from_repos(
         repos,
         paths,
@@ -1219,7 +1232,9 @@ def _record_mixed_source_refresh(
     refreshed = set(refreshed_repo_ids)
     failed = {failure.repo_id for failure in blocking_failures}
     refreshed_repos = [repo for repo in repos if repo.id in refreshed]
-    failed_repos = [repo for repo in repos if repo.id in failed and repo.id not in refreshed]
+    failed_repos = [
+        repo for repo in repos if repo.id in failed and repo.id not in refreshed
+    ]
     if refreshed_repos:
         _record_global_source_refresh(
             paths,
@@ -1296,8 +1311,9 @@ def _first_index_parse_failure(failures) -> str | None:
 
 def _first_skill_metadata_failure(failures) -> str | None:
     for failure in failures:
-        if failure.operation == "reading candidate SKILL.md file" and failure.detail.startswith(
-            "Failed to read SKILL.md"
+        if (
+            failure.operation == "reading candidate SKILL.md file"
+            and failure.detail.startswith("Failed to read SKILL.md")
         ):
             return failure.detail
     return None
@@ -1326,9 +1342,13 @@ def _record_global_source_refresh(
             paths, repo, repos, refreshed_backends_by_repo
         )
         if backend == "git-local-source":
-            source_repo_path = _local_source_root_from_catalog(repo_entries) or source_repo_path
+            source_repo_path = (
+                _local_source_root_from_catalog(repo_entries) or source_repo_path
+            )
         source_commit, source_tree = _git_source_metadata(source_repo_path)
-        index_hash = _source_refresh_metadata_for_repo(repo, repos, index_hashes_by_repo)
+        index_hash = _source_refresh_metadata_for_repo(
+            repo, repos, index_hashes_by_repo
+        )
         states[repo.id] = GlobalSourceState(
             repo_id=repo.id,
             repo_url=repo.url,
@@ -1503,7 +1523,7 @@ def _git_source_metadata(repo_path: Path) -> tuple[str | None, str | None]:
 def _run_git_metadata(command: list[str], repo_path: Path) -> str | None:
     try:
         result = default_runner(command, repo_path)
-    except (OSError, SvError):
+    except OSError, SvError:
         return None
     if result.returncode != 0:
         return None
@@ -1583,7 +1603,9 @@ def _print_wrapped(message: str, *, leading_blank_line: bool = False) -> None:
         print()
     width = _table_width()
     indent = "     " if width > 5 else ""
-    for line in _wrap_message_to_display_width(message, width, subsequent_indent=indent):
+    for line in _wrap_message_to_display_width(
+        message, width, subsequent_indent=indent
+    ):
         print(line)
 
 
@@ -1735,7 +1757,9 @@ def _reject_symlinked_init_metadata_dir(target: Path) -> None:
 def _init_index_document(target: Path) -> tuple[IndexDocument, bool]:
     path = index_path(target)
     if path.is_symlink():
-        raise SvError(f"Refusing to use symlinked sv index at {_escape_output_path(path)}.")
+        raise SvError(
+            f"Refusing to use symlinked sv index at {_escape_output_path(path)}."
+        )
     if path.exists():
         document = load_index(path)
         if document.kind != "skill-vault":
@@ -1757,7 +1781,9 @@ def _init_index_document(target: Path) -> tuple[IndexDocument, bool]:
 def _ensure_init_manifest(target: Path) -> None:
     path = target / ".sv" / "manifest.toml"
     if path.is_symlink():
-        raise SvError(f"Refusing to use symlinked sv manifest at {_escape_output_path(path)}.")
+        raise SvError(
+            f"Refusing to use symlinked sv manifest at {_escape_output_path(path)}."
+        )
     if path.exists():
         if not path.is_file():
             raise SvError(
@@ -1821,7 +1847,9 @@ def _handle_index(cwd: Path, *, args: argparse.Namespace) -> int:
     repo_root = _find_repo_root(cwd)
     path = index_path(repo_root)
     if path.is_symlink():
-        raise SvError(f"Refusing to use symlinked sv index at {_escape_output_path(path)}.")
+        raise SvError(
+            f"Refusing to use symlinked sv index at {_escape_output_path(path)}."
+        )
     kind: IndexKind = "project-index"
     if path.exists():
         kind = load_index(path).kind
@@ -1836,7 +1864,9 @@ def _handle_index(cwd: Path, *, args: argparse.Namespace) -> int:
         update_readme_skill_table(readme_path(repo_root), document)
     skill_count = len(document.skills)
     suffix = "" if skill_count == 1 else "s"
-    print(f"Wrote sv index with {skill_count} skill{suffix} to {_escape_output_path(path)}")
+    print(
+        f"Wrote sv index with {skill_count} skill{suffix} to {_escape_output_path(path)}"
+    )
     return 0
 
 
@@ -1920,7 +1950,9 @@ def _handle_repo(
 
     if args.repo_command == "add":
         try:
-            result = ConfigStore(paths).add_repo(args.repo, skills_paths=args.skills_paths)
+            result = ConfigStore(paths).add_repo(
+                args.repo, skills_paths=args.skills_paths
+            )
         except ValueError as exc:
             raise SvError(str(exc)) from exc
         _print_repo_change_result(result)
@@ -2032,26 +2064,28 @@ def _browse_repo_source_skills(
         print("No valid skills found in this source repo.")
         return
 
-    context = _detect_local_context(cwd)
     rows, entries = _interactive_source_skill_rows(catalog)
 
-    def install_one(row: Sequence[str]) -> None:
+    def render_detail(row: Sequence[str], status: str | None) -> str:
         entry = _entry_for_interactive_row(row, rows, entries)
         if entry is None:
-            return
-        result = _add_skill_to_context(entry, adapter, context)
-        _print_add_result(result)
-        _refresh_local_index_if_needed(context)
+            return _format_source_skill_unavailable_detail(status)
+        return _format_source_skill_detail(entry, status=status)
+
+    def add_detail(row: Sequence[str]) -> str:
+        return _source_skill_detail_action(row, rows, entries, cwd=cwd, adapter=adapter)
 
     def install_all(_row: Sequence[str]) -> None:
+        context = _detect_local_context(cwd)
         _handle_add_all(catalog, cwd=cwd, adapter=adapter, context=context)
 
     _browse_tty_table(
         _source_skill_headers(),
         rows,
-        on_detail=install_one,
+        detail_renderer=render_detail,
+        detail_actions={"a": add_detail},
         key_actions={"a": install_all},
-        key_help="a install all",
+        key_help="a add all",
         clear_on_exit=True,
         row_ranker=_source_skill_ranker(entries),
     )
@@ -2122,7 +2156,11 @@ def _confirm_repo_removal(repos: Sequence[RepoConfig], *, yes: bool) -> bool:
 
 
 def _handle_run(
-    args: Sequence[str], cwd: Path, adapter: PiAdapter, process_runner, context: LocalContext
+    args: Sequence[str],
+    cwd: Path,
+    adapter: PiAdapter,
+    process_runner,
+    context: LocalContext,
 ) -> int:
     """Run Pi and turn launch failures into user-facing errors."""
     project_skills_dir = adapter.project_skill_dir(context.repo_root)
@@ -2157,6 +2195,9 @@ def _handle_search(
     query: str,
     catalog: Sequence[SourceSkill],
     *,
+    cwd: Path | None = None,
+    adapter: PiAdapter | None = None,
+    context: LocalContext | None = None,
     can_browse_tty: bool | None = None,
 ) -> int:
     if not catalog:
@@ -2172,8 +2213,12 @@ def _handle_search(
     if can_browse_tty is None:
         can_browse_tty = _can_browse_tty()
     if can_browse_tty:
+        if adapter is None or (context is None and cwd is None):
+            raise SvError("Interactive skill browsing requires a local context.")
         try:
-            return _browse_source_skills(matches)
+            return _browse_source_skills(
+                matches, cwd=cwd, adapter=adapter, context=context
+            )
         except SvError as exc:
             if not _is_tty_browser_unavailable_error(exc):
                 raise
@@ -2213,7 +2258,12 @@ def _handle_search(
 
 
 def _handle_list(
-    catalog: Sequence[SourceSkill], *, can_browse_tty: bool | None = None
+    catalog: Sequence[SourceSkill],
+    *,
+    cwd: Path | None = None,
+    adapter: PiAdapter | None = None,
+    context: LocalContext | None = None,
+    can_browse_tty: bool | None = None,
 ) -> int:
     if not catalog:
         print("No valid skills found in configured source repos.")
@@ -2222,8 +2272,12 @@ def _handle_list(
     if can_browse_tty is None:
         can_browse_tty = _can_browse_tty()
     if can_browse_tty:
+        if adapter is None or (context is None and cwd is None):
+            raise SvError("Interactive skill browsing requires a local context.")
         try:
-            return _browse_source_skills(catalog)
+            return _browse_source_skills(
+                catalog, cwd=cwd, adapter=adapter, context=context
+            )
         except SvError as exc:
             if not _is_tty_browser_unavailable_error(exc):
                 raise
@@ -2269,19 +2323,33 @@ def _handle_list(
     return 0
 
 
-def _browse_source_skills(catalog: Sequence[SourceSkill]) -> int:
+def _browse_source_skills(
+    catalog: Sequence[SourceSkill],
+    *,
+    cwd: Path | None = None,
+    adapter: PiAdapter,
+    context: LocalContext | None = None,
+) -> int:
     rows, entries = _interactive_source_skill_rows(catalog)
 
-    def show_details(row: Sequence[str]) -> None:
+    def render_detail(row: Sequence[str], status: str | None) -> str:
         entry = _entry_for_interactive_row(row, rows, entries)
-        if entry is not None:
-            _print_source_skill_detail(entry)
+        if entry is None:
+            return _format_source_skill_unavailable_detail(status)
+        return _format_source_skill_detail(entry, status=status)
+
+    def add_detail(row: Sequence[str]) -> str:
+        return _source_skill_detail_action(
+            row, rows, entries, cwd=cwd, adapter=adapter, context=context
+        )
 
     _browse_tty_table(
         _source_skill_headers(),
         rows,
-        on_detail=show_details,
         row_ranker=_source_skill_ranker(entries),
+        detail_renderer=render_detail,
+        detail_actions={"a": add_detail},
+        detail_key_help="a add skill • q back",
     )
     return 0
 
@@ -2352,17 +2420,50 @@ def _entry_for_interactive_row(
     return None
 
 
+def _format_source_skill_detail(entry: SourceSkill, status: str | None = None) -> str:
+    lines = [
+        f"Skill: {_escape_control_characters(entry.name)}",
+        f"Source: {_escape_control_characters(entry.repo_id)}",
+        f"Path: {_escape_control_characters(entry.source_relative_path)}",
+        f"Description: {_escape_control_characters(entry.description)}",
+    ]
+    if status is not None:
+        lines.append(f"Status: {_escape_control_characters(status)}")
+    return "\n".join(lines)
+
+
+def _format_source_skill_unavailable_detail(status: str | None = None) -> str:
+    safe_status = status or "Selected skill is no longer available."
+    return f"Status: {_escape_control_characters(safe_status)}"
+
+
+def _source_skill_detail_action(
+    row: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    entries: Sequence[SourceSkill],
+    *,
+    cwd: Path | None = None,
+    adapter: PiAdapter,
+    context: LocalContext | None = None,
+) -> str:
+    entry = _entry_for_interactive_row(row, rows, entries)
+    if entry is None:
+        return "Selected skill is no longer available."
+    try:
+        if context is None:
+            if cwd is None:
+                raise SvError("Interactive skill add requires a local context.")
+            context = _detect_local_context(cwd)
+        result = _add_skill_to_context(entry, adapter, context, allow_prompt=False)
+        _refresh_local_index_if_needed(context)
+    except SvError as exc:
+        return _escape_control_characters(str(exc))
+    return _format_add_result(result)
+
+
 def _print_source_skill_detail(entry: SourceSkill) -> None:
     print()
-    _print_tty_detail(
-        "Skill details",
-        [
-            ("Skill", _escape_control_characters(entry.name)),
-            ("Source", _escape_control_characters(entry.repo_id)),
-            ("Path", _escape_control_characters(entry.source_relative_path)),
-            ("Description", _escape_control_characters(entry.description)),
-        ],
-    )
+    print(_format_source_skill_detail(entry))
 
 
 def _browse_tty_table(headers: Sequence[str], rows: Sequence[Sequence[str]], **kwargs):
@@ -2518,11 +2619,15 @@ def _add_skill_to_context(
     context: LocalContext,
     *,
     replace_existing: bool = False,
+    allow_prompt: bool = True,
 ) -> AddSkillResult:
     _validate_local_index_refresh_config(context)
     if context.is_skill_vault:
         should_replace = _resolve_vault_replacement(
-            entry, context.vault_skills_dir, replace_existing=replace_existing
+            entry,
+            context.vault_skills_dir,
+            replace_existing=replace_existing,
+            allow_prompt=allow_prompt,
         )
         return add_vault_skill(
             entry, context.vault_skills_dir, replace_existing=should_replace
@@ -2562,7 +2667,11 @@ def _project_skills_dir(adapter: PiAdapter, context: LocalContext) -> Path:
 
 
 def _resolve_vault_replacement(
-    entry: SourceSkill, vault_skills_dir: Path, *, replace_existing: bool
+    entry: SourceSkill,
+    vault_skills_dir: Path,
+    *,
+    replace_existing: bool,
+    allow_prompt: bool = True,
 ) -> bool:
     _ensure_safe_vault_skills_dir_for_replacement(vault_skills_dir)
     skill_name = normalize_skill_name(entry.name)
@@ -2576,7 +2685,7 @@ def _resolve_vault_replacement(
         _warn_if_vault_skill_has_local_edits(skill_name, target, vault_skills_dir)
         return True
 
-    if not _can_prompt_for_vault_replacement():
+    if not allow_prompt or not _can_prompt_for_vault_replacement():
         raise SvError(
             f"Vault skill '{skill_name}' already exists at {_escape_output_path(target)}. "
             "Use --replace to replace it."
@@ -2662,7 +2771,7 @@ def _refresh_local_index_if_needed(context: LocalContext) -> None:
         update_readme_skill_table(readme_path(context.repo_root), document)
 
 
-def _print_add_result(result: AddSkillResult) -> None:
+def _format_add_result(result: AddSkillResult) -> str:
     requested_repo = (
         _escape_control_characters(result.repo_id) if result.repo_id else None
     )
@@ -2685,7 +2794,9 @@ def _print_add_result(result: AddSkillResult) -> None:
     source = f" from {requested_source}" if requested_source else ""
     skill_label = _result_skill_label(result.target_kind)
     if result.status == "exists":
-        message = f"{skill_label.capitalize()} '{result.skill}' already exists at {target}"
+        message = (
+            f"{skill_label.capitalize()} '{result.skill}' already exists at {target}"
+        )
         if existing_source and requested_source == existing_source:
             message += f" from {existing_source}."
         elif existing_source and requested_source:
@@ -2698,14 +2809,16 @@ def _print_add_result(result: AddSkillResult) -> None:
                 f" (no sv origin recorded; requested {requested_source}). "
                 f"Run 'sv remove {result.skill}' first if you want to replace it."
             )
-        print(message)
-        return
+        return message
 
     if result.status == "replaced":
-        print(f"Replaced {skill_label} '{result.skill}'{source} at {target}")
-        return
+        return f"Replaced {skill_label} '{result.skill}'{source} at {target}"
 
-    print(f"Added {skill_label} '{result.skill}'{source} to {target}")
+    return f"Added {skill_label} '{result.skill}'{source} to {target}"
+
+
+def _print_add_result(result: AddSkillResult) -> None:
+    print(_format_add_result(result))
 
 
 def _result_skill_label(target_kind: str) -> str:
@@ -2745,7 +2858,9 @@ def _handle_remove_all(
     project_skills_dir = _removal_skills_dir(adapter, context)
     entries = _managed_removal_entries(project_skills_dir, context)
     if not entries:
-        print(f"No sv-managed {_result_skills_label(_context_target_kind(context))} found to remove.")
+        print(
+            f"No sv-managed {_result_skills_label(_context_target_kind(context))} found to remove."
+        )
         return 0
 
     if not yes and not _can_prompt_for_confirmation():
@@ -2904,11 +3019,13 @@ def _selector_accepts_keyword_arguments(
 ) -> bool:
     try:
         signature = inspect.signature(selector)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return True
 
     parameters = signature.parameters
-    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+    if any(
+        param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values()
+    ):
         return True
     return all(
         name in parameters
@@ -2921,7 +3038,7 @@ def _selector_accepts_keyword_arguments(
 def _selector_accepts_items_only(selector: SkillSelector) -> bool:
     try:
         inspect.signature(selector).bind(object())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return True
 
@@ -2956,7 +3073,9 @@ def _same_manifest_target(first: ManifestEntry, second: ManifestEntry) -> bool:
 
 def _print_remove_result(result: RemoveSkillResult) -> None:
     target = _escape_output_path(result.target)
-    print(f"Removed {_result_skill_label(result.target_kind)} '{result.skill}' from {target}")
+    print(
+        f"Removed {_result_skill_label(result.target_kind)} '{result.skill}' from {target}"
+    )
 
 
 def _manifest_target_is_unavailable(entry: ManifestEntry) -> bool:
@@ -3142,7 +3261,9 @@ def _vault_freshness_status(repo_root: Path) -> _VaultFreshnessStatus:
         index_status = "missing"
     else:
         existing = load_index(path)
-        index_status = "fresh" if _index_skills_are_fresh(existing, current) else "stale"
+        index_status = (
+            "fresh" if _index_skills_are_fresh(existing, current) else "stale"
+        )
     readme_status = (
         "fresh"
         if readme_skill_table_is_fresh(readme_path(repo_root), current)
@@ -3152,10 +3273,9 @@ def _vault_freshness_status(repo_root: Path) -> _VaultFreshnessStatus:
 
 
 def _index_skills_are_fresh(existing: IndexDocument, current: IndexDocument) -> bool:
-    return (
-        existing.kind == current.kind
-        and _canonical_index_skills(existing.skills) == _canonical_index_skills(current.skills)
-    )
+    return existing.kind == current.kind and _canonical_index_skills(
+        existing.skills
+    ) == _canonical_index_skills(current.skills)
 
 
 def _canonical_index_skills(
@@ -3193,11 +3313,19 @@ def _handle_global_status(paths: SvPaths) -> int:
             [
                 _escape_control_characters(repo_id),
                 _escape_control_characters(repo_url),
-                _escape_control_characters(state.backend if state and state.backend else "unknown"),
+                _escape_control_characters(
+                    state.backend if state and state.backend else "unknown"
+                ),
                 _escape_control_characters(_global_refresh_label(state)),
-                _escape_control_characters(_global_hash_label(state.index_hash if state else None)),
-                _escape_control_characters(_global_hash_label(state.catalog_hash if state else None)),
-                str(state.catalog_skill_count) if state and state.catalog_skill_count is not None else "-",
+                _escape_control_characters(
+                    _global_hash_label(state.index_hash if state else None)
+                ),
+                _escape_control_characters(
+                    _global_hash_label(state.catalog_hash if state else None)
+                ),
+                str(state.catalog_skill_count)
+                if state and state.catalog_skill_count is not None
+                else "-",
                 _escape_control_characters(_global_health_label(state)),
             ]
         )
@@ -3205,7 +3333,16 @@ def _handle_global_status(paths: SvPaths) -> int:
     print("Global skill source status")
     print(
         format_table(
-            ["Repo", "URL", "Backend", "Refresh", "Index", "Catalog", "Skills", "Health"],
+            [
+                "Repo",
+                "URL",
+                "Backend",
+                "Refresh",
+                "Index",
+                "Catalog",
+                "Skills",
+                "Health",
+            ],
             rows,
             max_widths={
                 "Repo": 32,
@@ -3278,8 +3415,7 @@ def _status_catalog_if_configured(
         config.repos,
         paths,
         git_runner,
-        policy=cache_policy
-        or CachePolicy.force_refresh(allow_stale_on_error=False),
+        policy=cache_policy or CachePolicy.force_refresh(allow_stale_on_error=False),
         record_global_source_state=record_global_source_state,
         lightweight_discovery=True,
         allow_partial_failures=False,
@@ -3464,12 +3600,11 @@ def _print_update_result(result: SyncResult) -> None:
         if skip.reason == "unchanged":
             continue
         if skip.reason == "modified":
-            print(
-                f"Skipped local {skill_label} '{skip.skill}': "
-                "local edits preserved."
-            )
+            print(f"Skipped local {skill_label} '{skip.skill}': local edits preserved.")
         elif skip.reason == "source-missing":
-            repos = ", ".join(_escape_control_characters(repo) for repo in skip.repo_ids)
+            repos = ", ".join(
+                _escape_control_characters(repo) for repo in skip.repo_ids
+            )
             print(
                 f"Skipped local {skill_label} '{skip.skill}': recorded source is missing ({repos}). "
                 "orphan state recorded."
@@ -3506,12 +3641,16 @@ def _print_sync_result(result: SyncResult) -> None:
                     f"multiple source skills match ({sources})."
                 )
                 continue
-            repos = ", ".join(_escape_control_characters(repo) for repo in skip.repo_ids)
+            repos = ", ".join(
+                _escape_control_characters(repo) for repo in skip.repo_ids
+            )
             print(
                 f"Skipped local {skill_label} '{skip.skill}': multiple source repos match ({repos})."
             )
         elif skip.reason == "source-missing":
-            repos = ", ".join(_escape_control_characters(repo) for repo in skip.repo_ids)
+            repos = ", ".join(
+                _escape_control_characters(repo) for repo in skip.repo_ids
+            )
             print(
                 f"Skipped local {skill_label} '{skip.skill}': recorded source is missing ({repos}). "
                 "orphan state recorded."
@@ -3596,7 +3735,7 @@ def _can_browse_tty(stdin=None, stdout=None) -> bool:
     try:
         stdin.fileno()
         stdout.fileno()
-    except (AttributeError, OSError):
+    except AttributeError, OSError:
         return False
     return True
 
@@ -3649,7 +3788,12 @@ def _duplicate_source_skill_rows(
         skill_name = entry.name if entry.name not in visible_names else ""
         visible_names.add(entry.name)
         rows.append(
-            [skill_name, entry.repo_id, entry.description, _source_skill_reference(entry)]
+            [
+                skill_name,
+                entry.repo_id,
+                entry.description,
+                _source_skill_reference(entry),
+            ]
         )
     return rows
 
@@ -3731,9 +3875,7 @@ def _source_skill_picker_columns(entry: SourceSkill) -> list[str]:
 def _source_skill_picker_source_label(entry: SourceSkill) -> str:
     if entry.is_default_source_path:
         return _escape_control_characters(entry.repo_id)
-    return _escape_control_characters(
-        f"{entry.repo_id}:{entry.source_relative_path}"
-    )
+    return _escape_control_characters(f"{entry.repo_id}:{entry.source_relative_path}")
 
 
 def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:

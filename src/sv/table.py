@@ -11,7 +11,11 @@ from typing import TextIO
 import unicodedata
 
 from sv.errors import SvError
-from sv.search import discard_last_utf8_character, read_search_prompt, ranked_search_indices
+from sv.search import (
+    discard_last_utf8_character,
+    read_search_prompt,
+    ranked_search_indices,
+)
 from sv.terminal import escape_terminal_controls
 
 
@@ -43,7 +47,9 @@ class TableState:
     filter_query: str = ""
     key_help: str = ""
     row_ranker: Callable[[str], Sequence[int]] | None = None
-    _visible_indices_cache: list[int] | None = field(default=None, init=False, repr=False)
+    _visible_indices_cache: list[int] | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.viewport_size < 1:
@@ -58,7 +64,9 @@ class TableState:
 
     @property
     def visible_end(self) -> int:
-        return min(self.viewport_start + self.viewport_size, len(self._filtered_indices()))
+        return min(
+            self.viewport_start + self.viewport_size, len(self._filtered_indices())
+        )
 
     def visible_rows(self) -> list[tuple[int, Sequence[str]]]:
         filtered_indices = self._filtered_indices()
@@ -93,7 +101,9 @@ class TableState:
         self.viewport_start -= page_size
 
     def page_next(self) -> None:
-        if not self._filtered_indices() or self.visible_end >= len(self._filtered_indices()):
+        if not self._filtered_indices() or self.visible_end >= len(
+            self._filtered_indices()
+        ):
             return
         last_index = len(self._filtered_indices()) - 1
         self.cursor = min(self.cursor + self.viewport_size, last_index)
@@ -157,6 +167,10 @@ def browse_table(
     key_help: str = "",
     clear_on_exit: bool = False,
     row_ranker: Callable[[str], Sequence[int]] | None = None,
+    detail_renderer: Callable[[Sequence[str], str | None], str | Sequence[str]]
+    | None = None,
+    detail_actions: Mapping[str, Callable[[Sequence[str]], str | None]] | None = None,
+    detail_key_help: str = "a add skill • q back",
 ) -> Sequence[str] | None:
     """Browse rows in a read-only TTY table.
 
@@ -173,7 +187,9 @@ def browse_table(
         import termios
         import tty
     except ImportError as exc:
-        raise SvError("Interactive table browsing requires a Unix-like terminal.") from exc
+        raise SvError(
+            "Interactive table browsing requires a Unix-like terminal."
+        ) from exc
 
     state = TableState(
         headers,
@@ -183,11 +199,16 @@ def browse_table(
         row_ranker=row_ranker,
     )
     actions = {key.casefold(): action for key, action in (key_actions or {}).items()}
+    detail_mode_actions = {
+        key.casefold(): action for key, action in (detail_actions or {}).items()
+    }
     try:
         fd = input_stream.fileno()
         original_settings = termios.tcgetattr(fd)
     except (AttributeError, OSError, termios.error) as exc:
-        raise SvError("Interactive table browsing could not read terminal settings.") from exc
+        raise SvError(
+            "Interactive table browsing could not read terminal settings."
+        ) from exc
 
     try:
         try:
@@ -199,9 +220,51 @@ def browse_table(
         output_stream.write(_HIDE_CURSOR)
         output_stream.flush()
         rendered_lines = _render_interactive_table(state, output_stream)
+        mode = "list"
+        detail_row: Sequence[str] | None = None
+        detail_status: str | None = None
 
         while True:
             key = _read_key(fd)
+            if mode == "detail":
+                if key in {"escape", "quit"}:
+                    mode = "list"
+                    detail_row = None
+                    detail_status = None
+                    rendered_lines = _render_interactive_table(
+                        state,
+                        output_stream,
+                        previous_line_count=rendered_lines,
+                    )
+                    continue
+                if key == "eof":
+                    if clear_on_exit:
+                        _clear_rendered_table(output_stream, rendered_lines)
+                    else:
+                        _render_interactive_table(
+                            state,
+                            output_stream,
+                            previous_line_count=rendered_lines,
+                            highlight_cursor=False,
+                        )
+                    return None
+                if key.startswith("action:") and detail_row is not None:
+                    action_key = key.partition(":")[2].casefold()
+                    action = detail_mode_actions.get(action_key)
+                    if action is not None:
+                        status = action(detail_row)
+                        detail_status = str(status) if status is not None else None
+                        rendered_lines = _render_interactive_detail(
+                            detail_row,
+                            detail_renderer,
+                            detail_status,
+                            output_stream,
+                            previous_line_count=rendered_lines,
+                            detail_key_help=detail_key_help,
+                        )
+                    continue
+                continue
+
             if key == "up":
                 state.move_up()
             elif key == "down":
@@ -224,6 +287,19 @@ def browse_table(
             elif key == "enter":
                 row = state.current_row()
                 if row is None:
+                    continue
+                if detail_renderer is not None:
+                    mode = "detail"
+                    detail_row = list(row)
+                    detail_status = None
+                    rendered_lines = _render_interactive_detail(
+                        detail_row,
+                        detail_renderer,
+                        detail_status,
+                        output_stream,
+                        previous_line_count=rendered_lines,
+                        detail_key_help=detail_key_help,
+                    )
                     continue
                 if on_detail is None:
                     _render_interactive_table(
@@ -285,6 +361,38 @@ def _clear_rendered_table(stdout: TextIO, rendered_lines: int) -> None:
         stdout.flush()
 
 
+def _render_interactive_detail(
+    row: Sequence[str],
+    detail_renderer: Callable[[Sequence[str], str | None], str | Sequence[str]] | None,
+    status: str | None,
+    stdout: TextIO,
+    *,
+    previous_line_count: int = 0,
+    detail_key_help: str = "a add skill • q back",
+) -> int:
+    if previous_line_count:
+        stdout.write(f"\x1b[{previous_line_count}F")
+        stdout.write("\x1b[J")
+
+    terminal_width = _terminal_width()
+    rendered = detail_renderer(row, status) if detail_renderer is not None else ""
+    if isinstance(rendered, str):
+        content_lines = rendered.splitlines() or [""]
+    else:
+        content_lines = [str(line) for line in rendered]
+    lines = [_fit_text(_sanitize_cell(line), terminal_width) for line in content_lines]
+    while lines and lines[-1] == "":
+        lines.pop()
+    lines.append(
+        f"{_FG_MUTED}{_fit_text(_sanitize_cell(detail_key_help), terminal_width)}{_RESET}"
+    )
+
+    stdout.write("\n".join(lines))
+    stdout.write("\n")
+    stdout.flush()
+    return len(lines)
+
+
 def _render_interactive_table(
     state: TableState,
     stdout: TextIO,
@@ -308,7 +416,9 @@ def _render_interactive_table(
     if not state.visible_rows():
         lines.append(_fit_text("No rows to show", terminal_width))
     for row_index, row in state.visible_rows():
-        line = _fit_text(_format_interactive_row(row, widths, separator), terminal_width)
+        line = _fit_text(
+            _format_interactive_row(row, widths, separator), terminal_width
+        )
         filtered_indices = state._filtered_indices()
         cursor_row_index = filtered_indices[state.cursor] if filtered_indices else -1
         if highlight_cursor and row_index == cursor_row_index:
@@ -586,9 +696,7 @@ def _column_widths(
             widths.append(max(max_content_width, min_width))
         else:
             widths.append(max(min_width, min(max_content_width, configured_width)))
-    return _fit_table_width(
-        widths, preferred_minimums, hard_minimums, max_table_width
-    )
+    return _fit_table_width(widths, preferred_minimums, hard_minimums, max_table_width)
 
 
 def _hard_wrap_output_line(line: str, max_table_width: int | None) -> list[str]:
@@ -637,7 +745,11 @@ def _fit_table_width(
 
 
 def _shrink_widths_to_fit(
-    widths: list[int], *, max_table_width: int, separator_width: int, minimums: Sequence[int]
+    widths: list[int],
+    *,
+    max_table_width: int,
+    separator_width: int,
+    minimums: Sequence[int],
 ) -> None:
     while sum(widths) + separator_width > max_table_width:
         candidates = [
