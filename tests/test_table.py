@@ -99,13 +99,16 @@ def test_interactive_table_renders_headers_highlighted_row_and_footer(monkeypatc
 
     lines = stdout.getvalue().splitlines()
     visible_lines = [visible_text(line) for line in lines]
-    assert line_count == 5
-    assert visible_lines[0] == "Skill  Description"
-    assert visible_lines[1] == "-----  --------------------------------------------"
-    assert visible_lines[2] == "alpha  Short."
-    assert lines[2].startswith("\x1b[48;5;24m")
-    assert visible_lines[3] == "beta   This description is intentionally very long."
-    assert visible_lines[4] == "Showing 1-2 of 2 • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
+    assert line_count == 6
+    assert visible_lines[0] == "-----  --------------------------------------------"
+    assert visible_lines[1] == "Skill  Description"
+    assert visible_lines[2] == "-----  --------------------------------------------"
+    assert lines[0].startswith("\x1b[38;5;60m")
+    assert lines[1].startswith("\x1b[38;5;183m\x1b[1m")
+    assert lines[3].startswith("\x1b[48;5;24m")
+    assert visible_lines[3] == "alpha  Short."
+    assert visible_lines[4] == "beta   This description is intentionally very long."
+    assert visible_lines[5] == "Showing 1-2 of 2 • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
 
 
 def test_interactive_table_truncates_every_line_when_columns_exceed_width(monkeypatch):
@@ -131,7 +134,7 @@ def test_interactive_table_truncates_rows_to_one_line(monkeypatch):
 
     visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
     assert all(display_width(line) <= 32 for line in visible_lines)
-    assert visible_lines[2].endswith("...")
+    assert visible_lines[3].endswith("...")
 
 
 def test_interactive_table_sanitizes_initial_filter_query_in_footer():
@@ -202,7 +205,7 @@ def test_table_state_slash_filtering_keeps_matching_rows_and_footer():
     _render_interactive_table(state, stdout, highlight_cursor=False)
 
     visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
-    assert visible_lines[2] == "gamma  Org/C"
+    assert visible_lines[3] == "gamma  Org/C"
     assert visible_lines[-1] == "Showing 1-1 of 1 matching 3 • filter: org/c • ↑/↓ move • ←/→ page • / filter • Enter details • q back"
 
 
@@ -233,7 +236,7 @@ def test_browse_table_enter_invokes_detail_hook_and_q_goes_back(monkeypatch):
     assert selected is None
     assert details == [["beta", "Details."]]
     rendered = output.getvalue()
-    assert "\x1b[5F\x1b[JDETAIL\n" in rendered
+    assert "\x1b[6F\x1b[JDETAIL\n" in rendered
 
 
 def test_browse_table_applies_slash_filter_key(monkeypatch):
@@ -301,7 +304,7 @@ def test_browse_table_can_clear_on_back_without_leaving_final_table(monkeypatch)
     )
 
     assert selected is None
-    assert output.getvalue().endswith("\x1b[4F\x1b[J\x1b[?25h")
+    assert output.getvalue().endswith("\x1b[5F\x1b[J\x1b[?25h")
 
 
 def test_browse_table_requires_tty_streams():
