@@ -289,6 +289,8 @@ def test_browse_table_visible_search_enter_applies_and_cancel_preserves(monkeypa
 
     def _fake_read_search_query(_fd, stdout, previous_line_count=0):
         result = next(prompt_results)
+        assert previous_line_count == 4
+        stdout.write(f"\x1b[{previous_line_count}F\x1b[J")
         if result is None:
             stdout.write("Search: ignored\n")
             return None
@@ -308,10 +310,41 @@ def test_browse_table_visible_search_enter_applies_and_cancel_preserves(monkeypa
     )
 
     assert selected == ["docs"]
-    visible_output = visible_text(output.getvalue())
+    rendered = output.getvalue()
+    assert "Search: ignored\n\x1b[1F\x1b[J" in rendered
+    assert "Search: docs\n\x1b[1F\x1b[J" in rendered
+    visible_output = visible_text(rendered)
     assert "Search: ignored" in visible_output
     assert "Search: docs" in visible_output
     assert "search: alpha" in visible_output
+
+
+def test_browse_table_search_cancel_leaves_previous_result_selected(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["filter:alpha", "search", "enter"])
+
+    def _fake_read_key(_fd):
+        return next(key_inputs)
+
+    def _fake_read_search_query(_fd, stdout, previous_line_count=0):
+        assert previous_line_count == 4
+        stdout.write(f"\x1b[{previous_line_count}F\x1b[JSearch: ignored\n")
+        return None
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+    monkeypatch.setattr("sv.table._read_search_query", _fake_read_search_query)
+
+    selected = browse_table(
+        ["Skill"],
+        [["alpha"], ["docs"], ["docs-helper"], ["find-docs"]],
+        stdin=TtyStream(),
+        stdout=output,
+    )
+
+    assert selected == ["alpha"]
+    assert "Search: ignored\n\x1b[1F\x1b[J" in output.getvalue()
 
 
 def test_browse_table_runs_custom_key_actions_and_stays_in_view(monkeypatch):

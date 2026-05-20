@@ -12,9 +12,18 @@ def test_ranked_search_indices_orders_exact_prefix_substring_and_fuzzy_matches()
         ("detailed overview",),
     ]
 
-    assert ranked_search_indices("docs", rows) == [1, 2, 0, 3]
+    assert ranked_search_indices("docs", rows) == [1, 2, 3, 0]
     assert ranked_search_indices("do", rows)[:2] == [1, 2]
     assert ranked_search_indices("dh", rows) == [2]
+
+
+def test_ranked_search_indices_prefers_earlier_substring_positions():
+    rows = [
+        ("abcdefghijklmnopqrstuvw docs",),
+        ("xxdocs",),
+    ]
+
+    assert ranked_search_indices("docs", rows) == [1, 0]
 
 
 def test_read_search_prompt_renders_escaped_query_and_applies_on_enter(monkeypatch):

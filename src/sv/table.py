@@ -203,6 +203,7 @@ def browse_table(
                 state.page_next()
             elif key == "search":
                 query = _read_search_query(fd, output_stream, rendered_lines)
+                rendered_lines = 1
                 if query is not None:
                     state.set_search(query)
             elif key == "filter":

@@ -52,7 +52,7 @@ def _score_term(term: str, value: str) -> int | None:
         return 2
     position = value.find(term)
     if position >= 0:
-        return 6
+        return 6 + min(position, 20)
     if len(term) >= 2:
         return _fuzzy_score(term, value)
     return None
