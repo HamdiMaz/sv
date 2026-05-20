@@ -591,6 +591,21 @@ def test_selection_state_searches_visible_items_without_losing_selection():
     assert state.selected_items() == ["beta"]
 
 
+def test_selection_state_empty_search_restores_all_original_items():
+    state = SelectionState(["alpha", "beta", "gamma"])
+
+    state.set_search("ga")
+    assert [skill for _, skill in state.visible_items()] == ["gamma"]
+
+    state.set_search("")
+
+    assert state.search_query == ""
+    assert state.filter_query == ""
+    assert state.cursor == 0
+    assert state.viewport_start == 0
+    assert [skill for _, skill in state.visible_items()] == ["alpha", "beta", "gamma"]
+
+
 def test_selection_state_uses_item_ranker_when_provided():
     state = SelectionState(
         ["alpha", "docs", "docs-helper", "find-docs"],
@@ -675,6 +690,22 @@ def test_read_search_query_applies_eof_input_and_clears_empty_eof():
     assert empty_query == ""
 
 
+def test_read_search_query_returns_none_when_escape_cancels():
+    stdout = StringIO()
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"\x1b")
+        os.close(write_fd)
+        write_fd = -1
+        query = _read_search_query(read_fd, stdout)
+    finally:
+        os.close(read_fd)
+        if write_fd != -1:
+            os.close(write_fd)
+
+    assert query is None
+
+
 def test_set_filter_and_filter_synthetic_key_remain_compatible(monkeypatch):
     state = SelectionState(["alpha", "beta", "gamma"])
     state.set_filter("ga")
@@ -709,6 +740,40 @@ def test_select_skills_applies_slash_search_key(monkeypatch):
     )
 
     assert selected == ["gamma"]
+
+
+def test_select_skills_real_search_prompt_filters_before_selection(monkeypatch):
+    class PipeTty(TtyStream):
+        def __init__(self, fd):
+            super().__init__()
+            self._fd = fd
+
+        def fileno(self):
+            return self._fd
+
+    output = TtyStream()
+    key_inputs = iter(["search", "space", "enter"])
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"ga\n")
+        os.close(write_fd)
+        write_fd = -1
+        monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+        monkeypatch.setitem(sys.modules, "tty", FakeTty)
+        monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
+
+        selected = select_skills(
+            ["alpha", "beta", "gamma"], stdin=PipeTty(read_fd), stdout=output
+        )
+    finally:
+        os.close(read_fd)
+        if write_fd != -1:
+            os.close(write_fd)
+
+    assert selected == ["gamma"]
+    rendered = visible_text(output.getvalue())
+    assert "Search: ga" in rendered
+    assert "Showing 1-1 of 1 matching 3 • search: ga" in rendered
 
 
 def test_select_skills_escape_cancelled_search_preserves_previous_search(monkeypatch):
