@@ -286,12 +286,14 @@ def _deduplicate_index_entries(
     entries: Sequence[IndexSkillEntry],
 ) -> list[IndexSkillEntry]:
     selected: dict[tuple[str, str], IndexSkillEntry] = {}
-    for entry in sorted(
-        entries, key=lambda item: len(PurePosixPath(item.source_path).parts)
-    ):
+    for entry in sorted(entries, key=_index_entry_preference_key):
         key = (entry.content_hash, entry.skill_file_hash)
         selected.setdefault(key, entry)
     return list(selected.values())
+
+
+def _index_entry_preference_key(entry: IndexSkillEntry) -> tuple[int, str]:
+    return (len(PurePosixPath(entry.source_path).parts), entry.source_path)
 
 
 _SKIPPED_SCAN_DIRS = {
