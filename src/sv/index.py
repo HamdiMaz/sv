@@ -238,6 +238,7 @@ def scan_repo_for_index(
         if scanned.entry is not None:
             entries.append(scanned.entry)
 
+    entries = _deduplicate_index_entries(entries)
     return IndexDocument(
         kind=kind,
         generated_by="sv",
@@ -279,6 +280,20 @@ def _scan_one_skill_for_index(skill_file: Path, root: Path) -> _ScannedSkill:
                 f"{_escape_control_characters(str(exc))}"
             ),
         )
+
+
+def _deduplicate_index_entries(
+    entries: Sequence[IndexSkillEntry],
+) -> list[IndexSkillEntry]:
+    selected: dict[tuple[str, str], IndexSkillEntry] = {}
+    for entry in sorted(entries, key=_index_entry_preference_key):
+        key = (entry.content_hash, entry.skill_file_hash)
+        selected.setdefault(key, entry)
+    return list(selected.values())
+
+
+def _index_entry_preference_key(entry: IndexSkillEntry) -> tuple[int, str]:
+    return (len(PurePosixPath(entry.source_path).parts), entry.source_path)
 
 
 _SKIPPED_SCAN_DIRS = {
