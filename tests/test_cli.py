@@ -1397,14 +1397,7 @@ def test_add_interactive_picker_uses_aligned_skill_source_description_labels(
     calls = []
 
     def capture_selector(skills, **kwargs):
-        label = kwargs["item_label"]
-        calls.append(
-            (
-                skills,
-                kwargs["header_label"],
-                [label(skill) for skill in skills],
-            )
-        )
+        calls.append((skills, kwargs))
         return []
 
     exit_code = cli_module._handle_add_interactive(
@@ -1416,15 +1409,18 @@ def test_add_interactive_picker_uses_aligned_skill_source_description_labels(
 
     assert exit_code == 0
     assert calls
-    skills, header, labels = calls[0]
+    skills, kwargs = calls[0]
     assert skills == [short, long]
-    assert header == "Skill        Source      Description"
-    assert labels == [
-        "alpha        Org/A       Alpha skill.",
-        "longer-name  Org/Longer  Longer skill.",
+    assert "item_label" not in kwargs
+    assert "header_label" not in kwargs
+    assert kwargs["enter_action_label"] == "add"
+    assert kwargs["header_columns"] == ["Skill", "Source", "Description"]
+    assert kwargs["item_columns"](short) == ["alpha", "Org/A", "Alpha skill."]
+    assert kwargs["item_columns"](long) == [
+        "longer-name",
+        "Org/Longer",
+        "Longer skill.",
     ]
-    assert labels[0].index("Org/A") == labels[1].index("Org/Longer")
-    assert labels[0].index("Alpha skill.") == labels[1].index("Longer skill.")
 
 
 def test_print_add_result_existing_without_recorded_origin_mentions_requested_repo(

@@ -11,6 +11,13 @@ import unicodedata
 
 from sv.errors import SvError
 from sv.search import discard_last_utf8_character, read_search_prompt, ranked_search_indices
+from sv.table import (
+    _fit_text as _fit_table_text,
+    _format_interactive_header_lines,
+    _format_interactive_row,
+    _interactive_column_separator,
+    _interactive_column_widths_for_rows,
+)
 from sv.terminal import escape_terminal_controls
 
 T = TypeVar("T")
@@ -178,6 +185,7 @@ def select_skills(
     item_ranker: Callable[[str], Sequence[int]] | None = None,
     item_columns: Callable[[T], Sequence[str]] | None = None,
     header_columns: Sequence[str] | None = None,
+    enter_action_label: str = "confirm",
 ) -> list[T]:
     """Prompt for skills with arrow-key navigation and spacebar selection."""
     input_stream = sys.stdin if stdin is None else stdin
@@ -233,6 +241,9 @@ def select_skills(
             output_stream,
             item_label=effective_item_label,
             header_label=effective_header_label,
+            item_columns=item_columns,
+            header_columns=header_columns,
+            enter_action_label=enter_action_label,
         )
 
         while True:
@@ -266,6 +277,9 @@ def select_skills(
                     highlight_cursor=False,
                     item_label=effective_item_label,
                     header_label=effective_header_label,
+                    item_columns=item_columns,
+                    header_columns=header_columns,
+                    enter_action_label=enter_action_label,
                 )
                 return state.selected_items()
             elif key in {"escape", "quit", "eof"}:
@@ -276,6 +290,9 @@ def select_skills(
                     highlight_cursor=False,
                     item_label=effective_item_label,
                     header_label=effective_header_label,
+                    item_columns=item_columns,
+                    header_columns=header_columns,
+                    enter_action_label=enter_action_label,
                 )
                 return []
             else:
@@ -287,6 +304,9 @@ def select_skills(
                 previous_line_count=rendered_lines,
                 item_label=effective_item_label,
                 header_label=effective_header_label,
+                item_columns=item_columns,
+                header_columns=header_columns,
+                enter_action_label=enter_action_label,
             )
     finally:
         restore_error: BaseException | None = None
@@ -355,6 +375,20 @@ def _fit_column(value: str, width: int) -> str:
     return value + " " * max(width - _display_width(value), 0)
 
 
+def _structured_selection_headers(header_columns: Sequence[str]) -> list[str]:
+    return ["Sel", *[str(column) for column in header_columns]]
+
+
+def _structured_selection_row(
+    state: SelectionState[T],
+    index: int,
+    item: T,
+    item_columns: Callable[[T], Sequence[str]],
+) -> list[str]:
+    checkbox = "[x]" if index in state.selected else "[ ]"
+    return [checkbox, *[str(value) for value in item_columns(item)]]
+
+
 def _render(
     state: SelectionState[T],
     stdout: TextIO,
@@ -363,10 +397,24 @@ def _render(
     highlight_cursor: bool = True,
     item_label: Callable[[T], str] = str,
     header_label: str | None = None,
+    item_columns: Callable[[T], Sequence[str]] | None = None,
+    header_columns: Sequence[str] | None = None,
+    enter_action_label: str = "confirm",
 ) -> int:
     if previous_line_count:
         stdout.write(f"\x1b[{previous_line_count}F")
         stdout.write("\x1b[J")
+
+    if item_columns is not None and header_columns is not None:
+        return _render_structured(
+            state,
+            stdout,
+            previous_line_count=0,
+            highlight_cursor=highlight_cursor,
+            item_columns=item_columns,
+            header_columns=header_columns,
+            enter_action_label=enter_action_label,
+        )
 
     lines: list[str] = []
     if header_label is not None:
@@ -377,11 +425,77 @@ def _render(
         )
         for index, skill in state.visible_items()
     )
-    lines.append(_format_help_line(state))
+    lines.append(_format_help_line(state, enter_action_label=enter_action_label))
     stdout.write("\n".join(lines))
     stdout.write("\n")
     stdout.flush()
     return len(lines)
+
+
+def _render_structured(
+    state: SelectionState[T],
+    stdout: TextIO,
+    *,
+    previous_line_count: int = 0,
+    highlight_cursor: bool = True,
+    item_columns: Callable[[T], Sequence[str]],
+    header_columns: Sequence[str],
+    enter_action_label: str,
+) -> int:
+    if previous_line_count:
+        stdout.write(f"\x1b[{previous_line_count}F")
+        stdout.write("\x1b[J")
+
+    terminal_width = _terminal_width()
+    visible_items = state.visible_items()
+    headers = _structured_selection_headers(header_columns)
+    rows = [
+        _structured_selection_row(state, index, item, item_columns)
+        for index, item in visible_items
+    ]
+    widths = _interactive_column_widths_for_rows(headers, rows or [[]], terminal_width)
+    separator = _interactive_column_separator(widths, terminal_width)
+    lines = _format_interactive_header_lines(headers, widths, separator, terminal_width)
+
+    if not visible_items:
+        lines.append(_fit_text("No rows to show", terminal_width))
+    for index, item in visible_items:
+        row = _structured_selection_row(state, index, item, item_columns)
+        line = _fit_table_text(
+            _format_interactive_row(row, widths, separator),
+            terminal_width,
+        )
+        line = _style_structured_selection_line(
+            state,
+            index,
+            line,
+            highlight_cursor=highlight_cursor,
+        )
+        lines.append(line)
+
+    lines.append(_format_help_line(state, enter_action_label=enter_action_label))
+    stdout.write("\n".join(lines))
+    stdout.write("\n")
+    stdout.flush()
+    return len(lines)
+
+
+def _style_structured_selection_line(
+    state: SelectionState[T],
+    index: int,
+    line: str,
+    *,
+    highlight_cursor: bool,
+) -> str:
+    is_selected = index in state.selected
+    is_cursor = highlight_cursor and index == state._current_item_index()
+    if is_cursor and is_selected:
+        return f"{_BG_CURSOR_SELECTED}{_FG_CURSOR_SELECTED}{_BOLD}{line}{_RESET}"
+    if is_cursor:
+        return f"{_BG_CURSOR}{_FG_CURSOR}{_BOLD}{line}{_RESET}"
+    if is_selected:
+        return f"{_FG_YELLOW}{_BOLD}{line}{_RESET}"
+    return f"{_FG_TEXT}{line}{_RESET}"
 
 
 def _format_header_line(header_label: str) -> str:
@@ -392,13 +506,18 @@ def _format_header_line(header_label: str) -> str:
     return f"{_FG_MUTED}{_BOLD}{line}{_RESET}"
 
 
-def _format_help_line(state: SelectionState[T]) -> str:
+def _format_help_line(
+    state: SelectionState[T],
+    *,
+    enter_action_label: str = "confirm",
+) -> str:
     filtered_count = len(state._filtered_indices())
     if state.items and filtered_count:
         text = f"Showing {state.viewport_start + 1}-{state.visible_end} of {filtered_count}"
         if state.search_query:
             text += f" matching {len(state.items)} • search: {state.search_query}"
-        text += " • ↑/↓ move • ←/→ page • Space select • Enter confirm • / search • q cancel"
+        safe_enter_action_label = _sanitize_label(enter_action_label)
+        text += f" • ↑/↓ move • ←/→ page • Space select • Enter {safe_enter_action_label} • / search • q cancel"
     elif state.items:
         text = f"Showing 0-0 of 0 matching {len(state.items)}"
         if state.search_query:

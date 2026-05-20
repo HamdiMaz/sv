@@ -87,8 +87,11 @@ def test_tty_list_browses_source_skills_with_details_by_default(
         rows_by_name["alpha-docs"],
         rows_by_name["beta"],
     ]
+    assert "Skill details" in result.stdout
+    assert "\x1b[38;5;183m\x1b[1mSkill details\x1b[0m" in result.stdout
     assert "Skill: alpha" in result.stdout
     assert "Source: " in result.stdout
+    assert "Path: " in result.stdout
     assert "Description: Alpha skill." in result.stdout
     assert "Add as:" not in result.stdout
 
