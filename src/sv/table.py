@@ -264,7 +264,7 @@ def _render_interactive_table(
 
     terminal_width = _terminal_width()
     widths = _interactive_column_widths(state, terminal_width)
-    separator = _column_separator(widths, terminal_width)
+    separator = _interactive_column_separator(widths, terminal_width)
     lines = _format_interactive_header_lines(
         state.headers,
         widths,
@@ -289,11 +289,8 @@ def _render_interactive_table(
 
 
 def _interactive_column_widths(state: TableState, terminal_width: int) -> list[int]:
-    rows = [tuple(_sanitize_cell(cell) for cell in row) for _, row in state.visible_rows()]
-    if not rows:
-        rows = [()]
-    headers = tuple(_sanitize_cell(header) for header in state.headers)
-    return _column_widths(headers, rows, None, None, terminal_width)
+    rows = [row for _, row in state.visible_rows()] or [()]
+    return _interactive_column_widths_for_rows(state.headers, rows, terminal_width)
 
 
 def _interactive_column_widths_for_rows(

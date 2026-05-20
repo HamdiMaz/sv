@@ -105,6 +105,7 @@ def test_interactive_table_renders_headers_highlighted_row_and_footer(monkeypatc
     assert visible_lines[2] == "-----  --------------------------------------------"
     assert lines[0].startswith("\x1b[38;5;60m")
     assert lines[1].startswith("\x1b[38;5;183m\x1b[1m")
+    assert lines[2].startswith("\x1b[38;5;60m")
     assert lines[3].startswith("\x1b[48;5;24m")
     assert visible_lines[3] == "alpha  Short."
     assert visible_lines[4] == "beta   This description is intentionally very long."
