@@ -473,6 +473,8 @@ def test_remove_interactive_lists_managed_rows_and_ignores_unmanaged(tmp_path: P
     assert result.exit_code == 0
     assert selector_calls[0][0] == ["alpha"]
     kwargs = selector_calls[0][1]
+    assert "header_label" not in kwargs
+    assert kwargs["enter_action_label"] == "remove"
     assert kwargs["header_columns"] == ["Skill", "Target", "Source/Status"]
     assert kwargs["item_columns"]("alpha") == [
         "alpha",

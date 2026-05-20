@@ -107,6 +107,9 @@ def test_add_list_picker_provides_structured_skill_source_description_columns(tm
     assert exit_code == 0
     assert selector_calls[0][0] == matches
     kwargs = selector_calls[0][1]
+    assert "header_label" not in kwargs
+    assert "item_label" not in kwargs
+    assert kwargs["enter_action_label"] == "add"
     assert kwargs["header_columns"] == ["Skill", "Source", "Description"]
     assert kwargs["item_columns"](matches[0]) == ["alpha", "Org/Short", "First alpha."]
     assert kwargs["item_columns"](matches[1]) == [
@@ -149,14 +152,20 @@ def test_duplicate_source_chooser_uses_aligned_source_table(monkeypatch, tmp_pat
     assert selected == matches[1]
     assert selector_calls[0][0] == matches
     kwargs = selector_calls[0][1]
-    header_label = kwargs["header_label"]
-    item_label = kwargs["item_label"]
-    first_label = item_label(matches[0])
-    second_label = item_label(matches[1])
-    assert header_label.startswith("Skill")
-    assert header_label.index("Source") == first_label.index(matches[0].repo_id)
-    assert header_label.index("Description") == first_label.index(matches[0].description)
-    assert first_label.index(matches[0].description) == second_label.index(matches[1].description)
+    assert "header_label" not in kwargs
+    assert "item_label" not in kwargs
+    assert kwargs["enter_action_label"] == "choose"
+    assert kwargs["header_columns"] == ["Skill", "Source", "Description"]
+    assert kwargs["item_columns"](matches[0]) == [
+        "alpha",
+        "Org/Short",
+        "First alpha.",
+    ]
+    assert kwargs["item_columns"](matches[1]) == [
+        "alpha",
+        "LongerOrg/Skills",
+        "Second alpha.",
+    ]
 
 
 @pytest.mark.integration
@@ -732,19 +741,18 @@ def test_add_interactive_adds_selected_skills(tmp_path: Path, capsys):
     )
 
     assert exit_code == 0
-    assert selector_calls[0][0][0].name == "alpha"
-    assert "item_label" in selector_calls[0][1]
-    assert "header_label" in selector_calls[0][1]
-    item_label = selector_calls[0][1]["item_label"]
-    header_label = selector_calls[0][1]["header_label"]
     first_skill = selector_calls[0][0][0]
-    label = item_label(first_skill)
-    assert header_label.startswith("Skill  Source")
-    assert header_label.endswith("Description")
-    assert first_skill.repo_id in label
-    assert label.index(first_skill.repo_id) == header_label.index("Source")
-    assert label.index(first_skill.description) == header_label.index("Description")
-    assert f"{first_skill.repo_id}:alpha" not in label
+    assert first_skill.name == "alpha"
+    kwargs = selector_calls[0][1]
+    assert "item_label" not in kwargs
+    assert "header_label" not in kwargs
+    assert kwargs["enter_action_label"] == "add"
+    assert kwargs["header_columns"] == ["Skill", "Source", "Description"]
+    assert kwargs["item_columns"](first_skill) == [
+        "alpha",
+        first_skill.repo_id,
+        first_skill.description,
+    ]
     assert not (project / ".pi" / "skills" / "alpha").exists()
     assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
     assert "Added Pi skill 'beta'" in capsys.readouterr().out
