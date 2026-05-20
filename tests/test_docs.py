@@ -289,6 +289,23 @@ def test_command_reference_documents_search():
     assert "descriptions match by text substring" in command_reference
 
 
+def test_docs_describe_framed_interactive_search_prompt():
+    documented = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            README_PATH,
+            DOCS_DIR / "output.md",
+            DOCS_DIR / "usage.md",
+            DOCS_DIR / "getting-started.md",
+            DOCS_DIR / "commands.md",
+        ]
+    )
+
+    assert "framed search prompt" in documented
+    assert "empty Enter" in documented
+    assert "Esc cancels" in documented
+
+
 def test_command_reference_documents_repo_aliases_and_svx():
     command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")
 
