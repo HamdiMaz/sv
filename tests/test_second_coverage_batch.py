@@ -37,6 +37,7 @@ from sv.source import (
     GitTreelessPartialBackend,
     SourceBackendError,
 )
+from sv.search import SearchPromptResult
 from sv.table import TableState, browse_table
 from sv.tomlutil import load_toml_document, require_schema_version
 
@@ -671,10 +672,20 @@ def test_selector_empty_and_filtered_interactive_paths(monkeypatch):
     monkeypatch.setitem(sys.modules, "tty", _FakeTty)
     monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
 
-    selected = select_skills(["alpha"], stdin=_TtyStream(), stdout=output)
+    selected = select_skills(
+        ["alpha"],
+        stdin=_TtyStream(),
+        stdout=output,
+        item_columns=lambda skill: [skill, "Repo", "Alpha skill"],
+        header_columns=["Skill", "Source", "Description"],
+    )
 
     assert selected == []
-    assert "Showing 0-0 of 0" in output.getvalue()
+    rendered = output.getvalue()
+    assert "No matches for \"zz\"" in rendered
+    assert "Try a different search term." in rendered
+    assert "No rows to show" not in rendered
+    assert "Showing 0-0 of 0" in rendered
 
     confirm_output = _TtyStream()
     confirm_keys = iter(["space", "enter"])
@@ -684,7 +695,14 @@ def test_selector_empty_and_filtered_interactive_paths(monkeypatch):
     search_output = _TtyStream()
     search_keys = iter(["search", "enter"])
     monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(search_keys))
-    monkeypatch.setattr("sv.selector._read_search_query", lambda *_args: "alpha")
+    monkeypatch.setattr(
+        "sv.selector._read_search_query",
+        lambda *_args, **_kwargs: SearchPromptResult(
+            applied=True,
+            query="alpha",
+            rendered_line_count=4,
+        ),
+    )
     assert select_skills(["alpha"], stdin=_TtyStream(), stdout=search_output) == []
 
 

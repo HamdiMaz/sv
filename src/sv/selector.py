@@ -10,7 +10,14 @@ from typing import Generic, TextIO, TypeVar
 import unicodedata
 
 from sv.errors import SvError
-from sv.search import discard_last_utf8_character, read_search_prompt, ranked_search_indices
+from sv.search import (
+    SearchPromptConfig,
+    SearchPromptResult,
+    discard_last_utf8_character,
+    read_search_prompt,
+    ranked_search_indices,
+    render_search_prompt,
+)
 from sv.table import (
     _fit_text as _fit_table_text,
     _format_interactive_header_lines,
@@ -186,6 +193,8 @@ def select_skills(
     item_columns: Callable[[T], Sequence[str]] | None = None,
     header_columns: Sequence[str] | None = None,
     enter_action_label: str = "confirm",
+    search_title: str = "Search skills",
+    search_placeholder: str = "type to search…",
 ) -> list[T]:
     """Prompt for skills with arrow-key navigation and spacebar selection."""
     input_stream = sys.stdin if stdin is None else stdin
@@ -259,10 +268,17 @@ def select_skills(
             elif key == "space":
                 state.toggle_current()
             elif key == "search":
-                query = _read_search_query(fd, output_stream, rendered_lines)
-                rendered_lines = 1
-                if query is not None:
-                    state.set_search(query)
+                result = _read_search_query(
+                    fd,
+                    output_stream,
+                    rendered_lines,
+                    search_title=search_title,
+                    search_placeholder=search_placeholder,
+                    count_label=f"{len(state.items)} items",
+                )
+                rendered_lines = result.rendered_line_count
+                if result.applied:
+                    state.set_search(result.query)
             elif key == "filter":
                 state.set_filter(_read_filter_query(fd))
             elif key.startswith("search:"):
@@ -416,14 +432,17 @@ def _render(
             enter_action_label=enter_action_label,
         )
 
+    visible_items = state.visible_items()
     lines: list[str] = []
     if header_label is not None:
         lines.append(_format_header_line(header_label))
+    if state.items and not visible_items:
+        lines.extend(_format_selector_no_match_lines(state))
     lines.extend(
         _format_skill_line(
             state, index, item_label(skill), highlight_cursor=highlight_cursor
         )
-        for index, skill in state.visible_items()
+        for index, skill in visible_items
     )
     lines.append(_format_help_line(state, enter_action_label=enter_action_label))
     stdout.write("\n".join(lines))
@@ -458,7 +477,7 @@ def _render_structured(
     lines = _format_interactive_header_lines(headers, widths, separator, terminal_width)
 
     if not visible_items:
-        lines.append(_fit_text("No rows to show", terminal_width))
+        lines.extend(_format_selector_no_match_lines(state, terminal_width=terminal_width))
     for index, item in visible_items:
         row = _structured_selection_row(state, index, item, item_columns)
         line = _fit_table_text(
@@ -504,6 +523,21 @@ def _format_header_line(header_label: str) -> str:
     label = _fit_label(header_label, max(terminal_width - prefix_width, 0))
     line = _fit_text(f"{' ' * prefix_width}{label}", terminal_width)
     return f"{_FG_MUTED}{_BOLD}{line}{_RESET}"
+
+
+def _format_selector_no_match_lines(
+    state: SelectionState[T],
+    *,
+    terminal_width: int | None = None,
+) -> list[str]:
+    width = _terminal_width() if terminal_width is None else terminal_width
+    if not state.search_query:
+        return [_fit_text("No rows to show", width)]
+    safe_query = _sanitize_label(state.search_query)
+    return [
+        f"{_FG_MUTED}{_fit_text(f'No matches for \"{safe_query}\"', width)}{_RESET}",
+        f"{_FG_MUTED}{_fit_text('Try a different search term.', width)}{_RESET}",
+    ]
 
 
 def _format_help_line(
@@ -622,16 +656,24 @@ def _read_search_query(
     fd: int,
     stdout: TextIO,
     previous_line_count: int = 0,
-) -> str | None:
-    result = read_search_prompt(
+    *,
+    search_title: str = "Search skills",
+    search_placeholder: str = "type to search…",
+    count_label: str = "",
+) -> SearchPromptResult:
+    return read_search_prompt(
         fd,
         stdout,
-        lambda query: f"Search: {query}",
+        lambda query: render_search_prompt(
+            query,
+            SearchPromptConfig(
+                title=search_title,
+                placeholder=search_placeholder,
+                count_label=count_label,
+            ),
+        ),
         previous_line_count=previous_line_count,
     )
-    if not result.applied:
-        return None
-    return result.query
 
 
 def _read_filter_query(fd: int) -> str:

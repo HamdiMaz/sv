@@ -8,6 +8,7 @@ import unicodedata
 import pytest
 
 from sv.errors import SvError
+from sv.search import SearchPromptResult
 from sv.selector import (
     SelectionState,
     _read_filter_query,
@@ -726,20 +727,21 @@ def test_render_footer_shows_slash_search_query():
     ]
 
 
-def test_render_footer_shows_stable_no_match_search_query():
+def test_render_plain_selector_no_match_names_query_and_hint():
     state = SelectionState(["alpha", "beta", "gamma"])
     state.set_search("missing")
     stdout = StringIO()
 
     _render(state, stdout)
 
-    lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
-    assert lines == [
-        "Showing 0-0 of 0 matching 3 • search: missing • / search • q cancel",
-    ]
+    visible = visible_text(stdout.getvalue())
+    assert "No matches for \"missing\"" in visible
+    assert "Try a different search term." in visible
+    assert "Showing 0-0 of 0 matching 3" in visible
+    assert "search: missing" in visible
 
 
-def test_read_search_query_renders_visible_prompt_and_escapes_controls():
+def test_selector_read_search_query_renders_framed_prompt_and_escapes_controls():
     stdout = StringIO()
     read_fd, write_fd = os.pipe()
     try:
@@ -747,15 +749,28 @@ def test_read_search_query_renders_visible_prompt_and_escapes_controls():
         os.close(write_fd)
         write_fd = -1
 
-        query = _read_search_query(read_fd, stdout)
+        result = _read_search_query(
+            read_fd,
+            stdout,
+            search_title="Search skills",
+            count_label="3 items",
+        )
     finally:
         os.close(read_fd)
         if write_fd != -1:
             os.close(write_fd)
 
-    assert query == "docs\x01"
+    assert result == SearchPromptResult(
+        applied=True,
+        query="docs\x01",
+        rendered_line_count=4,
+    )
     rendered = stdout.getvalue()
-    assert "Search: docs\\x01" in rendered
+    visible = visible_text(rendered)
+    assert "Search skills" in visible
+    assert "3 items" in visible
+    assert "⌕ docs\\x01" in visible
+    assert "Enter apply • empty Enter clear • Esc cancel" in visible
     assert "docs\x01" not in rendered
 
 
@@ -766,23 +781,27 @@ def test_read_search_query_applies_eof_input_and_clears_empty_eof():
         os.write(write_fd, b"docs")
         os.close(write_fd)
         write_fd = -1
-        query = _read_search_query(read_fd, stdout)
+        result = _read_search_query(read_fd, stdout)
     finally:
         os.close(read_fd)
         if write_fd != -1:
             os.close(write_fd)
 
-    assert query == "docs"
+    assert result.query == "docs"
+    assert result.applied is True
+    assert result.rendered_line_count == 4
 
     empty_stdout = StringIO()
     empty_read_fd, empty_write_fd = os.pipe()
     try:
         os.close(empty_write_fd)
-        empty_query = _read_search_query(empty_read_fd, empty_stdout)
+        empty_result = _read_search_query(empty_read_fd, empty_stdout)
     finally:
         os.close(empty_read_fd)
 
-    assert empty_query == ""
+    assert empty_result.query == ""
+    assert empty_result.applied is True
+    assert empty_result.rendered_line_count == 4
 
 
 def test_read_search_query_returns_none_when_escape_cancels():
@@ -792,13 +811,15 @@ def test_read_search_query_returns_none_when_escape_cancels():
         os.write(write_fd, b"\x1b")
         os.close(write_fd)
         write_fd = -1
-        query = _read_search_query(read_fd, stdout)
+        result = _read_search_query(read_fd, stdout)
     finally:
         os.close(read_fd)
         if write_fd != -1:
             os.close(write_fd)
 
-    assert query is None
+    assert result.applied is False
+    assert result.query == ""
+    assert result.rendered_line_count == 4
 
 
 def test_legacy_read_filter_query_escape_and_invalid_utf8_backspace(monkeypatch):
@@ -890,25 +911,51 @@ def test_select_skills_real_search_prompt_filters_before_selection(monkeypatch):
 
     assert selected == ["gamma"]
     rendered = visible_text(output.getvalue())
-    assert "Search: ga" in rendered
+    assert "⌕ ga" in rendered
     assert "Showing 1-1 of 1 matching 3 • search: ga" in rendered
 
 
 def test_select_skills_escape_cancelled_search_preserves_previous_search(monkeypatch):
     output = TtyStream()
     key_inputs = iter(["search:ga", "search", "space", "enter"])
-    cancelled = iter([None])
+    cancelled = iter([SearchPromptResult(applied=False, query="", rendered_line_count=4)])
 
     monkeypatch.setitem(sys.modules, "termios", FakeTermios)
     monkeypatch.setitem(sys.modules, "tty", FakeTty)
     monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
-    monkeypatch.setattr("sv.selector._read_search_query", lambda *_args: next(cancelled))
+    monkeypatch.setattr("sv.selector._read_search_query", lambda *_args, **_kwargs: next(cancelled))
 
     selected = select_skills(
         ["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output
     )
 
     assert selected == ["gamma"]
+
+
+def test_select_skills_empty_enter_clears_previous_search(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["search:ga", "search", "space", "enter"])
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
+    monkeypatch.setattr(
+        "sv.selector._read_search_query",
+        lambda *_args, **_kwargs: SearchPromptResult(
+            applied=True,
+            query="",
+            rendered_line_count=4,
+        ),
+    )
+
+    selected = select_skills(
+        ["alpha", "beta", "gamma"],
+        stdin=TtyStream(),
+        stdout=output,
+    )
+
+    assert selected == ["alpha"]
+    assert "search: ga" not in visible_text(output.getvalue()).splitlines()[-1]
 
 
 def _read_key_from_bytes(data: bytes) -> str:

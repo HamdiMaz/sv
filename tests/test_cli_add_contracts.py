@@ -96,6 +96,7 @@ def test_add_list_picker_provides_structured_skill_source_description_columns(tm
     selector_calls = []
 
     def fake_select_skills(skills, **kwargs):
+        assert kwargs["search_title"] == "Search skills"
         selector_calls.append((skills, kwargs))
         return []
 
@@ -157,6 +158,7 @@ def test_duplicate_source_chooser_uses_aligned_source_table(monkeypatch, tmp_pat
     selector_calls = []
 
     def fake_select_skills(skills, **kwargs):
+        assert kwargs["search_title"] == "Search skills"
         selector_calls.append((skills, kwargs))
         return [skills[1]]
 

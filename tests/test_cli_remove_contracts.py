@@ -459,6 +459,7 @@ def test_remove_interactive_lists_managed_rows_and_ignores_unmanaged(tmp_path: P
     selector_calls = []
 
     def skill_selector(skills, **kwargs):
+        assert kwargs["search_title"] == "Search skills"
         selector_calls.append((skills, kwargs))
         return skills
 
