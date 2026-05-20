@@ -1,6 +1,7 @@
 import unicodedata
 
 from io import StringIO
+import os
 import re
 import sys
 
@@ -12,6 +13,7 @@ from sv.table import (
     _read_escape_sequence,
     _read_filter_query,
     _read_key,
+    _read_search_query,
     _read_key_from_bytes,
     _render_interactive_table,
     browse_table,
@@ -183,6 +185,11 @@ def test_table_state_navigation_pages_clamps_and_handles_empty_results():
     state.page_next()
     assert state.current_row() == ["delta"]
 
+    state.cursor = 1
+    state.viewport_start = 2
+    state._scroll_to_cursor()
+    assert state.viewport_start == 1
+
     state.set_filter("no-match")
     assert state.visible_rows() == []
     assert state.current_row() is None
@@ -226,6 +233,19 @@ def test_table_state_accepts_custom_row_ranker_with_original_indices():
 
     assert state.visible_rows() == [(3, ("find-docs",)), (1, ("docs",))]
     assert state.current_row() == ["find-docs"]
+
+
+def test_table_state_filter_query_init_aliases_search_and_ranker_ignores_bad_indices():
+    state = TableState(
+        ["Skill"],
+        [["alpha"], ["beta"], ["gamma"]],
+        filter_query="ga",
+        row_ranker=lambda query: [-1, 2, 2, 99, 1] if query == "ga" else [],
+    )
+
+    assert state.search_query == "ga"
+    assert state.filter_query == "ga"
+    assert state.visible_rows() == [(2, ("gamma",)), (1, ("beta",))]
 
 
 def test_render_interactive_table_reuses_ranked_visible_indices_from_set_search(monkeypatch):
@@ -282,7 +302,7 @@ def test_browse_table_enter_invokes_detail_hook_and_q_goes_back(monkeypatch):
 
 def test_browse_table_applies_slash_search_key(monkeypatch):
     output = TtyStream()
-    key_inputs = iter(["filter:ga", "enter"])
+    key_inputs = iter(["search:ga", "enter"])
 
     def _fake_read_key(_fd):
         return next(key_inputs)
@@ -290,6 +310,25 @@ def test_browse_table_applies_slash_search_key(monkeypatch):
     monkeypatch.setitem(sys.modules, "termios", FakeTermios)
     monkeypatch.setitem(sys.modules, "tty", FakeTty)
     monkeypatch.setattr("sv.table._read_key", _fake_read_key)
+
+    selected = browse_table(
+        ["Skill"],
+        [["alpha"], ["beta"], ["gamma"]],
+        stdin=TtyStream(),
+        stdout=output,
+    )
+
+    assert selected == ["gamma"]
+
+
+def test_browse_table_legacy_filter_key_reads_query(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["filter", "enter"])
+
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.table._read_key", lambda _fd: next(key_inputs))
+    monkeypatch.setattr("sv.table._read_filter_query", lambda _fd: "ga")
 
     selected = browse_table(
         ["Skill"],
@@ -443,8 +482,14 @@ def test_browse_table_reports_terminal_restore_errors(monkeypatch):
         browse_table(["Skill"], [["alpha"]], stdin=TtyStream(), stdout=TtyStream())
 
 
-def test_read_key_from_bytes_decodes_slash_as_search():
+def test_read_key_from_bytes_decodes_controls_actions_and_invalid_utf8():
+    assert _read_key_from_bytes(b"") == "eof"
+    assert _read_key_from_bytes(b"\n") == "enter"
     assert _read_key_from_bytes(b"/") == "search"
+    assert _read_key_from_bytes(b"Q") == "quit"
+    assert _read_key_from_bytes(b"x") == "action:x"
+    assert _read_key_from_bytes(b"\xff") == "unknown"
+    assert _read_key_from_bytes(b"\x01") == "unknown"
 
 
 def test_read_key_decodes_actions_quit_enter_eof_unknown_and_invalid_utf8(monkeypatch):
@@ -457,6 +502,23 @@ def test_read_key_decodes_actions_quit_enter_eof_unknown_and_invalid_utf8(monkey
     assert _read_key(0) == "eof"
     assert _read_key(0) == "unknown"
     assert _read_key(0) == "unknown"
+
+
+def test_read_search_query_returns_none_when_escape_cancels():
+    stdout = StringIO()
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"\x1b")
+        os.close(write_fd)
+        write_fd = -1
+        query = _read_search_query(read_fd, stdout)
+    finally:
+        os.close(read_fd)
+        if write_fd != -1:
+            os.close(write_fd)
+
+    assert query is None
+
 
 
 def test_read_filter_query_handles_backspace_escape_and_replacement(monkeypatch):
@@ -476,6 +538,13 @@ def test_read_filter_query_backspace_removes_complete_multibyte_character(monkey
     monkeypatch.setattr("os.read", lambda _fd, _count: next(values))
 
     assert _read_filter_query(0) == ""
+
+
+def test_read_filter_query_backspace_after_invalid_utf8_pops_one_byte(monkeypatch):
+    values = iter([b"a", b"\xff", b"\x7f", b"\n"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(values))
+
+    assert _read_filter_query(0) == "a"
 
 
 @pytest.mark.parametrize(

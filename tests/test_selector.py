@@ -8,7 +8,14 @@ import unicodedata
 import pytest
 
 from sv.errors import SvError
-from sv.selector import SelectionState, _read_key, _read_search_query, _render, select_skills
+from sv.selector import (
+    SelectionState,
+    _read_filter_query,
+    _read_key,
+    _read_search_query,
+    _render,
+    select_skills,
+)
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -617,6 +624,18 @@ def test_selection_state_uses_item_ranker_when_provided():
     assert [item for _, item in state.visible_items()] == ["find-docs", "docs"]
 
 
+def test_selection_state_filter_query_init_aliases_search_and_ranker_ignores_bad_indices():
+    state = SelectionState(
+        ["alpha", "beta", "gamma"],
+        filter_query="ga",
+        item_ranker=lambda query: [-1, 2, 2, 99, 1] if query == "ga" else [],
+    )
+
+    assert state.search_query == "ga"
+    assert state.filter_query == "ga"
+    assert state.visible_items() == [(2, "gamma"), (1, "beta")]
+
+
 def test_render_footer_shows_slash_search_query():
     state = SelectionState(["alpha", "beta", "gamma"])
     state.set_search("ga")
@@ -706,6 +725,16 @@ def test_read_search_query_returns_none_when_escape_cancels():
     assert query is None
 
 
+def test_legacy_read_filter_query_escape_and_invalid_utf8_backspace(monkeypatch):
+    escape_values = iter([b"g", b"\x1b", b"ignored"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(escape_values))
+    assert _read_filter_query(0) == ""
+
+    invalid_values = iter([b"g", b"\xff", b"\x7f", b"\n"])
+    monkeypatch.setattr("os.read", lambda _fd, _count: next(invalid_values))
+    assert _read_filter_query(0) == "g"
+
+
 def test_set_filter_and_filter_synthetic_key_remain_compatible(monkeypatch):
     state = SelectionState(["alpha", "beta", "gamma"])
     state.set_filter("ga")
@@ -718,6 +747,19 @@ def test_set_filter_and_filter_synthetic_key_remain_compatible(monkeypatch):
     monkeypatch.setitem(sys.modules, "termios", FakeTermios)
     monkeypatch.setitem(sys.modules, "tty", FakeTty)
     monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
+
+    assert select_skills(["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output) == [
+        "gamma"
+    ]
+
+
+def test_select_skills_legacy_filter_key_reads_query(monkeypatch):
+    output = TtyStream()
+    key_inputs = iter(["filter", "space", "enter"])
+    monkeypatch.setitem(sys.modules, "termios", FakeTermios)
+    monkeypatch.setitem(sys.modules, "tty", FakeTty)
+    monkeypatch.setattr("sv.selector._read_key", lambda _fd: next(key_inputs))
+    monkeypatch.setattr("sv.selector._read_filter_query", lambda _fd: "ga")
 
     assert select_skills(["alpha", "beta", "gamma"], stdin=TtyStream(), stdout=output) == [
         "gamma"

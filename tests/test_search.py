@@ -1,6 +1,11 @@
 from io import StringIO
 
-from sv.search import SearchPromptResult, ranked_search_indices, read_search_prompt
+from sv.search import (
+    SearchPromptResult,
+    discard_last_utf8_character,
+    ranked_search_indices,
+    read_search_prompt,
+)
 
 
 def test_ranked_search_indices_orders_exact_prefix_substring_and_fuzzy_matches():
@@ -24,6 +29,27 @@ def test_ranked_search_indices_prefers_earlier_substring_positions():
     ]
 
     assert ranked_search_indices("docs", rows) == [1, 0]
+
+
+def test_ranked_search_indices_empty_query_one_character_miss_and_field_replacement():
+    rows = [
+        ("zzz", "needle"),
+        ("alpha", "zzz"),
+        ("zzz", "alphabet"),
+    ]
+
+    assert ranked_search_indices("", rows) == [0, 1, 2]
+    assert ranked_search_indices("x", rows) == []
+    assert ranked_search_indices("alpha", rows) == [1, 2]
+    assert ranked_search_indices("needle", rows) == [0]
+
+
+def test_discard_last_utf8_character_invalid_bytes_pop_one_byte():
+    query = bytearray(b"a\xff")
+
+    discard_last_utf8_character(query)
+
+    assert query == bytearray(b"a")
 
 
 def test_read_search_prompt_renders_escaped_query_and_applies_on_enter(monkeypatch):
