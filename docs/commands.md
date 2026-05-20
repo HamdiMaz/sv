@@ -28,20 +28,22 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 
 | Command | Use when |
 | --- | --- |
-| `sv repo add <owner/repo>` | Add a GitHub source repo. |
-| `sv repo add <path-or-url>` | Add a local or Git URL source repo. |
+| `sv repo add <owner/repo>` | Add a GitHub source repo and warm its source metadata cache by default. |
+| `sv repo add <path-or-url>` | Add a local or Git URL source repo and warm its source metadata cache by default. |
 | `sv repo add <repo> --skills-path <path>` | Add a source repo with one bounded discovery root. Repeat `--skills-path` to scan multiple repo-relative skill roots. |
+| `sv repo add <repo> --no-warm-cache` | Add or update source configuration without the default best-effort local cache warm step. |
 | `sv repo list [--refresh/--cached]` | Show configured source IDs, URLs, and cache paths. If the repo list is empty, prints the `sv repo add` next step instead of an empty table. In a TTY, Enter on a repo opens that repo's skill browser using fresh cached metadata when available; `--refresh` forces a metadata refresh before opening repo skills, and `--cached` requires existing cached metadata while avoiding network and Git refreshes. In the repo skill browser, list-mode `a` remains add-all for non-conflicting skills from that repo; Enter opens a detail page, detail-mode `a` adds only the shown skill and shows the add result/status, detail `q`/Esc returns to the repo skill list, and list `q`/Esc backtracks or exits. |
 | `sv repo -l [--refresh/--cached]` | exact alias for `sv repo list`; opens the same TTY repo browser or prints the same non-TTY table. |
 | `sv repo remove <repo-id>` | Stop using a configured source repo. |
 | `sv repo remove -l` | Choose one or more source repos to remove from an interactive list. Use `--yes` to skip the confirmation prompt. |
-| `svx <repo>` | console script alias for `sv repo add <repo>`; passes through repeatable `--skills-path` values. |
+| `svx <repo>` | console script alias for `sv repo add <repo>`; passes through repeatable `--skills-path` values and warms source metadata by default. |
+| `svx <repo> --no-warm-cache` | Add a source repo through `svx` without the default best-effort local cache warm step. |
 
-`sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. Use `sv repo -l` as a shorter spelling of `sv repo list`; it accepts the same cache flags. In non-TTY output, repo-list cache flags parse successfully but the plain repo table does not load source metadata. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful.
+`sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. Use `sv repo -l` as a shorter spelling of `sv repo list`; it accepts the same cache flags. In non-TTY output, repo-list cache flags parse successfully but the plain repo table does not load source metadata. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful. Cache warming after `sv repo add` or `svx` is local and best-effort: warnings do not undo the repo configuration, and `--no-warm-cache` skips only that warm step.
 
 ## Index publishing
 
-Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. In a skill-vault repo, it also refreshes the generated README skill table; README files touched by that update must be UTF-8 and no larger than 4 MiB. Index scanning is bounded by skill-candidate and directory-depth limits so huge accidental trees fail closed instead of exhausting traversal. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`; `sv` uses the same persistent scan config when it auto-refreshes a local index or checks skill-vault index/README freshness:
+Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. Source-published indexes are the fastest path for first use by every user because `sv` can read one metadata file instead of probing each skill folder. In a skill-vault repo, `sv index` also refreshes the generated README skill table; README files touched by that update must be UTF-8 and no larger than 4 MiB. Index scanning is bounded by skill-candidate and directory-depth limits so huge accidental trees fail closed instead of exhausting traversal. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`; `sv` uses the same persistent scan config when it auto-refreshes a local index or checks skill-vault index/README freshness:
 
 ```toml
 schema_version = 1
@@ -86,7 +88,7 @@ Sources can publish skills under `skills/<name>`, one-level `*/skills/<name>` fo
 
 ## Global cache
 
-`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, TTY `sv repo list` nested skill browsing, and all `sv add` modes, including `sv add`, `sv add -l`, and `sv add --all`). These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
+`sv` keeps a global cache under `~/.sv/cache/v1`. Source metadata is cached for 24 hours for normal browsing/install commands (`sv list`, `sv search`, TTY `sv repo list` nested skill browsing, and all `sv add` modes, including `sv add`, `sv add -l`, and `sv add --all`). `sv repo add` and `svx` warm this same 24-hour catalog cache by default so the first later list/search/add command can reuse local metadata. These commands use fresh cached metadata, refresh lazily when it expires, and warn while using stale metadata if refresh fails and cached metadata exists.
 
 `sv sync`, `sv update`, and source-aware `sv status` are refresh-first by default so they continue to report and apply current source changes. They still use the cache manager for `--cached`, cache writes, body-cache reuse, and cache-only error handling, but they do not silently trust 24-hour-old metadata by default.
 
@@ -96,6 +98,6 @@ Use `--refresh` on source-reading commands to force metadata refresh. Use `--cac
 
 ## Parallelism
 
-Source-reading commands can refresh independent configured repos in parallel. Bulk `add --all`, `sync`, and `update` prepare independent skill trees in parallel, then commit final filesystem and manifest changes in stable order. `status` and `index` can hash independent skill folders in parallel.
+Source-reading commands can refresh independent configured repos in parallel. When a source does not publish an index, fallback source metadata reads can also use `SV_JOBS` within that repo while probing candidate skill folders. Bulk `add --all`, `sync`, and `update` prepare independent skill trees in parallel, then commit final filesystem and manifest changes in stable order. `status` and `index` can hash independent skill folders in parallel.
 
 Use `SV_JOBS=1` when you want fully sequential execution for debugging or reproducing a race. Use `SV_JOBS=N` with `N` from 1 through 64 to choose a specific worker count. Invalid values fail before command work starts with a clear error.
