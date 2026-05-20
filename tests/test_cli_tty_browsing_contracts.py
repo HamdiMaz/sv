@@ -346,6 +346,12 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
         if headers == ["Repo", "URL", "Cache"]:
             kwargs["on_detail"](rows[0])
         elif headers == ["Skill", "Source", "Description"]:
+            assert callable(kwargs.get("detail_renderer"))
+            assert callable(kwargs.get("detail_actions", {}).get("a"))
+            assert callable(kwargs.get("key_actions", {}).get("a"))
+            assert kwargs.get("key_help") == "a add all"
+            assert kwargs.get("clear_on_exit") is True
+            assert kwargs.get("on_detail") is None
             kwargs["key_actions"]["a"](rows[0])
         return None
 
@@ -370,7 +376,7 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
 
 
 @pytest.mark.integration
-def test_tty_repo_skill_browser_enter_installs_one_skill(
+def test_tty_repo_skill_browser_detail_action_installs_one_skill(
     tmp_path: Path, run_sv, monkeypatch
 ):
     source = make_source_repo(tmp_path)
@@ -385,7 +391,12 @@ def test_tty_repo_skill_browser_enter_installs_one_skill(
         if headers == ["Repo", "URL", "Cache"]:
             kwargs["on_detail"](rows[0])
         elif headers == ["Skill", "Source", "Description"]:
-            kwargs["on_detail"](rows[0])
+            detail_text = kwargs["detail_renderer"](rows[0], None)
+            assert "Skill: alpha" in detail_text
+            assert "Description: Alpha skill." in detail_text
+            assert not (project / ".pi" / "skills" / "alpha").exists()
+            status = kwargs["detail_actions"]["a"](rows[0])
+            assert "Added Pi skill 'alpha'" in status
         return None
 
     monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
@@ -395,7 +406,36 @@ def test_tty_repo_skill_browser_enter_installs_one_skill(
     assert result.exit_code == 0
     assert (project / ".pi" / "skills" / "alpha" / "SKILL.md").is_file()
     assert not (project / ".pi" / "skills" / "beta").exists()
-    assert "Added Pi skill 'alpha'" in result.stdout
+    assert "Added Pi skill 'alpha'" not in result.stdout
+
+
+@pytest.mark.integration
+def test_tty_repo_skill_browser_detail_render_does_not_install_skill(
+    tmp_path: Path, run_sv, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+
+    def fake_browse(headers, rows, **kwargs):
+        if headers == ["Repo", "URL", "Cache"]:
+            kwargs["on_detail"](rows[0])
+        elif headers == ["Skill", "Source", "Description"]:
+            detail_text = kwargs["detail_renderer"](rows[0], None)
+            assert "Skill: alpha" in detail_text
+        return None
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+
+    result = run_sv(["repo", "list"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / "beta").exists()
 
 
 @pytest.mark.integration

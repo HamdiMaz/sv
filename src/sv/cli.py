@@ -2000,26 +2000,28 @@ def _browse_repo_source_skills(
         print("No valid skills found in this source repo.")
         return
 
-    context = _detect_local_context(cwd)
     rows, entries = _interactive_source_skill_rows(catalog)
 
-    def install_one(row: Sequence[str]) -> None:
+    def render_detail(row: Sequence[str], status: str | None) -> str:
         entry = _entry_for_interactive_row(row, rows, entries)
         if entry is None:
-            return
-        result = _add_skill_to_context(entry, adapter, context)
-        _print_add_result(result)
-        _refresh_local_index_if_needed(context)
+            return _format_source_skill_unavailable_detail(status)
+        return _format_source_skill_detail(entry, status=status)
+
+    def add_detail(row: Sequence[str]) -> str:
+        return _source_skill_detail_action(row, rows, entries, cwd=cwd, adapter=adapter)
 
     def install_all(_row: Sequence[str]) -> None:
+        context = _detect_local_context(cwd)
         _handle_add_all(catalog, cwd=cwd, adapter=adapter, context=context)
 
     _browse_tty_table(
         _source_skill_headers(),
         rows,
-        on_detail=install_one,
+        detail_renderer=render_detail,
+        detail_actions={"a": add_detail},
         key_actions={"a": install_all},
-        key_help="a install all",
+        key_help="a add all",
         clear_on_exit=True,
     )
 
