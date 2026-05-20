@@ -2509,7 +2509,7 @@ def _format_source_skill_unavailable_detail_card(
     safe_status = status or "Selected skill is no longer available."
     return [
         detail_line("Status", style="accent"),
-        detail_line(f"  {safe_status}", wrap=True),
+        detail_line(safe_status, wrap=True, indent=2),
     ]
 
 

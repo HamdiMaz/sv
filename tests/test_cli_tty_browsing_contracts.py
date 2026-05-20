@@ -53,7 +53,10 @@ class _NonTty(io.StringIO):
 def _detail_visible_text(detail) -> str:
     if isinstance(detail, str):
         return detail
-    return "\n".join(getattr(line, "text", str(line)) for line in detail)
+    return "\n".join(
+        f"{' ' * getattr(line, 'indent', 0)}{getattr(line, 'text', str(line))}"
+        for line in detail
+    )
 
 
 def _non_tty_runtime(*, cwd: Path, home: Path) -> Runtime:
@@ -537,6 +540,9 @@ def test_tty_detail_renderer_with_stale_row_preserves_status_line(
     result = run_sv(["list"], cwd=project, home=home)
 
     assert result.exit_code == 0
+    stale_detail = detail_texts[0]
+    assert getattr(stale_detail[1], "text") == "Still open"
+    assert getattr(stale_detail[1], "indent") == 2
     assert [_detail_visible_text(detail) for detail in detail_texts] == [
         "Status\n  Still open"
     ]
@@ -655,7 +661,9 @@ def test_tty_repo_skill_browser_detail_action_installs_one_skill(
             detail_text = _detail_visible_text(detail)
             assert "╭─ Skill" in detail_text
             assert "alpha ● available" in detail_text
-            assert "Description" in detail_text
+            assert "Source  " in detail_text
+            assert "Path    " in detail_text
+            assert "├─ Description" in detail_text
             assert "Alpha skill." in detail_text
             assert not (project / ".pi" / "skills" / "alpha").exists()
             status = kwargs["detail_actions"]["a"](rows[0])
@@ -692,6 +700,9 @@ def test_tty_repo_skill_browser_detail_render_does_not_install_skill(
             detail_text = _detail_visible_text(detail)
             assert "╭─ Skill" in detail_text
             assert "alpha ● available" in detail_text
+            assert "Source  " in detail_text
+            assert "Path    " in detail_text
+            assert "├─ Description" in detail_text
         return None
 
     monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
