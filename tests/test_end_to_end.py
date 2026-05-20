@@ -352,7 +352,7 @@ def test_epic1_vault_state_update_sync_orphan_status_acceptance(tmp_path, run_sv
     run_git(["commit", "-m", "update beta and remove gamma"], source)
 
     status_result = run_sv(
-        ["status"], cwd=vault, home=home, git_runner=default_runner
+        ["status", "--refresh"], cwd=vault, home=home, git_runner=default_runner
     )
     _assert_success(status_result)
     assert "Skill-vault status" in status_result.stdout
