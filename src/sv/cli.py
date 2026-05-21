@@ -113,6 +113,13 @@ _TTY_DETAIL_HEADER = "\x1b[38;5;183m"
 _TTY_DETAIL_RULE = "\x1b[38;5;60m"
 _SOURCE_SKILL_DETAIL_CARD_PREFERRED_WIDTH = 58
 _SOURCE_SKILL_DETAIL_CARD_MIN_WIDTH = 18
+_SUPPORTED_RUN_AGENTS = ("pi",)
+
+
+@dataclass(frozen=True)
+class RunInvocation:
+    agent: str
+    args: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -330,10 +337,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_cache_policy_args(update_parser)
 
     run_parser = subparsers.add_parser(
-        "run", help="Run Pi with only project skills enabled."
+        "run",
+        help="Run an agent with only project skills enabled.",
+        description="Run an agent with only project skills enabled.",
     )
     run_parser.add_argument(
-        "pi_args", nargs=argparse.REMAINDER, help="Arguments forwarded to pi after --."
+        "run_args",
+        nargs=argparse.REMAINDER,
+        metavar="agent [agent-args]",
+        help=(
+            "Agent name followed by arguments forwarded to that agent. "
+            "Supported agents: pi."
+        ),
     )
 
     cache_parser = subparsers.add_parser(
@@ -493,9 +508,10 @@ def handle(
             return _handle_index(cwd, args=args)
 
         if args.command == "run":
+            invocation = _parse_run_invocation(args.run_args)
             local_context = _detect_local_context(cwd)
             return _handle_run(
-                args.pi_args,
+                invocation,
                 cwd=cwd,
                 adapter=adapter,
                 process_runner=process_runner,
@@ -2338,13 +2354,13 @@ def _confirm_repo_removal(repos: Sequence[RepoConfig], *, yes: bool) -> bool:
 
 
 def _handle_run(
-    args: Sequence[str],
+    invocation: RunInvocation,
     cwd: Path,
     adapter: PiAdapter,
     process_runner,
     context: LocalContext,
 ) -> int:
-    """Run Pi and turn launch failures into user-facing errors."""
+    """Run an agent and turn launch failures into user-facing errors."""
     project_skills_dir = adapter.project_skill_dir(context.repo_root)
     validate_project_skills_for_run(project_skills_dir)
     skills_path = (
@@ -2352,7 +2368,7 @@ def _handle_run(
         if cwd.resolve() == context.repo_root.resolve()
         else str(project_skills_dir)
     )
-    command = adapter.run_command(_strip_arg_separator(args), skills_path=skills_path)
+    command = adapter.run_command(invocation.args, skills_path=skills_path)
     try:
         return process_runner(command)
     except FileNotFoundError as exc:
@@ -4184,6 +4200,28 @@ def _choose_skill(matches: Sequence[SourceSkill]) -> SourceSkill | None:
         if len(selected) == 1:
             return selected[0]
         print("Select exactly one source skill, or q to cancel.")
+
+
+def _supported_run_agents_text() -> str:
+    return ", ".join(_SUPPORTED_RUN_AGENTS)
+
+
+def _parse_run_invocation(run_args: Sequence[str]) -> RunInvocation:
+    supported_agents = _supported_run_agents_text()
+    if not run_args or run_args[0] == "--":
+        raise SvError(f"Specify an agent name. Supported agents: {supported_agents}.")
+
+    agent = run_args[0]
+    if agent not in _SUPPORTED_RUN_AGENTS:
+        safe_agent = _escape_control_characters(agent)
+        raise SvError(
+            f"Unsupported agent '{safe_agent}'. Supported agents: {supported_agents}."
+        )
+
+    return RunInvocation(
+        agent=agent,
+        args=tuple(_strip_arg_separator(run_args[1:])),
+    )
 
 
 def _strip_arg_separator(args: Sequence[str]) -> list[str]:

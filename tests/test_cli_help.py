@@ -108,7 +108,9 @@ from tests.helpers import parse_sv
         (
             ["run", "--help"],
             [
-                "Arguments forwarded to pi after --.",
+                "Run an agent with only project skills enabled.",
+                "Agent name",
+                "Supported agents: pi",
             ],
         ),
         (
