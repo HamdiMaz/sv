@@ -64,6 +64,22 @@ def test_loading_reporter_writes_spinner_and_clears_on_tty():
     assert output.endswith("\r" + (" " * len(rendered)) + "\r")
 
 
+def test_loading_reporter_print_line_without_active_spinner_writes_plain_line():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    reporter.print_line("warning: no spinner active")
+
+    assert stream.getvalue() == "warning: no spinner active\n"
+
+
 def test_loading_reporter_print_line_clears_and_redraws_active_spinner():
     from sv.ui import LoadingReporter
 
@@ -85,6 +101,116 @@ def test_loading_reporter_print_line_clears_and_redraws_active_spinner():
     assert output.endswith(clear_sequence)
 
 
+def test_loading_reporter_nested_operations_share_outer_spinner(monkeypatch):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    class InlineThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setattr(ui_module.threading, "Thread", InlineThread)
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("outer"):
+        outer_render = stream.getvalue()
+        with reporter.operation("inner"):
+            assert reporter._message == "outer"
+            assert stream.getvalue() == outer_render
+        assert reporter._message == "outer"
+        assert reporter._active_count == 1
+        assert stream.getvalue() == outer_render
+
+    assert stream.getvalue().endswith("\r" + (" " * len("| outer")) + "\r")
+    assert reporter._active_count == 0
+
+
+def test_loading_reporter_stop_without_active_operation_is_noop():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(stream, enabled=True)
+
+    reporter._stop()
+
+    assert stream.getvalue() == ""
+    assert reporter._active_count == 0
+    assert reporter._thread is None
+    assert reporter._stop_event is None
+
+
+def test_loading_reporter_animation_loop_renders_frame_when_active(monkeypatch):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    class ControlledEvent:
+        def __init__(self):
+            self.wait_calls = 0
+            self.set_called = False
+
+        def wait(self, timeout):
+            self.wait_calls += 1
+            return self.wait_calls > 1
+
+        def set(self):
+            self.set_called = True
+
+    class InlineThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setattr(ui_module.threading, "Event", ControlledEvent)
+    monkeypatch.setattr(ui_module.threading, "Thread", InlineThread)
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("A", "B"),
+        interval_seconds=60.0,
+    )
+
+    reporter._start("working")
+    stop_event = reporter._stop_event
+    assert isinstance(stop_event, ControlledEvent)
+
+    reporter._animate(stop_event)
+
+    assert "\rA working\rB working" in stream.getvalue()
+    assert stop_event.wait_calls == 2
+
+    reporter._stop()
+
+
+def test_loading_reporter_clear_without_previous_render_is_noop():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(stream, enabled=True)
+
+    reporter._clear_locked()
+
+    assert stream.getvalue() == ""
+    assert reporter._last_render_width == 0
+
+
 def test_loading_reporter_clears_wide_unicode_by_display_width():
     from sv.ui import LoadingReporter
 
@@ -100,6 +226,28 @@ def test_loading_reporter_clears_wide_unicode_by_display_width():
         pass
 
     rendered = "| 刷新"
+    assert stream.getvalue().endswith(
+        "\r" + (" " * _display_width(rendered)) + "\r"
+    )
+
+
+def test_loading_reporter_clears_combining_unicode_by_display_width():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("e\u0301"):
+        pass
+
+    rendered = "| e\u0301"
+    assert len(rendered) == 4
+    assert _display_width(rendered) == 3
     assert stream.getvalue().endswith(
         "\r" + (" " * _display_width(rendered)) + "\r"
     )
@@ -258,6 +406,29 @@ def test_tty_ui_delegates_table_browsing_to_configured_browser():
         return ["alpha"]
 
     selected = TtyUi(table_browser=browser).browse_table(
+        ["Skill"],
+        [["alpha"]],
+        key_help="a action",
+    )
+
+    assert selected == ["alpha"]
+    assert calls == [
+        (["Skill"], [["alpha"]], {"key_help": "a action"})
+    ]
+
+
+def test_tty_ui_default_table_browser_delegates_to_table_module(monkeypatch):
+    from sv import table as table_module
+
+    calls = []
+
+    def browser(headers, rows, **kwargs):
+        calls.append((headers, rows, kwargs))
+        return ["alpha"]
+
+    monkeypatch.setattr(table_module, "browse_table", browser)
+
+    selected = TtyUi().browse_table(
         ["Skill"],
         [["alpha"]],
         key_help="a action",
