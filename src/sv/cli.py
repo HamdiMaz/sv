@@ -1001,8 +1001,8 @@ def _find_nearest_non_git_project_context(
             )
         if path.is_file():
             index = load_index(path)
-            if index.kind == "project-index":
-                return LocalContext(repo_root=candidate, index_kind="project-index")
+            if index.kind in {"project-index", "skill-vault"}:
+                return LocalContext(repo_root=candidate, index_kind=index.kind)
         manifest = project_manifest_path(candidate)
         if manifest.is_symlink():
             raise SvError(

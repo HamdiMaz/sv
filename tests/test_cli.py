@@ -221,6 +221,33 @@ def test_default_rejects_skill_vault_context(tmp_path: Path, run_sv):
     assert not (vault / ".agents").exists()
 
 
+def test_default_set_rejects_non_git_skill_vault_context(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    (vault / "skills").mkdir(parents=True)
+    index_file = vault / ".sv" / "index.toml"
+    index_file.parent.mkdir()
+    index_file.write_text(
+        'schema_version = 1\n'
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-21T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+    manifest_file = vault / ".sv" / "manifest.toml"
+    original_manifest = "schema_version = 1\n"
+    manifest_file.write_text(original_manifest, encoding="utf-8")
+
+    result = run_sv(["default", "claude"], cwd=vault, home=home)
+
+    assert result.exit_code == 1
+    assert "sv default is for project agent folders" in result.stderr
+    assert manifest_file.read_text(encoding="utf-8") == original_manifest
+    assert not (vault / ".claude").exists()
+    assert not (vault / ".pi").exists()
+    assert not (vault / ".agents").exists()
+
+
 def test_index_command_uses_cli_and_configured_scan_paths(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
