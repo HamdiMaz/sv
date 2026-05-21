@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from _thread import RLock as RLockType
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -103,6 +104,7 @@ Now = Callable[[], datetime]
 BackendFactory = Callable[[RepoConfig], Sequence[SourceBackend]]
 AfterStore = Callable[[SourceSkill, str, str], None]
 RefreshEntryOnBodyMiss = Callable[[SourceSkill], SourceSkill | None]
+SourceMaterializationContext = Callable[[SourceSkill], AbstractContextManager[object]]
 
 
 @dataclass(frozen=True)
@@ -1075,6 +1077,7 @@ def wrap_catalog_with_skill_body_cache(
     allow_source_fallback: bool = True,
     refresh_entry_on_body_miss: RefreshEntryOnBodyMiss | None = None,
     warn: Warn | None = None,
+    source_materialization: SourceMaterializationContext | None = None,
 ) -> list[SourceSkill]:
     body_store = SkillBodyCacheStore(paths)
     return [
@@ -1086,6 +1089,7 @@ def wrap_catalog_with_skill_body_cache(
             allow_source_fallback=allow_source_fallback,
             refresh_entry_on_body_miss=refresh_entry_on_body_miss,
             warn=warn,
+            source_materialization=source_materialization,
         )
         for entry in catalog
     ]
@@ -1100,6 +1104,7 @@ def _wrap_source_skill(
     allow_source_fallback: bool,
     refresh_entry_on_body_miss: RefreshEntryOnBodyMiss | None,
     warn: Warn | None,
+    source_materialization: SourceMaterializationContext | None,
 ) -> SourceSkill:
     original_materialize = entry.materialize_to
 
@@ -1158,11 +1163,18 @@ def _wrap_source_skill(
                     allow_source_fallback=True,
                     refresh_entry_on_body_miss=None,
                     warn=warn,
+                    source_materialization=source_materialization,
                 ).materialize_to(destination)
             return
 
         try:
-            original_materialize(destination)
+            materialization_context = (
+                source_materialization(entry)
+                if source_materialization is not None
+                else nullcontext()
+            )
+            with materialization_context:
+                original_materialize(destination)
             parse_skill_file(destination / "SKILL.md", expected_folder=entry.name)
             actual_hash = sha256_skill_directory(destination, expected_name=entry.name)
             actual_skill_file_hash = sha256_file(destination / "SKILL.md")

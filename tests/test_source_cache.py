@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1538,6 +1539,108 @@ def test_cache_only_materializer_uses_body_cache_when_touch_maintenance_warns(
     assert warnings == [
         "warning: failed skill body cache touch/prune maintenance for alpha: metadata write unavailable"
     ]
+
+
+def test_cache_aware_materializer_wraps_source_fallback_with_loading_context(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    paths = SvPaths.from_home(home)
+    repo = _repo()
+    source_skill = _write_skill_tree(tmp_path / "source", "alpha")
+    content_hash = sha256_skill_directory(source_skill, expected_name="alpha")
+    events: list[tuple[str, str]] = []
+
+    def materialize(destination: Path) -> None:
+        shutil.copytree(source_skill, destination)
+
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="github-gh-api",
+        source_content_hash=content_hash,
+        _materializer=materialize,
+    )
+
+    @contextmanager
+    def source_loading(source_entry: SourceSkill):
+        events.append(("enter", source_entry.qualified_reference))
+        yield
+        events.append(("exit", source_entry.qualified_reference))
+
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 21, 12, 0, tzinfo=UTC),
+        after_store=lambda source_entry, content, skill_file: None,
+        source_materialization=source_loading,
+    )[0]
+
+    wrapped.materialize_to(tmp_path / "destination" / "alpha")
+
+    assert events == [
+        ("enter", "Org/Skills:alpha"),
+        ("exit", "Org/Skills:alpha"),
+    ]
+
+
+def test_cache_aware_materializer_does_not_wrap_body_cache_hit(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    paths = SvPaths.from_home(home)
+    repo = _repo()
+    cached_skill = _write_skill_tree(tmp_path / "cached", "alpha")
+    content_hash = sha256_skill_directory(cached_skill, expected_name="alpha")
+    store_skill_body_cache(
+        paths,
+        cached_skill,
+        skill_name="alpha",
+        content_hash=content_hash,
+        source_reference="Org/Skills:alpha",
+        now=datetime(2026, 5, 21, 12, 0, tzinfo=UTC),
+    )
+    events: list[str] = []
+
+    def materialize(destination: Path) -> None:
+        raise AssertionError("source materializer must not be called on body cache hit")
+
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="github-gh-api",
+        source_content_hash=content_hash,
+        _materializer=materialize,
+    )
+
+    @contextmanager
+    def source_loading(source_entry: SourceSkill):
+        events.append(source_entry.qualified_reference)
+        yield
+
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 21, 12, 0, tzinfo=UTC),
+        after_store=lambda source_entry, content, skill_file: None,
+        source_materialization=source_loading,
+    )[0]
+
+    wrapped.materialize_to(tmp_path / "destination" / "alpha")
+
+    assert events == []
 
 
 def test_cache_aware_materializer_stores_source_materialization_on_miss(

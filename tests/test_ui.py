@@ -1,7 +1,23 @@
+import io
 import subprocess
 import sys
+import unicodedata
 
 from sv.ui import CHOSEN_TTY_UI_APPROACH, PlainOutput, TtyUi, select_tty_items
+
+
+def _display_width(value: str) -> int:
+    width = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    return width
+
+
+class _TtyStringIO(io.StringIO):
+    def isatty(self):
+        return True
 
 
 def test_chosen_tty_ui_approach_prefers_stdlib_without_runtime_dependencies():
@@ -9,6 +25,321 @@ def test_chosen_tty_ui_approach_prefers_stdlib_without_runtime_dependencies():
     assert CHOSEN_TTY_UI_APPROACH.runtime_dependencies == ()
     assert "prompt-toolkit" in CHOSEN_TTY_UI_APPROACH.alternatives_considered
     assert "rich" in CHOSEN_TTY_UI_APPROACH.alternatives_considered
+
+
+def test_loading_reporter_does_not_write_when_disabled():
+    from sv.ui import LoadingReporter
+
+    stream = io.StringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=False,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("Refreshing source repo Org/Skills"):
+        reporter.print_line("warning: hidden from spinner test")
+
+    assert stream.getvalue() == "warning: hidden from spinner test\n"
+
+
+def test_loading_reporter_writes_spinner_and_clears_on_tty():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("Refreshing source repo Org/Skills"):
+        pass
+
+    output = stream.getvalue()
+    rendered = "| Refreshing source repo Org/Skills"
+    assert f"\r{rendered}" in output
+    assert output.endswith("\r" + (" " * len(rendered)) + "\r")
+
+
+def test_loading_reporter_print_line_without_active_spinner_writes_plain_line():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    reporter.print_line("warning: no spinner active")
+
+    assert stream.getvalue() == "warning: no spinner active\n"
+
+
+def test_loading_reporter_print_line_clears_and_redraws_active_spinner():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("Refreshing source repo Org/Skills"):
+        reporter.print_line("warning: using stale cached metadata")
+
+    output = stream.getvalue()
+    rendered = "| Refreshing source repo Org/Skills"
+    clear_sequence = "\r" + (" " * len(rendered)) + "\r"
+    assert clear_sequence + "warning: using stale cached metadata\n" in output
+    assert output.endswith(clear_sequence)
+
+
+def test_loading_reporter_nested_operations_share_outer_spinner(monkeypatch):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    class InlineThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setattr(ui_module.threading, "Thread", InlineThread)
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("outer"):
+        outer_render = stream.getvalue()
+        with reporter.operation("inner"):
+            assert reporter._message == "outer"
+            assert stream.getvalue() == outer_render
+        assert reporter._message == "outer"
+        assert reporter._active_count == 1
+        assert stream.getvalue() == outer_render
+
+    assert stream.getvalue().endswith("\r" + (" " * len("| outer")) + "\r")
+    assert reporter._active_count == 0
+
+
+def test_loading_reporter_stop_without_active_operation_is_noop():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(stream, enabled=True)
+
+    reporter._stop()
+
+    assert stream.getvalue() == ""
+    assert reporter._active_count == 0
+    assert reporter._thread is None
+    assert reporter._stop_event is None
+
+
+def test_loading_reporter_animation_loop_renders_frame_when_active(monkeypatch):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    class ControlledEvent:
+        def __init__(self):
+            self.wait_calls = 0
+            self.set_called = False
+
+        def wait(self, timeout):
+            self.wait_calls += 1
+            return self.wait_calls > 1
+
+        def set(self):
+            self.set_called = True
+
+    class InlineThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setattr(ui_module.threading, "Event", ControlledEvent)
+    monkeypatch.setattr(ui_module.threading, "Thread", InlineThread)
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("A", "B"),
+        interval_seconds=60.0,
+    )
+
+    reporter._start("working")
+    stop_event = reporter._stop_event
+    assert isinstance(stop_event, ControlledEvent)
+
+    reporter._animate(stop_event)
+
+    assert "\rA working\rB working" in stream.getvalue()
+    assert stop_event.wait_calls == 2
+
+    reporter._stop()
+
+
+def test_loading_reporter_clear_without_previous_render_is_noop():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(stream, enabled=True)
+
+    reporter._clear_locked()
+
+    assert stream.getvalue() == ""
+    assert reporter._last_render_width == 0
+
+
+def test_loading_reporter_clears_wide_unicode_by_display_width():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("刷新"):
+        pass
+
+    rendered = "| 刷新"
+    assert stream.getvalue().endswith(
+        "\r" + (" " * _display_width(rendered)) + "\r"
+    )
+
+
+def test_loading_reporter_clears_combining_unicode_by_display_width():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("e\u0301"):
+        pass
+
+    rendered = "| e\u0301"
+    assert len(rendered) == 4
+    assert _display_width(rendered) == 3
+    assert stream.getvalue().endswith(
+        "\r" + (" " * _display_width(rendered)) + "\r"
+    )
+
+
+def test_loading_reporter_clears_previous_render_before_restart_during_join(
+    monkeypatch,
+):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+    join_started_new_operation = False
+
+    class JoinControlledThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            nonlocal join_started_new_operation
+            if not join_started_new_operation:
+                join_started_new_operation = True
+                reporter._start("new")
+
+    monkeypatch.setattr(ui_module.threading, "Thread", JoinControlledThread)
+
+    reporter._start("old operation with a longer message")
+    old_rendered = "| old operation with a longer message"
+    new_rendered = "| new"
+
+    reporter._stop()
+    reporter._stop()
+
+    output = stream.getvalue()
+    old_clear_sequence = "\r" + (" " * len(old_rendered)) + "\r"
+    new_clear_sequence = "\r" + (" " * len(new_rendered)) + "\r"
+
+    assert old_clear_sequence + f"\r{new_rendered}" in output
+    assert output.endswith(new_clear_sequence)
+    assert reporter._last_render_width == 0
+
+
+def test_loading_reporter_stop_does_not_clear_new_operation_started_during_join(
+    monkeypatch,
+):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+    started_threads = []
+    join_started_new_operation = False
+
+    class JoinControlledThread:
+        def __init__(self, *args, **kwargs):
+            started_threads.append(self)
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            nonlocal join_started_new_operation
+            if not join_started_new_operation:
+                join_started_new_operation = True
+                reporter._start("new operation")
+
+    monkeypatch.setattr(ui_module.threading, "Thread", JoinControlledThread)
+
+    reporter._start("old operation")
+    old_thread = reporter._thread
+
+    reporter._stop()
+
+    assert join_started_new_operation is True
+    assert reporter._active_count == 1
+    assert reporter._message == "new operation"
+    assert reporter._thread is started_threads[1]
+    assert reporter._thread is not old_thread
 
 
 def test_plain_output_import_does_not_load_tty_selector_module():
@@ -75,6 +406,29 @@ def test_tty_ui_delegates_table_browsing_to_configured_browser():
         return ["alpha"]
 
     selected = TtyUi(table_browser=browser).browse_table(
+        ["Skill"],
+        [["alpha"]],
+        key_help="a action",
+    )
+
+    assert selected == ["alpha"]
+    assert calls == [
+        (["Skill"], [["alpha"]], {"key_help": "a action"})
+    ]
+
+
+def test_tty_ui_default_table_browser_delegates_to_table_module(monkeypatch):
+    from sv import table as table_module
+
+    calls = []
+
+    def browser(headers, rows, **kwargs):
+        calls.append((headers, rows, kwargs))
+        return ["alpha"]
+
+    monkeypatch.setattr(table_module, "browse_table", browser)
+
+    selected = TtyUi().browse_table(
         ["Skill"],
         [["alpha"]],
         key_help="a action",

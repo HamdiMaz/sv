@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Documented TTY-only stderr loading indicators for source refresh and remote materialization while preserving script-friendly non-interactive output.
 - Documented source metadata acceleration: index-first reads, default repo-add/`svx` cache warming with `--no-warm-cache`, and bounded parallel fallback metadata reads.
 - Redesigned interactive source skill detail pages as framed, color-accented cards with wrapped descriptions, safe styled metadata, status feedback, and the concise footer `a add • q back`.
 - Polished TTY `/` search with a framed inline prompt, contextual titles, and visible `empty Enter` clear guidance.

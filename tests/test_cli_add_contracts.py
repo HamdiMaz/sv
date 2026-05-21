@@ -16,6 +16,7 @@ from sv.manifest import load_manifest
 from sv.search import ranked_search_indices
 from sv.source import default_runner
 from sv.source_cache import load_cached_catalog, save_cached_catalog, _cached_catalog_hash
+from sv.ui import LoadingReporter
 from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
@@ -85,6 +86,45 @@ def _source_skill(tmp_path: Path, name: str, repo_id: str, description: str) -> 
         repo_path=repo_path,
         source_path=source_path,
     )
+
+
+def test_source_materialization_loading_context_uses_tty_for_remote_backend():
+    stream = _TtyStream()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+    entry = replace(
+        _source_skill(Path("/tmp"), "alpha", "Org/Remote", "Alpha skill."),
+        source_backend="github-gh-api",
+    )
+
+    with cli_module._source_materialization_loading_context(reporter, entry):
+        pass
+
+    assert "Materializing source skill Org/Remote:alpha" in stream.getvalue()
+    assert "\r" in stream.getvalue()
+
+
+def test_source_materialization_loading_context_skips_local_backends():
+    stream = _TtyStream()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+    entry = replace(
+        _source_skill(Path("/tmp"), "alpha", "Org/Local", "Alpha skill."),
+        source_backend="git-local",
+    )
+
+    with cli_module._source_materialization_loading_context(reporter, entry):
+        pass
+
+    assert stream.getvalue() == ""
 
 
 def test_add_list_picker_provides_structured_skill_source_description_columns(tmp_path):

@@ -2,6 +2,12 @@
 
 `sv` prints plain-text output so commands are readable in terminals, logs, and CI.
 
+## Loading indicators
+
+When `stderr` is an interactive terminal, `sv` shows a transient spinner while it refreshes source metadata or materializes a remote source skill folder. The spinner is written to `stderr` and cleared before final tables, prompts, warnings, or errors continue.
+
+Non-interactive output remains plain and stable. Scripts, CI logs, and redirected commands do not receive spinner frames, so existing stdout tables and stderr error contracts remain script-friendly.
+
 ## Skill lists
 
 In an interactive terminal, `sv list` opens an interactive browser so you can move through source skills before choosing anything. In non-interactive output, or when the browser is unavailable, `sv list` shows one row per skill name so the main table stays easy to scan:
