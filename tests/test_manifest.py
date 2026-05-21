@@ -154,6 +154,21 @@ def test_save_manifest_document_writes_default_agent_before_skills(tmp_path: Pat
     assert load_manifest_document(project_skills) == document
 
 
+def test_agents_skills_manifest_path_uses_project_root_sv_dir(tmp_path: Path):
+    project_root = tmp_path / "project"
+    project_skills = project_root / ".agents" / "skills"
+
+    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+
+    assert (
+        manifest_module.manifest_path(project_skills)
+        == project_root / ".sv" / "manifest.toml"
+    )
+    assert manifest_module.manifest_path(project_skills).is_file()
+    assert not (project_root / ".agents" / ".sv" / "manifest.toml").exists()
+    assert sorted(load_manifest(project_skills)) == ["alpha"]
+
+
 def test_save_manifest_preserves_existing_default_agent(tmp_path: Path):
     project_skills = tmp_path / "project" / ".pi" / "skills"
     save_manifest_document(
@@ -177,6 +192,41 @@ def test_save_manifest_preserves_existing_default_agent(tmp_path: Path):
     document = load_manifest_document(project_skills)
     assert document.default_agent == "agents"
     assert list(document.skills) == ["alpha"]
+
+
+def test_save_manifest_overrides_existing_default_agent(tmp_path: Path):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    save_manifest_document(
+        project_skills,
+        ManifestDocument(default_agent="pi", skills={}),
+    )
+
+    save_manifest(project_skills, {}, default_agent="claude")
+
+    document = load_manifest_document(project_skills)
+    assert document.default_agent == "claude"
+    assert (
+        'default_agent = "claude"'
+        in manifest_module.manifest_path(project_skills).read_text()
+    )
+
+
+def test_save_manifest_clears_existing_default_agent_when_none_is_explicit(
+    tmp_path: Path,
+):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    save_manifest_document(
+        project_skills,
+        ManifestDocument(default_agent="agents", skills={}),
+    )
+
+    save_manifest(project_skills, {}, default_agent=None)
+
+    document = load_manifest_document(project_skills)
+    assert document.default_agent is None
+    assert (
+        "default_agent" not in manifest_module.manifest_path(project_skills).read_text()
+    )
 
 
 def test_manifest_rejects_invalid_default_agent(tmp_path: Path):
@@ -474,6 +524,24 @@ def test_load_manifest_reads_legacy_manifest_when_canonical_is_missing(
         target_agent="pi",
         target_path=".pi/skills/alpha",
     )
+
+
+def test_load_manifest_ignores_default_agent_in_legacy_manifest(tmp_path: Path):
+    project_skills = tmp_path / ".pi" / "skills"
+    project_skills.mkdir(parents=True)
+    (project_skills / ".sv-manifest.toml").write_text(
+        'default_agent = "agents"\n'
+        "[[skills]]\n"
+        'name = "alpha"\n'
+        'repo_id = "Org/Skills"\n'
+        'repo_url = "https://github.com/Org/Skills.git"\n'
+        'description = "Alpha skill."\n'
+    )
+
+    document = load_manifest_document(project_skills)
+
+    assert document.default_agent is None
+    assert sorted(document.skills) == ["alpha"]
 
 
 def test_save_manifest_migrates_legacy_manifest_to_canonical_path(tmp_path: Path):
