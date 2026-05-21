@@ -137,6 +137,49 @@ def test_cli_help_is_available(args, required_phrases, capsys):
         assert phrase in output
 
 
+@pytest.mark.parametrize(
+    ("args", "required", "forbidden"),
+    [
+        (
+            ["status", "--help"],
+            [
+                "normal projects, shows the active/default project agent only",
+                "sv default <agent>",
+            ],
+            ["Pi skills only"],
+        ),
+        (
+            ["sync", "--help"],
+            [
+                "normal projects, syncs the active/default project agent only",
+                "sv default <agent>",
+            ],
+            ["all project skills", "Pi skills only"],
+        ),
+        (
+            ["update", "--help"],
+            [
+                "normal projects, updates the active/default project agent only",
+                "sv default <agent>",
+            ],
+            ["all project skills", "Pi skills only"],
+        ),
+    ],
+)
+def test_lifecycle_help_describes_active_default_project_agent_scope(
+    args, required, forbidden, capsys
+):
+    with pytest.raises(SystemExit) as exc_info:
+        parse_sv(args)
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    for phrase in required:
+        assert phrase in output
+    for phrase in forbidden:
+        assert phrase not in output
+
+
 def test_cache_clean_output_describes_skill_body_pruning(
     tmp_path, capsys, monkeypatch
 ):

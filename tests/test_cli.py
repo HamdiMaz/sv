@@ -1462,6 +1462,22 @@ def test_add_all_uses_manifest_default_agent(tmp_path: Path, capsys):
     assert "Added Claude skill 'beta'" in output
 
 
+def test_status_infers_and_persists_single_existing_agent_folder(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / ".agents").mkdir()
+
+    result = run_sv(["status", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Agents skills" in result.stdout
+    document = load_manifest_document(project / ".pi" / "skills")
+    assert document.default_agent == "agents"
+
+
 def test_status_reports_only_default_agent_entries(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"

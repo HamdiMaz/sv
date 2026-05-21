@@ -156,7 +156,7 @@ class ActiveProjectAgent:
     skills_dir: Path
 
     @property
-    def agent(self):
+    def agent(self) -> ProjectAgent:
         return project_agent_for(self.name)
 
 
@@ -256,6 +256,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show sv-managed skill status.",
         description=(
             "Show sv-managed skill status for the current project, skill-vault, or global source context.\n"
+            "In normal projects, shows the active/default project agent only; use "
+            "'sv default <agent>' to view or choose it.\n"
             "Includes modified, update-available, and orphan states when available."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -356,8 +358,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force-sync sv-managed skills from source repos.",
         description=(
             "Force-sync sv-managed project or vault skills from configured source "
-            "repos, replacing local edits with the latest source content."
+            "repos, replacing local edits with the latest source content.\n"
+            "In normal projects, syncs the active/default project agent only; use "
+            "'sv default <agent>' to view or choose it."
         ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_cache_policy_args(sync_parser)
     update_parser = subparsers.add_parser(
@@ -365,8 +370,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Update sources and unchanged sv-managed skills.",
         description=(
             "Update source metadata and update sv-managed project or vault skills "
-            "only when local files have not been modified."
+            "only when local files have not been modified.\n"
+            "In normal projects, updates the active/default project agent only; use "
+            "'sv default <agent>' to view or choose it."
         ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_cache_policy_args(update_parser)
 
