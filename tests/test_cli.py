@@ -132,6 +132,33 @@ def test_default_show_does_not_infer_or_persist_single_existing_folder(
     assert not (project / ".sv" / "manifest.toml").exists()
 
 
+def test_default_rejects_skill_vault_context(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    (vault / "skills").mkdir()
+    index_file = vault / ".sv" / "index.toml"
+    index_file.parent.mkdir()
+    index_file.write_text(
+        'schema_version = 1\n'
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-21T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+    manifest_file = vault / ".sv" / "manifest.toml"
+    manifest_file.write_text("schema_version = 1\n", encoding="utf-8")
+
+    result = run_sv(["default"], cwd=vault, home=home)
+
+    assert result.exit_code == 1
+    assert "sv default is for project agent folders" in result.stderr
+    assert manifest_file.read_text(encoding="utf-8") == "schema_version = 1\n"
+    assert not (vault / ".pi").exists()
+    assert not (vault / ".claude").exists()
+    assert not (vault / ".agents").exists()
+
+
 def test_index_command_uses_cli_and_configured_scan_paths(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
