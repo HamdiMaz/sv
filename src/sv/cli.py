@@ -69,9 +69,9 @@ from sv.project import (
     AddSkillResult,
     RemoveSkillResult,
     SyncResult,
-    add_all_project_skills,
+    add_all_project_agent_skills,
     add_all_vault_skills,
-    add_project_skill,
+    add_project_agent_skill,
     add_vault_skill,
     normalize_skill_name,
     refresh_project_skill_local_states,
@@ -822,13 +822,17 @@ def _manifest_skills_dir_for_project_root(project_root: Path) -> Path:
 
 
 def _load_project_manifest_document(context: LocalContext) -> ManifestDocument:
-    return load_manifest_document(_manifest_skills_dir_for_project_root(context.repo_root))
+    return load_manifest_document(
+        _manifest_skills_dir_for_project_root(context.repo_root)
+    )
 
 
 def _save_project_manifest_document(
     context: LocalContext, document: ManifestDocument
 ) -> None:
-    save_manifest_document(_manifest_skills_dir_for_project_root(context.repo_root), document)
+    save_manifest_document(
+        _manifest_skills_dir_for_project_root(context.repo_root), document
+    )
 
 
 def _handle_default(
@@ -882,7 +886,9 @@ def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
     if document.default_agent is not None:
         agent = project_agent_for(document.default_agent)
         _validate_project_agent_folder(context.repo_root, agent)
-        return ActiveProjectAgent(agent.name, agent.project_skill_dir(context.repo_root))
+        return ActiveProjectAgent(
+            agent.name, agent.project_skill_dir(context.repo_root)
+        )
 
     existing_agents = _existing_project_agent_folders(context.repo_root)
     if len(existing_agents) == 1:
@@ -891,7 +897,9 @@ def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
             context,
             ManifestDocument(default_agent=agent.name, skills=document.skills),
         )
-        return ActiveProjectAgent(agent.name, agent.project_skill_dir(context.repo_root))
+        return ActiveProjectAgent(
+            agent.name, agent.project_skill_dir(context.repo_root)
+        )
 
     if not _can_browse_tty():
         raise SvError(
@@ -957,7 +965,9 @@ def _choose_project_agent_interactively(project_root: Path):
     if selected is None:
         return None
     row_values = [str(value) for value in selected]
-    agent_name = row_values[len(headers)] if len(row_values) > len(headers) else row_values[0]
+    agent_name = (
+        row_values[len(headers)] if len(row_values) > len(headers) else row_values[0]
+    )
     return project_agent_for(agent_name)
 
 
@@ -1800,7 +1810,7 @@ def _git_source_metadata(repo_path: Path) -> tuple[str | None, str | None]:
 def _run_git_metadata(command: list[str], repo_path: Path) -> str | None:
     try:
         result = default_runner(command, repo_path)
-    except (OSError, SvError):
+    except OSError, SvError:
         return None
     if result.returncode != 0:
         return None
@@ -2311,7 +2321,9 @@ def _handle_repo(
     repo_is_list_command = args.repo_command == "list" or repo_list_alias
     repo_cache_policy = CachePolicy()
     if _repo_cache_flag_used(args) and not repo_is_list_command:
-        raise SvError("Use --refresh/--cached only with 'sv repo list' or 'sv repo -l'.")
+        raise SvError(
+            "Use --refresh/--cached only with 'sv repo list' or 'sv repo -l'."
+        )
     if repo_list_alias and args.repo_command not in {None, "list"}:
         raise SvError("Use 'sv repo -l' by itself or use a repo subcommand.")
     if repo_is_list_command:
@@ -3041,6 +3053,9 @@ def _handle_add_all(
             return 0
         catalog = resolved_catalog
     _validate_local_index_refresh_config(context)
+    if not catalog:
+        print("No valid skills found in configured source repos.")
+        return 0
     result = _add_all_skills_to_context(
         catalog, cwd, adapter, context, replace_existing=replace_existing
     )
@@ -3117,7 +3132,12 @@ def _add_skill_to_context(
         return add_vault_skill(
             entry, context.vault_skills_dir, replace_existing=should_replace
         )
-    return add_project_skill(entry, _project_skills_dir(adapter, context))
+    active_agent = _resolve_active_project_agent(context)
+    return add_project_agent_skill(
+        entry,
+        _project_skills_dir(context, active_agent),
+        active_agent.name,
+    )
 
 
 def _add_all_skills_to_context(
@@ -3144,11 +3164,18 @@ def _add_all_skills_to_context(
             replace_existing=replace_existing,
             replace_existing_indexes=frozenset(replace_indexes),
         )
-    return add_all_project_skills(catalog, _project_skills_dir(adapter, context))
+    active_agent = _resolve_active_project_agent(context)
+    return add_all_project_agent_skills(
+        catalog,
+        _project_skills_dir(context, active_agent),
+        active_agent.name,
+    )
 
 
-def _project_skills_dir(adapter: PiAdapter, context: LocalContext) -> Path:
-    return adapter.project_skill_dir(context.repo_root)
+def _project_skills_dir(
+    context: LocalContext, active_agent: ActiveProjectAgent
+) -> Path:
+    return active_agent.skills_dir
 
 
 def _resolve_vault_replacement(
@@ -3326,7 +3353,9 @@ def _handle_remove(
     if context.is_skill_vault:
         result = remove_vault_skill(skill, context.vault_skills_dir)
     else:
-        result = remove_project_skill(skill, _project_skills_dir(adapter, context))
+        result = remove_project_skill(
+            skill, adapter.project_skill_dir(context.repo_root)
+        )
     _print_remove_result(result)
     _refresh_local_index_if_needed(context)
     return 0
@@ -3411,7 +3440,7 @@ def _handle_remove_interactive(
 def _removal_skills_dir(adapter: PiAdapter, context: LocalContext) -> Path:
     if context.is_skill_vault:
         return context.vault_skills_dir
-    return _project_skills_dir(adapter, context)
+    return adapter.project_skill_dir(context.repo_root)
 
 
 def _managed_removal_entries(
@@ -3505,7 +3534,7 @@ def _selector_accepts_keyword_arguments(
 ) -> bool:
     try:
         signature = inspect.signature(selector)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return True
 
     parameters = signature.parameters
@@ -3524,7 +3553,7 @@ def _selector_accepts_keyword_arguments(
 def _selector_accepts_items_only(selector: SkillSelector) -> bool:
     try:
         inspect.signature(selector).bind(object())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return True
 
@@ -3592,7 +3621,9 @@ def _handle_sync(
     if context.is_skill_vault:
         result = sync_vault_skills(catalog, context.vault_skills_dir)
     else:
-        result = sync_project_skills(catalog, _project_skills_dir(adapter, context))
+        result = sync_project_skills(
+            catalog, adapter.project_skill_dir(context.repo_root)
+        )
     _print_sync_result(result)
     _refresh_local_index_if_needed(context)
     return 0
@@ -4059,7 +4090,9 @@ def _handle_update(
         result = update_vault_skills(catalog, context.vault_skills_dir)
     else:
         print("Updating project skills...")
-        result = update_project_skills(catalog, _project_skills_dir(adapter, context))
+        result = update_project_skills(
+            catalog, adapter.project_skill_dir(context.repo_root)
+        )
     _print_update_result(result)
     _refresh_local_index_if_needed(context)
     return 0
@@ -4221,7 +4254,7 @@ def _can_browse_tty(stdin=None, stdout=None) -> bool:
     try:
         stdin.fileno()
         stdout.fileno()
-    except (AttributeError, OSError):
+    except AttributeError, OSError:
         return False
     return True
 

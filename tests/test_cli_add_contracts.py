@@ -12,14 +12,23 @@ from sv.cli import _choose_skill, build_parser, handle
 from sv.config import SvPaths, load_config
 from sv.errors import SvError
 from sv.hashing import sha256_skill_directory
-from sv.manifest import load_manifest
+from sv.manifest import (
+    ManifestDocument,
+    load_manifest,
+    load_manifest_document,
+    save_manifest_document,
+)
 from sv.search import ranked_search_indices
 from sv.source import default_runner
-from sv.source_cache import load_cached_catalog, save_cached_catalog, _cached_catalog_hash
+from sv.source_cache import (
+    load_cached_catalog,
+    save_cached_catalog,
+    _cached_catalog_hash,
+)
 from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
-    configure_source,
+    configure_source as _configure_source,
     make_source_repo,
     run_git,
     write_source_skill,
@@ -28,6 +37,14 @@ from tests.helpers import (
 
 def parse(argv):
     return build_parser().parse_args(argv)
+
+
+def configure_source(source: Path, project: Path, home: Path) -> None:
+    _configure_source(source, project, home)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="pi", skills={}),
+    )
 
 
 def _assert_validation_rejected(result, project: Path) -> None:
@@ -65,7 +82,10 @@ def _expire_cached_metadata(home: Path) -> None:
     save_cached_catalog(
         paths,
         repo,
-        replace(expired_without_hash, catalog_hash=_cached_catalog_hash(expired_without_hash)),
+        replace(
+            expired_without_hash,
+            catalog_hash=_cached_catalog_hash(expired_without_hash),
+        ),
     )
 
 
@@ -74,7 +94,9 @@ class _TtyStream(StringIO):
         return True
 
 
-def _source_skill(tmp_path: Path, name: str, repo_id: str, description: str) -> SourceSkill:
+def _source_skill(
+    tmp_path: Path, name: str, repo_id: str, description: str
+) -> SourceSkill:
     repo_path = tmp_path / repo_id.replace("/", "-")
     source_path = repo_path / "skills" / name
     return SourceSkill(
@@ -500,8 +522,12 @@ def test_add_writes_canonical_project_manifest_without_legacy_manifest(
     project_skills = project / ".pi" / "skills"
     installed = project_skills / "alpha"
     assert (installed / "notes.md").read_text() == "alpha v1\n"
-    assert not (paths.source_repo_for(repo_id) / "skills" / "alpha" / "notes.md").exists()
-    assert not (paths.source_repo_for(repo_id) / "skills" / "beta" / "notes.md").exists()
+    assert not (
+        paths.source_repo_for(repo_id) / "skills" / "alpha" / "notes.md"
+    ).exists()
+    assert not (
+        paths.source_repo_for(repo_id) / "skills" / "beta" / "notes.md"
+    ).exists()
     assert (project / ".sv" / "manifest.toml").is_file()
     assert not (project_skills / ".sv-manifest.toml").exists()
     manifest = load_manifest(project_skills)
@@ -549,7 +575,9 @@ def test_add_validates_indexed_materialized_skill_before_mutating_project(
     assert "does not match folder" in captured.err
     assert not (project / ".pi" / "skills" / "alpha").exists()
     assert not (project / ".pi" / "skills" / ".alpha.sv-add-tmp").exists()
-    assert not (project / ".sv" / "manifest.toml").exists()
+    document = load_manifest_document(project / ".pi" / "skills")
+    assert document.default_agent == "pi"
+    assert document.skills == {}
 
 
 @pytest.mark.integration
@@ -590,13 +618,17 @@ def test_add_all_treats_all_as_a_literal_skill_name(tmp_path: Path, capsys):
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "Added Pi skill 'all'" in output
-    assert (project / ".pi" / "skills" / "all" / "notes.md").read_text() == "literal all\n"
+    assert (
+        project / ".pi" / "skills" / "all" / "notes.md"
+    ).read_text() == "literal all\n"
     assert not (project / ".pi" / "skills" / "alpha").exists()
     assert not (project / ".pi" / "skills" / "beta").exists()
 
 
 @pytest.mark.integration
-def test_add_all_missing_literal_all_reports_error_without_copying(tmp_path: Path, capsys):
+def test_add_all_missing_literal_all_reports_error_without_copying(
+    tmp_path: Path, capsys
+):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -612,7 +644,9 @@ def test_add_all_missing_literal_all_reports_error_without_copying(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_add_all_repo_installs_every_skill_from_requested_source(tmp_path: Path, capsys):
+def test_add_all_repo_installs_every_skill_from_requested_source(
+    tmp_path: Path, capsys
+):
     source_a = make_source_repo(tmp_path, "source-a")
     source_b = make_source_repo(tmp_path, "source-b")
     write_source_skill(source_b, "alpha", "Alpha from B.", "alpha from b\n")
@@ -627,7 +661,9 @@ def test_add_all_repo_installs_every_skill_from_requested_source(tmp_path: Path,
     repo_id_b = load_config(SvPaths.from_home(home)).repos[1].id
     capsys.readouterr()
 
-    exit_code = handle(parse(["add", "--all", "--repo", repo_id_b]), cwd=project, home=home)
+    exit_code = handle(
+        parse(["add", "--all", "--repo", repo_id_b]), cwd=project, home=home
+    )
 
     assert exit_code == 0
     output = capsys.readouterr().out
@@ -636,7 +672,9 @@ def test_add_all_repo_installs_every_skill_from_requested_source(tmp_path: Path,
     assert (
         project / ".pi" / "skills" / "alpha" / "notes.md"
     ).read_text() == "alpha from b\n"
-    assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta from b\n"
+    assert (
+        project / ".pi" / "skills" / "beta" / "notes.md"
+    ).read_text() == "beta from b\n"
 
 
 @pytest.mark.integration
@@ -659,7 +697,9 @@ def test_add_all_repo_reports_duplicate_skills_in_requested_source_before_copyin
     repo_id = load_config(SvPaths.from_home(home)).repos[0].id
     capsys.readouterr()
 
-    exit_code = handle(parse(["add", "--all", "--repo", repo_id]), cwd=project, home=home)
+    exit_code = handle(
+        parse(["add", "--all", "--repo", repo_id]), cwd=project, home=home
+    )
 
     assert exit_code == 1
     assert not (project / ".pi").exists()
@@ -713,7 +753,9 @@ def test_add_all_repo_resolves_duplicate_skills_in_requested_source_before_copyi
 
     assert exit_code == 0
     selected_matches, selector_kwargs = selector_calls[0]
-    assert [(match.repo_id, match.source_relative_path) for match in selected_matches] == [
+    assert [
+        (match.repo_id, match.source_relative_path) for match in selected_matches
+    ] == [
         (repo_id, "skills/alpha"),
         (repo_id, "team/skills/alpha"),
     ]
@@ -741,7 +783,9 @@ def test_add_all_repo_unknown_source_fails_without_copying(tmp_path: Path, capsy
     configure_source(source, project, home)
     capsys.readouterr()
 
-    exit_code = handle(parse(["add", "--all", "--repo", "missing/repo"]), cwd=project, home=home)
+    exit_code = handle(
+        parse(["add", "--all", "--repo", "missing/repo"]), cwd=project, home=home
+    )
 
     assert exit_code == 1
     assert "Repo 'missing/repo' was not found" in capsys.readouterr().err
@@ -862,7 +906,9 @@ def test_add_interactive_uses_cached_source_without_pull(tmp_path: Path, capsys)
     )
 
     assert exit_code == 0
-    assert not any(call[0][:2] in (["git", "fetch"], ["git", "pull"]) for call in git_calls)
+    assert not any(
+        call[0][:2] in (["git", "fetch"], ["git", "pull"]) for call in git_calls
+    )
     assert (
         project / ".pi" / "skills" / selected[0] / "notes.md"
     ).read_text() == f"{selected[0]} v1\n"
@@ -1197,9 +1243,7 @@ def test_add_all_resolves_duplicate_source_skills_before_copying(
     assert (
         project / ".pi" / "skills" / "alpha" / "notes.md"
     ).read_text() == "alpha from b\n"
-    assert (
-        project / ".pi" / "skills" / "beta" / "notes.md"
-    ).read_text() == "beta v1\n"
+    assert (project / ".pi" / "skills" / "beta" / "notes.md").read_text() == "beta v1\n"
     output = capsys.readouterr().out
     assert "Multiple selected sources provide 'alpha'" in output
     assert "Added Pi skill 'alpha'" in output
@@ -1264,10 +1308,14 @@ def test_add_uses_cached_metadata_and_cached_skill_body_when_source_unavailable(
     def fail_git(args, cwd=None):
         raise AssertionError(f"--cached must not call Git or GitHub backends: {args}")
 
-    result = run_sv(["add", "alpha", "--cached"], cwd=project, home=home, git_runner=fail_git)
+    result = run_sv(
+        ["add", "alpha", "--cached"], cwd=project, home=home, git_runner=fail_git
+    )
 
     assert result.exit_code == 0
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v1\n"
 
 
 def test_add_cached_fails_without_cached_skill_body_and_does_not_call_source(
@@ -1284,7 +1332,9 @@ def test_add_cached_fails_without_cached_skill_body_and_does_not_call_source(
     def fail_git(args, cwd=None):
         raise AssertionError(f"--cached must not call Git or GitHub backends: {args}")
 
-    result = run_sv(["add", "alpha", "--cached"], cwd=project, home=home, git_runner=fail_git)
+    result = run_sv(
+        ["add", "alpha", "--cached"], cwd=project, home=home, git_runner=fail_git
+    )
 
     assert result.exit_code == 1
     assert "cached skill body" in result.stderr.lower()
@@ -1308,7 +1358,9 @@ def test_add_warns_and_uses_stale_cached_metadata_when_refresh_fails(
 
     assert result.exit_code == 0
     assert "using stale cached metadata" in result.stderr.lower()
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v1\n"
 
 
 def test_add_all_warns_and_uses_stale_cached_metadata_when_refresh_fails(
@@ -1329,4 +1381,6 @@ def test_add_all_warns_and_uses_stale_cached_metadata_when_refresh_fails(
 
     assert result.exit_code == 0
     assert "using stale cached metadata" in result.stderr.lower()
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v1\n"

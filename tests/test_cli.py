@@ -145,7 +145,9 @@ def test_resolve_active_project_agent_rejects_manifest_default_symlinked_folder(
     (project / ".claude").symlink_to(target, target_is_directory=True)
 
     with pytest.raises(SvError, match="Refusing to use symlinked Claude agent folder"):
-        cli_module._resolve_active_project_agent(cli_module.LocalContext(repo_root=project))
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
 
 
 def test_resolve_active_project_agent_rejects_regular_file_agent_folder(
@@ -156,7 +158,9 @@ def test_resolve_active_project_agent_rejects_regular_file_agent_folder(
     (project / ".agents").write_text("not a directory", encoding="utf-8")
 
     with pytest.raises(SvError, match="Agents agent folder .* is not a directory"):
-        cli_module._resolve_active_project_agent(cli_module.LocalContext(repo_root=project))
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
 
     assert not (project / ".sv" / "manifest.toml").exists()
 
@@ -202,7 +206,7 @@ def test_default_rejects_skill_vault_context(tmp_path: Path, run_sv):
     index_file = vault / ".sv" / "index.toml"
     index_file.parent.mkdir()
     index_file.write_text(
-        'schema_version = 1\n'
+        "schema_version = 1\n"
         'kind = "skill-vault"\n'
         'generated_by = "sv"\n'
         'generated_at = "2026-05-21T00:00:00Z"\n',
@@ -228,7 +232,7 @@ def test_default_set_rejects_non_git_skill_vault_context(tmp_path: Path, run_sv)
     index_file = vault / ".sv" / "index.toml"
     index_file.parent.mkdir()
     index_file.write_text(
-        'schema_version = 1\n'
+        "schema_version = 1\n"
         'kind = "skill-vault"\n'
         'generated_by = "sv"\n'
         'generated_at = "2026-05-21T00:00:00Z"\n',
@@ -348,9 +352,7 @@ def test_init_command_scaffolds_named_folder(tmp_path: Path, run_sv):
     assert git_calls == [(["git", "init"], target)]
 
 
-def test_init_command_does_not_reinitialize_existing_git_repo(
-    tmp_path: Path, run_sv
-):
+def test_init_command_does_not_reinitialize_existing_git_repo(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "existing"
     (project / ".git").mkdir(parents=True)
@@ -503,7 +505,9 @@ def test_init_command_rejects_named_folder_inside_existing_git_worktree(
         git_calls.append((list(args), cwd))
         raise AssertionError(f"unexpected git call: {args}")
 
-    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(
+        parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner
+    )
 
     assert result.exit_code == 1
     assert "Refusing to initialize a nested skill-vault" in result.stderr
@@ -528,7 +532,9 @@ def test_init_command_rejects_named_folder_inside_existing_sv_root(
         git_calls.append((list(args), cwd))
         raise AssertionError(f"unexpected git call: {args}")
 
-    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(
+        parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner
+    )
 
     assert result.exit_code == 1
     assert "Refusing to initialize a nested skill-vault" in result.stderr
@@ -675,9 +681,7 @@ def test_init_command_from_non_git_project_index_subdirectory_rejects_without_si
     assert git_calls == []
 
 
-def test_init_command_reports_target_file_without_git_call(
-    tmp_path: Path, run_sv
-):
+def test_init_command_reports_target_file_without_git_call(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -686,7 +690,9 @@ def test_init_command_reports_target_file_without_git_call(
     def git_runner(args, cwd=None):
         raise AssertionError(f"unexpected git call: {args}")
 
-    result = run_sv(parse(["init", "vault"]), cwd=workspace, home=home, git_runner=git_runner)
+    result = run_sv(
+        parse(["init", "vault"]), cwd=workspace, home=home, git_runner=git_runner
+    )
 
     assert result.exit_code == 1
     assert "Failed to create target folder" in result.stderr
@@ -891,9 +897,7 @@ def test_init_command_preserves_existing_readme_content(tmp_path: Path, run_sv):
     )
 
 
-def test_init_command_appends_readme_block_after_double_newline(
-    tmp_path: Path, run_sv
-):
+def test_init_command_appends_readme_block_after_double_newline(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     (project / ".git").mkdir(parents=True)
@@ -929,7 +933,9 @@ def test_init_command_reports_malformed_readme_markers(tmp_path: Path, run_sv):
     )
 
     assert result.exit_code == 1
-    assert "README must contain exactly one sv skill table start marker" in result.stderr
+    assert (
+        "README must contain exactly one sv skill table start marker" in result.stderr
+    )
     assert not (project / ".sv" / "index.toml").exists()
     assert not (project / ".sv" / "manifest.toml").exists()
 
@@ -939,10 +945,7 @@ def test_init_command_reports_reversed_readme_markers(tmp_path: Path, run_sv):
     project = tmp_path / "project"
     (project / ".git").mkdir(parents=True)
     (project / "README.md").write_text(
-        "# Team\n"
-        "<!-- sv:skills:end -->\n"
-        "stale\n"
-        "<!-- sv:skills:start -->\n",
+        "# Team\n<!-- sv:skills:end -->\nstale\n<!-- sv:skills:start -->\n",
         encoding="utf-8",
     )
 
@@ -954,7 +957,9 @@ def test_init_command_reports_reversed_readme_markers(tmp_path: Path, run_sv):
     )
 
     assert result.exit_code == 1
-    assert "README sv skill table end marker appears before start marker" in result.stderr
+    assert (
+        "README sv skill table end marker appears before start marker" in result.stderr
+    )
     assert not (project / ".sv" / "index.toml").exists()
     assert not (project / ".sv" / "manifest.toml").exists()
 
@@ -1036,9 +1041,7 @@ def test_index_command_escapes_output_path(tmp_path: Path, run_sv):
     assert "\\x1b[31m" in result.stdout
 
 
-def test_index_command_updates_readme_only_for_skill_vaults(
-    tmp_path: Path, run_sv
-):
+def test_index_command_updates_readme_only_for_skill_vaults(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     skill = project / "skills" / "alpha"
@@ -1110,9 +1113,7 @@ def test_index_command_updates_readme_only_for_skill_vaults(
     )
 
 
-def test_print_add_result_escapes_existing_manifest_repo_id(
-    tmp_path: Path, capsys
-):
+def test_print_add_result_escapes_existing_manifest_repo_id(tmp_path: Path, capsys):
     _print_add_result(
         AddSkillResult(
             skill="alpha",
@@ -1231,9 +1232,7 @@ def test_run_reports_missing_pi_binary(tmp_path: Path, run_sv):
     assert "Unable to run 'pi'" in result.stderr
 
 
-def test_run_reports_process_launch_os_errors_without_traceback(
-    tmp_path: Path, capsys
-):
+def test_run_reports_process_launch_os_errors_without_traceback(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -1251,9 +1250,7 @@ def test_run_reports_process_launch_os_errors_without_traceback(
     assert_no_traceback(captured.err)
 
 
-def test_run_escapes_control_characters_in_launch_errors(
-    tmp_path: Path, capsys
-):
+def test_run_escapes_control_characters_in_launch_errors(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -1277,9 +1274,7 @@ def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys):
     outside_skills = tmp_path / "outside-skills"
     outside_skills.mkdir()
     (project / ".pi").mkdir(parents=True)
-    (project / ".pi" / "skills").symlink_to(
-        outside_skills, target_is_directory=True
-    )
+    (project / ".pi" / "skills").symlink_to(outside_skills, target_is_directory=True)
     calls = []
 
     def process_runner(command):
@@ -1371,6 +1366,151 @@ def test_add_qualified_repo_id_with_control_characters_does_not_touch_source_rep
     message = capsys.readouterr().err
     assert "bad\\x1b[2J" in message
     assert "\x1b" not in message
+
+
+def _cli_source_skill(tmp_path: Path, name: str = "alpha") -> SourceSkill:
+    source = tmp_path / "source"
+    skill_dir = source / "skills" / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {name.title()} skill.\n---\n"
+    )
+    (skill_dir / "notes.md").write_text(f"{name} source\n")
+    return SourceSkill(
+        name=name,
+        description=f"{name.title()} skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=source,
+        source_path=skill_dir,
+    )
+
+
+def test_add_uses_manifest_default_agent(tmp_path: Path, capsys):
+    project = tmp_path / "project"
+    entry = _cli_source_skill(tmp_path)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    document = load_manifest_document(project / ".claude" / "skills")
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "claude"
+    assert "Added Claude skill 'alpha'" in capsys.readouterr().out
+
+
+def test_add_infers_single_existing_agent_folder_and_persists_default(
+    tmp_path: Path, capsys
+):
+    project = tmp_path / "project"
+    (project / ".agents").mkdir(parents=True)
+    entry = _cli_source_skill(tmp_path)
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".agents" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    document = load_manifest_document(project / ".agents" / "skills")
+    assert document.default_agent == "agents"
+    assert document.skills["alpha"].target_agent == "agents"
+
+
+def test_add_non_tty_fails_when_agent_selection_required(tmp_path: Path):
+    project = tmp_path / "project"
+    project.mkdir()
+    entry = _cli_source_skill(tmp_path)
+
+    with pytest.raises(SvError, match="sv default pi"):
+        cli_module._handle_add(
+            "alpha",
+            [entry],
+            project,
+            cli_module.PiAdapter(),
+            cli_module._choose_skill,
+        )
+
+    assert not (project / ".pi").exists()
+    assert not (project / ".claude").exists()
+    assert not (project / ".agents").exists()
+
+
+def test_add_non_tty_fails_when_multiple_agent_folders_exist(tmp_path: Path):
+    project = tmp_path / "project"
+    (project / ".pi").mkdir(parents=True)
+    (project / ".claude").mkdir()
+    entry = _cli_source_skill(tmp_path)
+
+    with pytest.raises(SvError, match="sv default pi"):
+        cli_module._handle_add(
+            "alpha",
+            [entry],
+            project,
+            cli_module.PiAdapter(),
+            cli_module._choose_skill,
+        )
+
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".claude" / "skills" / "alpha").exists()
+
+
+def test_add_interactive_agent_selection_persists_default(
+    monkeypatch, tmp_path: Path, capsys
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    entry = _cli_source_skill(tmp_path)
+
+    monkeypatch.setattr(
+        cli_module, "_can_browse_tty", lambda stdin=None, stdout=None: True
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_browse_tty_table",
+        lambda headers, rows, **kwargs: [
+            "Claude",
+            ".claude/skills",
+            "missing",
+            "claude",
+        ],
+    )
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    document = load_manifest_document(project / ".claude" / "skills")
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "claude"
 
 
 def test_malformed_config_reports_cli_error(tmp_path: Path, capsys):
@@ -1573,9 +1713,7 @@ def test_repo_add_reports_unresolvable_home_without_traceback(tmp_path: Path, ca
     assert "Traceback" not in captured.err
 
 
-def test_repo_remove_escapes_control_characters_in_missing_repo(
-    tmp_path: Path, capsys
-):
+def test_repo_remove_escapes_control_characters_in_missing_repo(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -1627,9 +1765,7 @@ def test_add_help_explains_skill_argument(capsys):
     assert "choose a source" in help_text
 
 
-def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(
-    capsys, monkeypatch
-):
+def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(capsys, monkeypatch):
     monkeypatch.setenv("COLUMNS", "4")
 
     _print_wrapped("one two three")
@@ -1642,7 +1778,9 @@ def test_print_wrapped_honors_display_width_for_wide_unicode(capsys, monkeypatch
 
     _print_wrapped("Duplicate 日本語日本語日本語 skill names")
 
-    assert all(display_width(line) <= 20 for line in capsys.readouterr().out.splitlines())
+    assert all(
+        display_width(line) <= 20 for line in capsys.readouterr().out.splitlines()
+    )
 
 
 def test_print_wrapped_replaces_overwide_character_at_one_column(capsys, monkeypatch):
@@ -1679,7 +1817,9 @@ def test_default_process_runner_delegates_to_subprocess_call(monkeypatch):
     assert calls == [["pi", "--help"]]
 
 
-def test_main_parses_arguments_and_uses_current_project_paths(monkeypatch, tmp_path: Path):
+def test_main_parses_arguments_and_uses_current_project_paths(
+    monkeypatch, tmp_path: Path
+):
     project = tmp_path / "project"
     home = tmp_path / "home"
     parsed_calls = []
@@ -1772,9 +1912,7 @@ def test_unknown_commands_are_reported_without_tracebacks(tmp_path: Path, capsys
     assert_no_traceback(captured.err)
 
 
-def test_unknown_repo_subcommand_is_reported_without_tracebacks(
-    tmp_path: Path, capsys
-):
+def test_unknown_repo_subcommand_is_reported_without_tracebacks(tmp_path: Path, capsys):
     exit_code = handle(
         Namespace(command="repo", repo_command="mystery"), cwd=tmp_path, home=tmp_path
     )
@@ -1793,10 +1931,14 @@ def test_empty_repo_qualified_add_reference_fails_before_git(tmp_path: Path, cap
     def git_runner(args, cwd=None):
         raise AssertionError(f"unexpected git call: {args}")
 
-    exit_code = handle(parse(["add", ":alpha"]), cwd=project, home=home, git_runner=git_runner)
+    exit_code = handle(
+        parse(["add", ":alpha"]), cwd=project, home=home, git_runner=git_runner
+    )
 
     assert exit_code == 1
-    assert "Invalid skill reference ':alpha'. Use repo:skill." in capsys.readouterr().err
+    assert (
+        "Invalid skill reference ':alpha'. Use repo:skill." in capsys.readouterr().err
+    )
 
 
 def test_missing_qualified_skill_reference_reports_exact_reference(tmp_path: Path):
@@ -1832,7 +1974,9 @@ def test_duplicate_add_choice_can_be_cancelled(tmp_path: Path, capsys):
 def test_add_all_and_interactive_report_empty_catalog(tmp_path: Path, capsys):
     project = tmp_path / "project"
 
-    assert cli_module._handle_add_all([], cwd=project, adapter=cli_module.PiAdapter()) == 0
+    assert (
+        cli_module._handle_add_all([], cwd=project, adapter=cli_module.PiAdapter()) == 0
+    )
     assert (
         cli_module._handle_add_interactive(
             [],
@@ -1971,11 +2115,15 @@ def test_choose_skill_accepts_empty_checkbox_selection(monkeypatch, tmp_path: Pa
     assert cli_module._choose_skill([_source_skill(tmp_path, "source")]) is None
 
 
-def _source_skill(tmp_path: Path, repo_folder: str, *, repo_id: str = "Org/Skills") -> SourceSkill:
+def _source_skill(
+    tmp_path: Path, repo_folder: str, *, repo_id: str = "Org/Skills"
+) -> SourceSkill:
     source = tmp_path / repo_folder
     skill_dir = source / "skills" / "alpha"
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha skill.\n---\n")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
     return SourceSkill(
         name="alpha",
         description="Alpha skill.",
@@ -2022,7 +2170,9 @@ def test_cli_rejects_invalid_remove_argument_combinations(tmp_path: Path, run_sv
         assert message in result.stderr
 
 
-def test_cli_list_and_search_without_source_config_print_guidance(tmp_path: Path, run_sv):
+def test_cli_list_and_search_without_source_config_print_guidance(
+    tmp_path: Path, run_sv
+):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -2037,8 +2187,12 @@ def test_cli_list_and_search_without_source_config_print_guidance(tmp_path: Path
 
 
 def test_cli_global_status_records_source_state_in_every_cwd(tmp_path: Path):
-    assert cli_module._should_record_global_source_state(tmp_path / "project", tmp_path / "home")
-    assert cli_module._should_record_global_source_state(tmp_path / "home", tmp_path / "home")
+    assert cli_module._should_record_global_source_state(
+        tmp_path / "project", tmp_path / "home"
+    )
+    assert cli_module._should_record_global_source_state(
+        tmp_path / "home", tmp_path / "home"
+    )
 
 
 def test_cli_prompt_for_initial_sources_handles_cancel_custom_repo_and_retries(
@@ -2118,7 +2272,4 @@ def test_handle_validates_sv_jobs_from_injected_environment(tmp_path):
     )
 
     assert exit_code == 1
-    assert (
-        "SV_JOBS must be an integer between 1 and 64."
-        in stderr.getvalue()
-    )
+    assert "SV_JOBS must be an integer between 1 and 64." in stderr.getvalue()
