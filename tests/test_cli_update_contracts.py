@@ -56,8 +56,12 @@ class _WorkingMetadataBackend:
 def test_update_catalog_refresh_fails_closed_when_one_repo_cannot_refresh(
     tmp_path, monkeypatch
 ):
-    working_repo = RepoConfig(id="Org/Working", url="https://github.com/Org/Working.git")
-    failing_repo = RepoConfig(id="Org/Failing", url="https://github.com/Org/Failing.git")
+    working_repo = RepoConfig(
+        id="Org/Working", url="https://github.com/Org/Working.git"
+    )
+    failing_repo = RepoConfig(
+        id="Org/Failing", url="https://github.com/Org/Failing.git"
+    )
     paths = SvPaths.from_home(tmp_path / "home")
 
     def fake_backends_for_repo(repo_config, paths_arg, *, runner, update):
@@ -130,6 +134,7 @@ def test_update_updates_sources_and_syncs_project_skills(tmp_path, run_sv):
     project = tmp_path / "project"
     nested = project / "nested" / "work"
     nested.mkdir(parents=True)
+    (project / ".pi").mkdir()
     run_git(["init"], project)
     configure_source(source, project, home)
 
@@ -169,6 +174,7 @@ def test_update_preserves_local_edits_and_marks_update_available(tmp_path, run_s
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     add_result = run_sv(
@@ -208,6 +214,7 @@ def test_update_marks_missing_source_orphan_and_reattaches_when_it_reappears(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     add_result = run_sv(
@@ -222,7 +229,9 @@ def test_update_marks_missing_source_orphan_and_reattaches_when_it_reappears(
     run_git(["rm", "-r", "skills/alpha"], source)
     run_git(["commit", "-m", "remove alpha"], source)
 
-    orphan_result = run_sv(["update"], cwd=project, home=home, git_runner=default_runner)
+    orphan_result = run_sv(
+        ["update"], cwd=project, home=home, git_runner=default_runner
+    )
 
     assert orphan_result.exit_code == 0
     assert (
@@ -258,6 +267,7 @@ def test_update_from_git_subdirectory_marks_root_manifest_orphan_and_reattaches(
     project = tmp_path / "project"
     nested = project / "nested" / "work"
     nested.mkdir(parents=True)
+    (project / ".pi").mkdir()
     run_git(["init"], project)
     configure_source(source, project, home)
 
@@ -290,7 +300,9 @@ def test_update_from_git_subdirectory_marks_root_manifest_orphan_and_reattaches(
 
     assert reattach_result.exit_code == 0
     assert "Updated Pi skill 'alpha'." in reattach_result.stdout
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v2\n"
     assert load_manifest(project / ".pi" / "skills")["alpha"].orphan is False
     assert not (nested / ".pi").exists()
     assert not (nested / ".sv").exists()
@@ -304,6 +316,7 @@ def test_update_aborts_on_partial_source_refresh_failure_without_marking_orphan(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
 
     add_result = run_sv(
@@ -327,7 +340,8 @@ def test_update_aborts_on_partial_source_refresh_failure_without_marking_orphan(
     assert project_skill.read_text() == "alpha v1\n"
     assert load_manifest(project / ".pi" / "skills")["alpha"].orphan is False
     states_by_url = {
-        state.repo_url: state for state in load_global_manifest(SvPaths.from_home(home)).values()
+        state.repo_url: state
+        for state in load_global_manifest(SvPaths.from_home(home)).values()
     }
     assert states_by_url[str(source_a)].last_refresh_status == "error"
     assert states_by_url[str(source_b)].last_refresh_status == "ok"
@@ -344,6 +358,7 @@ def test_update_reports_source_refresh_failure_without_syncing_project_skills(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     add_result = run_sv(
@@ -380,6 +395,7 @@ def test_update_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path, ru
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
@@ -390,7 +406,9 @@ def test_update_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path, ru
     result = run_sv(["update"], cwd=project, home=home, git_runner=default_runner)
 
     assert result.exit_code == 0
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v2\n"
 
 
 def test_update_cached_does_not_refresh_source(tmp_path, run_sv):
@@ -398,6 +416,7 @@ def test_update_cached_does_not_refresh_source(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0

@@ -74,15 +74,15 @@ from sv.project import (
     add_project_agent_skill,
     add_vault_skill,
     normalize_skill_name,
-    refresh_project_skill_local_states,
-    refresh_project_skill_states,
+    refresh_project_agent_skill_local_states,
+    refresh_project_agent_skill_states,
     refresh_vault_skill_local_states,
     refresh_vault_skill_states,
-    remove_project_skill,
+    remove_project_agent_skill,
     remove_vault_skill,
-    sync_project_skills,
+    sync_project_agent_skills,
     sync_vault_skills,
-    update_project_skills,
+    update_project_agent_skills,
     update_vault_skills,
     validate_project_skills_for_run,
 )
@@ -882,7 +882,9 @@ def _handle_default(
     return 0
 
 
-def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
+def _resolve_active_project_agent(
+    context: LocalContext, *, allow_pi_fallback: bool = False
+) -> ActiveProjectAgent:
     document = _load_project_manifest_document(context)
     if document.default_agent is not None:
         agent = project_agent_for(document.default_agent)
@@ -898,6 +900,25 @@ def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
             context,
             ManifestDocument(default_agent=agent.name, skills=document.skills),
         )
+        return ActiveProjectAgent(
+            agent.name, agent.project_skill_dir(context.repo_root)
+        )
+
+    manifest_agents = {
+        entry.target_agent
+        for entry in document.skills.values()
+        if entry.target_kind == "project-agent" and entry.target_agent is not None
+    }
+    if len(manifest_agents) == 1:
+        agent = project_agent_for(next(iter(manifest_agents)))
+        _validate_project_agent_folder(context.repo_root, agent)
+        return ActiveProjectAgent(
+            agent.name, agent.project_skill_dir(context.repo_root)
+        )
+
+    if allow_pi_fallback:
+        agent = project_agent_for("pi")
+        _validate_project_agent_folder(context.repo_root, agent)
         return ActiveProjectAgent(
             agent.name, agent.project_skill_dir(context.repo_root)
         )
@@ -3354,8 +3375,11 @@ def _handle_remove(
     if context.is_skill_vault:
         result = remove_vault_skill(skill, context.vault_skills_dir)
     else:
-        result = remove_project_skill(
-            skill, adapter.project_skill_dir(context.repo_root)
+        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        result = remove_project_agent_skill(
+            skill,
+            _project_skills_dir(context, active_agent),
+            active_agent.name,
         )
     _print_remove_result(result)
     _refresh_local_index_if_needed(context)
@@ -3370,11 +3394,16 @@ def _handle_remove_all(
     yes: bool,
 ) -> int:
     context = _detect_local_context(cwd) if context is None else context
-    project_skills_dir = _removal_skills_dir(adapter, context)
-    entries = _managed_removal_entries(project_skills_dir, context)
+    active_agent = (
+        None
+        if context.is_skill_vault
+        else _resolve_active_project_agent(context, allow_pi_fallback=True)
+    )
+    project_skills_dir = _removal_skills_dir(adapter, context, active_agent)
+    entries = _managed_removal_entries(project_skills_dir, context, active_agent)
     if not entries:
         print(
-            f"No sv-managed {_result_skills_label(_context_target_kind(context))} found to remove."
+            f"No sv-managed {_result_skills_label(_context_target_kind(context), _context_target_agent(context, active_agent))} found to remove."
         )
         return 0
 
@@ -3399,12 +3428,17 @@ def _handle_remove_interactive(
     yes: bool = False,
 ) -> int:
     context = _detect_local_context(cwd) if context is None else context
-    project_skills_dir = _removal_skills_dir(adapter, context)
-    entries = _managed_removal_entries(project_skills_dir, context)
+    active_agent = (
+        None
+        if context.is_skill_vault
+        else _resolve_active_project_agent(context, allow_pi_fallback=True)
+    )
+    project_skills_dir = _removal_skills_dir(adapter, context, active_agent)
+    entries = _managed_removal_entries(project_skills_dir, context, active_agent)
     empty_message = (
         "No vault skills found to remove."
         if context.is_skill_vault
-        else "No Pi skills found to remove."
+        else f"No {active_agent.agent.skills_label} found to remove."
     )
     if not entries:
         print(empty_message)
@@ -3438,24 +3472,44 @@ def _handle_remove_interactive(
     return 0
 
 
-def _removal_skills_dir(adapter: PiAdapter, context: LocalContext) -> Path:
+def _removal_skills_dir(
+    adapter: PiAdapter,
+    context: LocalContext,
+    active_agent: ActiveProjectAgent | None = None,
+) -> Path:
     if context.is_skill_vault:
         return context.vault_skills_dir
-    return adapter.project_skill_dir(context.repo_root)
+    if active_agent is None:
+        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+    return _project_skills_dir(context, active_agent)
 
 
 def _managed_removal_entries(
-    project_skills_dir: Path, context: LocalContext
+    project_skills_dir: Path,
+    context: LocalContext,
+    active_agent: ActiveProjectAgent | None = None,
 ) -> list[ManifestEntry]:
     if context.is_skill_vault:
         return _vault_status_entries(project_skills_dir)
-    return _project_status_entries(project_skills_dir)
+    if active_agent is None:
+        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+    return _project_status_entries(project_skills_dir, active_agent.name)
 
 
 def _context_target_kind(context: LocalContext) -> str:
     if context.is_skill_vault:
         return "skill-vault"
     return "project-agent"
+
+
+def _context_target_agent(
+    context: LocalContext, active_agent: ActiveProjectAgent | None = None
+) -> str | None:
+    if context.is_skill_vault:
+        return None
+    if active_agent is None:
+        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+    return active_agent.name
 
 
 def _skill_removal_label(entry: ManifestEntry) -> str:
@@ -3487,7 +3541,7 @@ def _confirm_skill_removal(
     if not _can_prompt_for_confirmation():
         return True
     target_kind = _context_target_kind(context)
-    label = _result_skills_label(target_kind)
+    label = _result_skills_label(target_kind, _context_target_agent(context))
     print(f"The following sv-managed {label} will be removed:")
     print(
         format_table(
@@ -3515,7 +3569,9 @@ def _remove_managed_entries(
         if context.is_skill_vault:
             result = remove_vault_skill(entry.name, project_skills_dir)
         else:
-            result = remove_project_skill(entry.name, project_skills_dir)
+            result = remove_project_agent_skill(
+                entry.name, project_skills_dir, entry.target_agent or "pi"
+            )
         _print_remove_result(result)
 
 
@@ -3604,7 +3660,7 @@ def _print_pruned_unavailable_result(
     target = _escape_output_path(project_skills_dir / entry.name)
     reason = "invalid" if entry.target_invalid else "missing"
     detail = "is not a directory" if entry.target_invalid else "was already gone"
-    label = _result_skill_label(_context_target_kind(context))
+    label = _result_skill_label(_context_target_kind(context), entry.target_agent)
     print(
         f"Pruned {reason} {label} '{entry.name}' from sv manifest "
         f"(target {target} {detail})."
@@ -3622,8 +3678,11 @@ def _handle_sync(
     if context.is_skill_vault:
         result = sync_vault_skills(catalog, context.vault_skills_dir)
     else:
-        result = sync_project_skills(
-            catalog, adapter.project_skill_dir(context.repo_root)
+        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        result = sync_project_agent_skills(
+            catalog,
+            _project_skills_dir(context, active_agent),
+            active_agent.name,
         )
     _print_sync_result(result)
     _refresh_local_index_if_needed(context)
@@ -3664,11 +3723,13 @@ def _handle_status(
     ):
         return _handle_global_status(paths)
 
-    project_skills_dir = adapter.project_skill_dir(context.repo_root)
-    _reject_symlinked_status_project_skills_path(project_skills_dir)
-    entries = _project_status_entries(project_skills_dir)
+    active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+    project_skills_dir = _project_skills_dir(context, active_agent)
+    _reject_symlinked_status_project_skills_path(project_skills_dir, active_agent.name)
+    entries = _project_status_entries(project_skills_dir, active_agent.name)
+    agent = active_agent.agent
     if not entries:
-        print("No sv-managed Pi skills found in this project.")
+        print(f"No sv-managed {agent.skills_label} found in this project.")
         return 0
 
     if _entries_require_source_status_refresh(entries):
@@ -3679,12 +3740,16 @@ def _handle_status(
             cache_policy=cache_policy,
         )
         if catalog is None:
-            refresh_project_skill_local_states(project_skills_dir)
+            refresh_project_agent_skill_local_states(
+                project_skills_dir, active_agent.name
+            )
         else:
-            refresh_project_skill_states(catalog, project_skills_dir)
-        entries = _project_status_entries(project_skills_dir)
+            refresh_project_agent_skill_states(
+                catalog, project_skills_dir, active_agent.name
+            )
+        entries = _project_status_entries(project_skills_dir, active_agent.name)
 
-    print("Project sv-managed Pi skills")
+    print(f"Project sv-managed {agent.skills_label}")
     print(
         format_table(
             ["Skill", "Agent", "Target", "Source", "State"],
@@ -3940,11 +4005,14 @@ def _status_catalog_if_configured(
     )
 
 
-def _reject_symlinked_status_project_skills_path(project_skills_dir: Path) -> None:
+def _reject_symlinked_status_project_skills_path(
+    project_skills_dir: Path, agent_name: str
+) -> None:
+    path_label = project_agent_for(agent_name).path_label
     for path in (project_skills_dir.parent, project_skills_dir):
         if path.is_symlink():
             raise SvError(
-                f"Refusing to inspect symlinked Pi skills path at {_escape_output_path(path)}."
+                f"Refusing to inspect symlinked {path_label} at {_escape_output_path(path)}."
             )
 
 
@@ -3961,15 +4029,18 @@ def _entries_require_source_status_refresh(
     return any(not _manifest_target_is_unavailable(entry) for entry in entries)
 
 
-def _project_status_entries(project_skills_dir: Path) -> list[ManifestEntry]:
+def _project_status_entries(
+    project_skills_dir: Path, agent_name: str
+) -> list[ManifestEntry]:
     entries: list[ManifestEntry] = []
     for entry in ProjectManifestStore(project_skills_dir).load().values():
-        if not _is_pi_project_manifest_entry(entry):
+        if not _is_project_agent_manifest_entry(entry, agent_name):
             continue
         target = project_skills_dir / entry.name
         if target.is_symlink():
+            label = project_agent_for(agent_name).skill_label
             raise SvError(
-                f"Refusing to inspect symlinked Pi skill '{entry.name}' at {_escape_output_path(target)}."
+                f"Refusing to inspect symlinked {label} '{entry.name}' at {_escape_output_path(target)}."
             )
         if target.is_dir():
             entries.append(entry)
@@ -3980,14 +4051,17 @@ def _project_status_entries(project_skills_dir: Path) -> list[ManifestEntry]:
     return sorted(entries, key=lambda item: item.name)
 
 
-def _is_pi_project_manifest_entry(entry: ManifestEntry) -> bool:
-    if entry.target_kind != "project-agent" or entry.target_agent != "pi":
+def _is_project_agent_manifest_entry(entry: ManifestEntry, agent_name: str) -> bool:
+    agent = project_agent_for(agent_name)
+    if entry.target_kind != "project-agent" or entry.target_agent != agent.name:
         return False
     try:
         normalize_skill_name(entry.name)
     except SvError as exc:
-        raise SvError(f"Invalid Pi skill directory in sv manifest: {exc}") from exc
-    return entry.target_path == f".pi/skills/{entry.name}"
+        raise SvError(
+            f"Invalid {agent.display_name} skill directory in sv manifest: {exc}"
+        ) from exc
+    return entry.target_path == f"{agent.target_path_prefix}/{entry.name}"
 
 
 def _vault_status_entries(vault_skills_dir: Path) -> list[ManifestEntry]:
@@ -4090,9 +4164,12 @@ def _handle_update(
         print("Updating vault skills...")
         result = update_vault_skills(catalog, context.vault_skills_dir)
     else:
+        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
         print("Updating project skills...")
-        result = update_project_skills(
-            catalog, adapter.project_skill_dir(context.repo_root)
+        result = update_project_agent_skills(
+            catalog,
+            _project_skills_dir(context, active_agent),
+            active_agent.name,
         )
     _print_update_result(result)
     _refresh_local_index_if_needed(context)

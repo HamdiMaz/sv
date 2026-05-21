@@ -1386,6 +1386,22 @@ def _cli_source_skill(tmp_path: Path, name: str = "alpha") -> SourceSkill:
     )
 
 
+def _managed_entry_for_agent(
+    name: str, agent: str, repo_id: str = "Org/Skills"
+) -> ManifestEntry:
+    folder = {"pi": ".pi", "claude": ".claude", "agents": ".agents"}[agent]
+    return ManifestEntry(
+        name=name,
+        repo_id=repo_id,
+        repo_url=f"https://github.com/{repo_id}.git",
+        source_path=f"skills/{name}",
+        description=f"{name.title()} skill.",
+        target_kind="project-agent",
+        target_agent=agent,
+        target_path=f"{folder}/skills/{name}",
+    )
+
+
 def test_add_uses_manifest_default_agent(tmp_path: Path, capsys):
     project = tmp_path / "project"
     entry = _cli_source_skill(tmp_path)
@@ -1444,6 +1460,136 @@ def test_add_all_uses_manifest_default_agent(tmp_path: Path, capsys):
     output = capsys.readouterr().out
     assert "Added Claude skill 'alpha'" in output
     assert "Added Claude skill 'beta'" in output
+
+
+def test_status_reports_only_default_agent_entries(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    claude_skill = project / ".claude" / "skills" / "beta"
+    pi_skill.mkdir(parents=True)
+    claude_skill.mkdir(parents=True)
+    (pi_skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
+    (claude_skill / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: Beta skill.\n---\n"
+    )
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={
+                "alpha": _managed_entry_for_agent("alpha", "pi"),
+                "beta": _managed_entry_for_agent("beta", "claude"),
+            },
+        ),
+    )
+
+    result = run_sv(["status", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project sv-managed Claude skills" in result.stdout
+    assert "beta" in result.stdout
+    assert "alpha" not in result.stdout
+
+
+def test_remove_removes_only_default_agent_skill(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    pi_skill.mkdir(parents=True)
+    claude_skill.mkdir(parents=True)
+    (pi_skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
+    (claude_skill / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: Beta skill.\n---\n"
+    )
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={
+                "alpha": _managed_entry_for_agent("alpha", "pi"),
+                "project-agent:claude:.claude/skills/alpha:alpha": _managed_entry_for_agent(
+                    "alpha", "claude"
+                ),
+            },
+        ),
+    )
+
+    result = run_sv(["remove", "alpha"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Removed Claude skill 'alpha'" in result.stdout
+    assert pi_skill.is_dir()
+    assert not claude_skill.exists()
+    remaining = load_manifest_document(project / ".pi" / "skills")
+    assert remaining.default_agent == "claude"
+    assert [
+        (entry.name, entry.target_agent) for entry in remaining.skills.values()
+    ] == [("alpha", "pi")]
+
+
+def test_remove_all_removes_only_default_agent_managed_skills(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    agents_skill = project / ".agents" / "skills" / "beta"
+    pi_skill.mkdir(parents=True)
+    agents_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="agents",
+            skills={
+                "alpha": _managed_entry_for_agent("alpha", "pi"),
+                "beta": _managed_entry_for_agent("beta", "agents"),
+            },
+        ),
+    )
+
+    result = run_sv(["remove", "--all", "--yes"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert pi_skill.is_dir()
+    assert not agents_skill.exists()
+    remaining_agents = {
+        entry.target_agent
+        for entry in load_manifest_document(project / ".pi" / "skills").skills.values()
+    }
+    assert remaining_agents == {"pi"}
+
+
+def test_sync_uses_only_default_agent(tmp_path: Path):
+    project = tmp_path / "project"
+    source_entry = _cli_source_skill(tmp_path)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    cli_module._handle_add(
+        "alpha",
+        [source_entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+    (project / ".pi" / "skills" / "alpha").mkdir(parents=True)
+    (project / ".pi" / "skills" / "alpha" / "notes.md").write_text("pi local\n")
+    (source_entry.source_path / "notes.md").write_text("source v2\n")
+
+    exit_code = cli_module._handle_sync([source_entry], project, cli_module.PiAdapter())
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "source v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "pi local\n"
 
 
 def test_add_infers_single_existing_agent_folder_and_persists_default(
