@@ -120,7 +120,7 @@ def test_tty_list_browses_source_skills_with_details_by_default(
         assert "Path    " in detail_text
         assert "├─ Description" in detail_text
         assert "Alpha skill." in detail_text
-        assert kwargs["detail_key_help"] == "a add • q back"
+        assert kwargs["detail_key_help"] == ""
         status = kwargs["detail_actions"]["a"](rows[0])
         assert "Added Pi skill 'alpha'" in status
         return None
@@ -513,7 +513,7 @@ def test_tty_search_browses_ranked_matches_with_details_by_default(
         assert "Path    " in detail_text
         assert "├─ Description" in detail_text
         assert "Docs skill." in detail_text
-        assert kwargs["detail_key_help"] == "a add • q back"
+        assert kwargs["detail_key_help"] == ""
         status = kwargs["detail_actions"]["a"](rows[0])
         assert "Added Pi skill 'docs'" in status
         return None
