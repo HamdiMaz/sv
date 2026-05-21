@@ -325,9 +325,11 @@ def build_parser() -> argparse.ArgumentParser:
         "remove",
         help="Remove sv-managed local skills.",
         description=(
-            "Remove sv-managed local skills. In normal projects this removes Pi "
-            "skills from .pi/skills; in skill-vault repos this removes vault skills "
-            "from skills/<name>. Manual/unmanaged skills are not removed by --all."
+            "Remove sv-managed local skills. In normal projects this removes skills "
+            "from the active/default project agent skills directory. Use "
+            "'sv default <agent>' to view or choose the default agent. In a "
+            "skill-vault repo, this removes vault skills from skills/<name>. "
+            "Manual/unmanaged skills are not removed by --all."
         ),
     )
     remove_parser.add_argument("skill", nargs="?", help="Skill name to remove.")

@@ -2182,6 +2182,18 @@ def test_add_help_explains_skill_argument(capsys):
     assert ".pi/skills directory" not in help_text
 
 
+def test_remove_help_explains_default_agent_target(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        parse(["remove", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "active/default project agent skills directory" in help_text
+    assert "sv default <agent>" in help_text
+    assert "Pi skills from .pi/skills" not in help_text
+    assert ".pi/skills directory" not in help_text
+
+
 def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(capsys, monkeypatch):
     monkeypatch.setenv("COLUMNS", "4")
 
