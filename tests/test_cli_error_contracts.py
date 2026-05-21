@@ -229,7 +229,7 @@ def _pi_launch_os_error(tmp_path: Path) -> CliErrorScenario:
         raise OSError("denied\x1b[2J")
 
     return CliErrorScenario(
-        args=["run"],
+        args=["run", "pi"],
         home=home,
         project=project,
         process_runner=process_runner,

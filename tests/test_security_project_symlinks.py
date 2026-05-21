@@ -253,7 +253,7 @@ def test_run_rejects_nested_project_skill_symlink_before_launching_process(
         return 0
 
     exit_code = handle(
-        parse_sv(["run"]),
+        parse_sv(["run", "pi"]),
         cwd=project_skills.parent.parent,
         home=home,
         process_runner=process_runner,
@@ -284,7 +284,7 @@ def test_run_rejects_symlinked_pi_dir_before_launching_process(
         return 0
 
     exit_code = handle(
-        parse_sv(["run"]),
+        parse_sv(["run", "pi"]),
         cwd=project,
         home=home,
         process_runner=process_runner,
@@ -317,7 +317,7 @@ def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys) -> No
         return 0
 
     exit_code = handle(
-        parse_sv(["run"]),
+        parse_sv(["run", "pi"]),
         cwd=project,
         home=home,
         process_runner=process_runner,
@@ -350,7 +350,7 @@ def test_run_rejects_symlinked_project_skill_directory(tmp_path: Path, capsys) -
         return 0
 
     exit_code = handle(
-        parse_sv(["run"]),
+        parse_sv(["run", "pi"]),
         cwd=project_skills.parent.parent,
         home=home,
         process_runner=process_runner,

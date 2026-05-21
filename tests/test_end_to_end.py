@@ -123,7 +123,7 @@ def test_local_git_user_journey_smoke(tmp_path, run_sv):
         return 0
 
     run_result = run_sv(
-        ["run", "--", "--help"],
+        ["run", "pi", "--help"],
         cwd=project,
         home=home,
         process_runner=process_runner,

@@ -948,7 +948,7 @@ def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path, run_sv
         return 23
 
     result = run_sv(
-        parse(["run", "--", "--model", "fast"]),
+        parse(["run", "pi", "--model", "fast"]),
         cwd=project,
         home=home,
         process_runner=process_runner,
@@ -967,7 +967,7 @@ def test_run_reports_missing_pi_binary(tmp_path: Path, run_sv):
         raise FileNotFoundError(command[0])
 
     result = run_sv(
-        parse(["run"]),
+        parse(["run", "pi"]),
         cwd=project,
         home=home,
         process_runner=process_runner,
@@ -988,7 +988,7 @@ def test_run_reports_process_launch_os_errors_without_traceback(
         raise PermissionError("denied")
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
@@ -1008,7 +1008,7 @@ def test_run_escapes_control_characters_in_launch_errors(
         raise PermissionError("denied\x1b[2J")
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
@@ -1033,7 +1033,7 @@ def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys):
         return 0
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
@@ -1056,7 +1056,7 @@ def test_run_rejects_symlinked_project_skill_directory(tmp_path: Path, capsys):
         return 0
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
