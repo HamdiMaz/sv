@@ -1799,7 +1799,7 @@ def test_update_uses_only_default_agent(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         cli_module,
         "_load_config_for_source_command",
-        lambda paths_arg: cli_module.SvConfig(repos=[]),
+        lambda paths_arg: cli_module.SvConfig(repos=()),
     )
     monkeypatch.setattr(
         cli_module,

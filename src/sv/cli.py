@@ -3449,11 +3449,11 @@ def _handle_remove_interactive(
     )
     project_skills_dir = _removal_skills_dir(adapter, context, active_agent)
     entries = _managed_removal_entries(project_skills_dir, context, active_agent)
-    empty_message = (
-        "No vault skills found to remove."
-        if context.is_skill_vault
-        else f"No {active_agent.agent.skills_label} found to remove."
-    )
+    if context.is_skill_vault:
+        empty_message = "No vault skills found to remove."
+    else:
+        assert active_agent is not None
+        empty_message = f"No {active_agent.agent.skills_label} found to remove."
     if not entries:
         print(empty_message)
         return 0

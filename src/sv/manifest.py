@@ -639,11 +639,16 @@ def save_manifest(
     *,
     default_agent: str | None | object = _DEFAULT_AGENT_UNSET,
 ) -> None:
+    resolved_default_agent: str | None
     if default_agent is _DEFAULT_AGENT_UNSET:
-        default_agent = _existing_default_agent(project_skills_dir)
+        resolved_default_agent = _existing_default_agent(project_skills_dir)
+    elif default_agent is None or isinstance(default_agent, str):
+        resolved_default_agent = default_agent
+    else:
+        raise TypeError("default_agent must be str or None")
     save_manifest_document(
         project_skills_dir,
-        ManifestDocument(skills=entries, default_agent=default_agent),
+        ManifestDocument(skills=entries, default_agent=resolved_default_agent),
     )
 
 
