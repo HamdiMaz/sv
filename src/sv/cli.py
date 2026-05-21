@@ -2400,7 +2400,11 @@ def _loading_warning_printer(
 ) -> Callable[[str], None]:
     if loading_reporter is None:
         return _print_stderr_warning
-    return loading_reporter.print_line
+
+    def print_loading_warning(message: str) -> None:
+        loading_reporter.print_line(_escape_control_characters(message))
+
+    return print_loading_warning
 
 
 def _source_refresh_loading_message(repos: Sequence[RepoConfig]) -> str:

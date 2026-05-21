@@ -54,6 +54,23 @@ def test_repo_add_warms_source_metadata_cache_by_default(tmp_path: Path, capsys)
     assert captured.err == ""
 
 
+def test_loading_warning_printer_escapes_control_characters_with_active_spinner():
+    stderr = _TtyStringIO()
+    loading_reporter = cli_module.LoadingReporter(
+        stderr,
+        frames=("-",),
+        interval_seconds=60.0,
+    )
+
+    with loading_reporter.operation("Loading"):
+        cli_module._loading_warning_printer(loading_reporter)("warning: bad \x1b[2J")
+
+    output = stderr.getvalue()
+    assert "\r" in output
+    assert "warning: bad \\x1b[2J" in output
+    assert "\x1b" not in output
+
+
 def test_repo_add_warm_cache_escapes_internal_cache_warnings(tmp_path: Path, capsys):
     home = tmp_path / "home\x1b[2J"
     project = tmp_path / "project"
