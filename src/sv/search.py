@@ -123,10 +123,7 @@ def render_search_prompt(
     )
     count = _fit_text(safe_count_label, inner_width) if safe_count_label else ""
     field_value = safe_query if safe_query else safe_placeholder
-    field_prefix = "⌕ "
-    field = field_prefix + _fit_text(
-        field_value, max(inner_width - _display_width(field_prefix), 1)
-    )
+    field = _fit_text(f"⌕ {field_value}", inner_width)
     help_text = _fit_text(safe_help_text, inner_width)
     title_line = _join_title_and_count(title, count, inner_width)
     horizontal = "─" * inner_width
@@ -135,19 +132,14 @@ def render_search_prompt(
             f"╭{horizontal}╮",
             _framed_line(f"{_BOLD}{title_line}{_RESET}", title_line, inner_width),
             _framed_line(f"{_FG_ACCENT}{field}{_RESET}", field, inner_width),
-            _framed_line(
-                f"{_FG_MUTED}{help_text}{_RESET}", help_text, inner_width, bottom=True
-            ),
+            _framed_line(f"{_FG_MUTED}{help_text}{_RESET}", help_text, inner_width),
+            f"╰{horizontal}╯",
         ]
     )
 
 
-def _framed_line(
-    styled_text: str, visible_text: str, width: int, *, bottom: bool = False
-) -> str:
+def _framed_line(styled_text: str, visible_text: str, width: int) -> str:
     padding = " " * max(width - _display_width(visible_text), 0)
-    if bottom:
-        return f"╰{styled_text}{padding}╯"
     return f"│{styled_text}{padding}│"
 
 

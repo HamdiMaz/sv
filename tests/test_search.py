@@ -1,4 +1,6 @@
 from io import StringIO
+import re
+import unicodedata
 
 from sv.search import (
     SearchPromptConfig,
@@ -8,6 +10,21 @@ from sv.search import (
     read_search_prompt,
     render_search_prompt,
 )
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def visible_text(value: str) -> str:
+    return ANSI_RE.sub("", value)
+
+
+def display_width(value: str) -> int:
+    width = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    return width
 
 
 def test_ranked_search_indices_orders_exact_prefix_substring_and_fuzzy_matches():
@@ -61,13 +78,34 @@ def test_render_search_prompt_frames_title_query_hint_and_count():
         terminal_width=60,
     )
 
-    assert prompt.count("\n") == 3
-    assert "Search skills" in prompt
-    assert "3 items" in prompt
-    assert "⌕ docs" in prompt
-    assert "Enter apply • empty Enter clear • Esc cancel" in prompt
-    assert "╭" in prompt
-    assert "╰" in prompt
+    visible_lines = [visible_text(line) for line in prompt.splitlines()]
+
+    assert len(visible_lines) == 5
+    assert visible_lines[0].startswith("╭")
+    assert visible_lines[1].startswith("│Search skills")
+    assert visible_lines[1].endswith("3 items│")
+    assert visible_lines[2].startswith("│⌕ docs")
+    assert visible_lines[2].endswith("│")
+    assert visible_lines[3].startswith("│Enter apply • empty Enter clear • Esc cancel")
+    assert visible_lines[3].endswith("│")
+    assert visible_lines[4].startswith("╰")
+    assert visible_lines[4].endswith("╯")
+    assert "Enter apply" not in visible_lines[4]
+
+
+def test_render_search_prompt_keeps_frame_aligned_in_tiny_terminals():
+    for terminal_width in range(1, 8):
+        prompt = render_search_prompt(
+            "very-long-query-value",
+            SearchPromptConfig(title="Search skills", count_label="123 items"),
+            terminal_width=terminal_width,
+        )
+
+        visible_lines = [visible_text(line) for line in prompt.splitlines()]
+        line_widths = [display_width(line) for line in visible_lines]
+
+        assert len(visible_lines) == 5
+        assert len(set(line_widths)) == 1
 
 
 def test_render_search_prompt_uses_placeholder_and_escapes_controls():
@@ -107,7 +145,7 @@ def test_render_search_prompt_fits_narrow_terminal_width():
     )
 
     lines = prompt.splitlines()
-    assert len(lines) == 4
+    assert len(lines) == 5
     assert all(len(line) <= 24 + len("\x1b[0m") * 4 for line in lines)
     assert "..." in prompt
 
@@ -147,11 +185,11 @@ def test_read_search_prompt_clears_multiline_prompt_on_each_redraw(monkeypatch):
     assert result == SearchPromptResult(
         applied=True,
         query="do",
-        rendered_line_count=4,
+        rendered_line_count=5,
     )
     rendered = stdout.getvalue()
     assert rendered.startswith("\x1b[5F\x1b[J")
-    assert rendered.count("\x1b[4F\x1b[J") == 2
+    assert rendered.count("\x1b[5F\x1b[J") == 3
     assert "Search skills" in rendered
     assert "⌕ do" in rendered
 

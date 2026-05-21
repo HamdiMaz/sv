@@ -920,7 +920,7 @@ def test_table_read_search_query_renders_framed_prompt_and_escapes_controls():
     assert result == SearchPromptResult(
         applied=True,
         query="docs\x01",
-        rendered_line_count=4,
+        rendered_line_count=5,
     )
     rendered = stdout.getvalue()
     visible = visible_text(rendered)
@@ -946,7 +946,7 @@ def test_read_search_query_returns_none_when_escape_cancels():
 
     assert result.applied is False
     assert result.query == ""
-    assert result.rendered_line_count == 4
+    assert result.rendered_line_count == 5
 
 
 def test_read_filter_query_handles_backspace_escape_and_replacement(monkeypatch):

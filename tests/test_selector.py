@@ -763,7 +763,7 @@ def test_selector_read_search_query_renders_framed_prompt_and_escapes_controls()
     assert result == SearchPromptResult(
         applied=True,
         query="docs\x01",
-        rendered_line_count=4,
+        rendered_line_count=5,
     )
     rendered = stdout.getvalue()
     visible = visible_text(rendered)
@@ -789,7 +789,7 @@ def test_read_search_query_applies_eof_input_and_clears_empty_eof():
 
     assert result.query == "docs"
     assert result.applied is True
-    assert result.rendered_line_count == 4
+    assert result.rendered_line_count == 5
 
     empty_stdout = StringIO()
     empty_read_fd, empty_write_fd = os.pipe()
@@ -801,7 +801,7 @@ def test_read_search_query_applies_eof_input_and_clears_empty_eof():
 
     assert empty_result.query == ""
     assert empty_result.applied is True
-    assert empty_result.rendered_line_count == 4
+    assert empty_result.rendered_line_count == 5
 
 
 def test_read_search_query_returns_none_when_escape_cancels():
@@ -819,7 +819,7 @@ def test_read_search_query_returns_none_when_escape_cancels():
 
     assert result.applied is False
     assert result.query == ""
-    assert result.rendered_line_count == 4
+    assert result.rendered_line_count == 5
 
 
 def test_legacy_read_filter_query_escape_and_invalid_utf8_backspace(monkeypatch):
