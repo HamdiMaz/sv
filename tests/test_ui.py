@@ -1,7 +1,13 @@
+import io
 import subprocess
 import sys
 
 from sv.ui import CHOSEN_TTY_UI_APPROACH, PlainOutput, TtyUi, select_tty_items
+
+
+class _TtyStringIO(io.StringIO):
+    def isatty(self):
+        return True
 
 
 def test_chosen_tty_ui_approach_prefers_stdlib_without_runtime_dependencies():
@@ -9,6 +15,64 @@ def test_chosen_tty_ui_approach_prefers_stdlib_without_runtime_dependencies():
     assert CHOSEN_TTY_UI_APPROACH.runtime_dependencies == ()
     assert "prompt-toolkit" in CHOSEN_TTY_UI_APPROACH.alternatives_considered
     assert "rich" in CHOSEN_TTY_UI_APPROACH.alternatives_considered
+
+
+def test_loading_reporter_does_not_write_when_disabled():
+    from sv.ui import LoadingReporter
+
+    stream = io.StringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=False,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("Refreshing source repo Org/Skills"):
+        reporter.print_line("warning: hidden from spinner test")
+
+    assert stream.getvalue() == "warning: hidden from spinner test\n"
+
+
+def test_loading_reporter_writes_spinner_and_clears_on_tty():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("Refreshing source repo Org/Skills"):
+        pass
+
+    output = stream.getvalue()
+    rendered = "| Refreshing source repo Org/Skills"
+    assert f"\r{rendered}" in output
+    assert output.endswith("\r" + (" " * len(rendered)) + "\r")
+
+
+def test_loading_reporter_print_line_clears_and_redraws_active_spinner():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("Refreshing source repo Org/Skills"):
+        reporter.print_line("warning: using stale cached metadata")
+
+    output = stream.getvalue()
+    rendered = "| Refreshing source repo Org/Skills"
+    clear_sequence = "\r" + (" " * len(rendered)) + "\r"
+    assert clear_sequence + "warning: using stale cached metadata\n" in output
+    assert output.endswith(clear_sequence)
 
 
 def test_plain_output_import_does_not_load_tty_selector_module():

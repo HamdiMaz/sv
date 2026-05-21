@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast
+import threading
+from typing import Any, TextIO, TypeVar, cast
 
 from sv.table import CellWidths, DetailLine, detail_line, format_table
 
@@ -12,6 +14,7 @@ __all__ = [
     "CHOSEN_TTY_UI_APPROACH",
     "CellWidths",
     "DetailLine",
+    "LoadingReporter",
     "PlainOutput",
     "TtyUi",
     "TtyUiApproach",
@@ -68,6 +71,127 @@ class PlainOutput:
             min_widths=min_widths,
             max_table_width=max_table_width,
         )
+
+
+class LoadingReporter:
+    """TTY-only in-place loading reporter for long source operations."""
+
+    def __init__(
+        self,
+        stream: TextIO,
+        *,
+        enabled: bool | None = None,
+        frames: Sequence[str] = (
+            "⠋",
+            "⠙",
+            "⠹",
+            "⠸",
+            "⠼",
+            "⠴",
+            "⠦",
+            "⠧",
+            "⠇",
+            "⠏",
+        ),
+        interval_seconds: float = 0.1,
+    ):
+        self._stream = stream
+        self._enabled = stream.isatty() if enabled is None else enabled
+        self._frames = tuple(frames) or ("-",)
+        self._interval_seconds = interval_seconds
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._active_count = 0
+        self._message = ""
+        self._frame_index = 0
+        self._last_render_width = 0
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @contextmanager
+    def operation(self, message: str) -> Iterator["LoadingReporter"]:
+        if not self.enabled:
+            yield self
+            return
+
+        self._start(message)
+        try:
+            yield self
+        finally:
+            self._stop()
+
+    def print_line(self, message: str) -> None:
+        if not self.enabled:
+            print(message, file=self._stream)
+            return
+
+        with self._lock:
+            active = self._active_count > 0
+            if active:
+                self._clear_locked()
+            self._stream.write(f"{message}\n")
+            if active:
+                self._render_locked()
+            self._stream.flush()
+
+    def _start(self, message: str) -> None:
+        with self._lock:
+            self._active_count += 1
+            if self._active_count > 1:
+                return
+            self._message = message
+            self._stop_event.clear()
+            self._render_locked()
+            self._thread = threading.Thread(
+                target=self._animate,
+                name="sv-loading-reporter",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def _stop(self) -> None:
+        thread: threading.Thread | None = None
+        with self._lock:
+            if self._active_count == 0:
+                return
+            self._active_count -= 1
+            if self._active_count > 0:
+                return
+            self._stop_event.set()
+            thread = self._thread
+
+        if thread is not None:
+            thread.join(timeout=1.0)
+
+        with self._lock:
+            self._thread = None
+            self._clear_locked()
+            self._message = ""
+
+    def _animate(self) -> None:
+        while not self._stop_event.wait(self._interval_seconds):
+            with self._lock:
+                if self._active_count == 0:
+                    return
+                self._render_locked()
+
+    def _render_locked(self) -> None:
+        frame = self._frames[self._frame_index % len(self._frames)]
+        self._frame_index += 1
+        rendered = f"{frame} {self._message}"
+        self._last_render_width = len(rendered)
+        self._stream.write(f"\r{rendered}")
+        self._stream.flush()
+
+    def _clear_locked(self) -> None:
+        if self._last_render_width == 0:
+            return
+        self._stream.write("\r" + (" " * self._last_render_width) + "\r")
+        self._stream.flush()
+        self._last_render_width = 0
 
 
 @dataclass(frozen=True)
