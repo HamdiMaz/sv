@@ -8,7 +8,7 @@ In an interactive terminal, `sv list` opens an interactive browser so you can mo
 
 | Column | Meaning |
 | --- | --- |
-| `Skill` | Folder name that will be created under `.pi/skills`. |
+| `Skill` | Folder name that will be created under the default agent skill folder. |
 | `Source` | Source repo ID, or `N sources` when duplicate names need a source choice. |
 | `Description` | Description from `SKILL.md`, or a short prompt to use the duplicate section. |
 
@@ -56,6 +56,8 @@ Terminal control characters from repo metadata or skill descriptions are escaped
 ## Interactive table browser
 
 Interactive TTY browsers render a compact table with a muted rule above and below the header row. Header labels use the interactive accent color, the current row keeps the blue highlight, and the footer lists the active keys. Browse-mode Enter opens details or runs the highlighted row action; `q` or Esc goes back.
+
+When sv needs a project agent and cannot infer one, TTY output opens a highlighted chooser with `Pi`, `Claude`, and `Agents`. Use arrow keys to move, `/` to search, Enter to choose, and `q`/Esc to cancel.
 
 `sv list`, `sv search`, and TTY `sv repo list` use this browser when stdin and stdout are interactive. In `sv list` and `sv search`, use ↑/↓ to move and ←/→ to page when available. Press `/` to open the framed search prompt with ranked results; Enter applies the typed search, empty Enter clears the active search, and Esc cancels without changing the current results. Enter opens an inline detail page; detail `a` adds the shown skill and shows the add result/status, and detail `q`/Esc returns to the list. List `q`/Esc exits the browser. Detail pages show a framed, color-accented card with the skill name, source, path, wrapped description, optional add status, and the concise footer `a add • q back`; copy-paste `Add as` references stay in non-interactive duplicate sections where they are easier to use from scripts. Long values fit the current terminal width, and control characters from source names, paths, descriptions, or statuses are escaped before display.
 

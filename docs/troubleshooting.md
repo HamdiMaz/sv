@@ -16,9 +16,22 @@ sv repo add SomeOrg/TeamSkills
 
 `sv repo add` warms the local source metadata cache by default. If that warm step warns but the repo was added, fix the network/auth issue and run `sv list --refresh` later, or use `--no-warm-cache` for offline/config-only setup.
 
+## Project default agent folders
+
+Project skills can be installed under one supported project agent folder:
+`.pi/skills`, `.claude/skills`, or `.agents/skills`.
+
+Use `sv default` to show the current project default agent. Use
+`sv default pi`, `sv default claude`, or `sv default agents` to set it.
+The selected value is stored in `.sv/manifest.toml` as `default_agent`.
+Changing it affects future project commands only; sv does not migrate existing
+skill folders between agents.
+
+`sv run` still requires an explicit supported run agent. The supported run agent is `pi`, and it uses `.pi/skills` regardless of the project default agent.
+
 ## Duplicate skill names
 
-A Pi project can only contain one `.pi/skills/<name>` directory. If two source repos provide the same skill name, `sv list` keeps the main skill table compact with one `N sources` row and adds a separate `Duplicate skill names` section with each repo, description, and qualified `Add as` value. The duplicate section shows each skill name once and leaves continuation rows blank in that column, which is expected. Copy the `Add as` value for the source you want.
+A project can only contain one folder for a given skill name in its default agent skill folder. If two source repos provide the same skill name, `sv list` keeps the main skill table compact with one `N sources` row and adds a separate `Duplicate skill names` section with each repo, description, and qualified `Add as` value. The duplicate section shows each skill name once and leaves continuation rows blank in that column, which is expected. Copy the `Add as` value for the source you want.
 
 Install the exact source you want. Most `Add as` values use `repo-id:skill`; path-aware entries can use `repo-id:path/to/skill`:
 

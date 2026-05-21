@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added project default agent documentation for `.pi/skills`, `.claude/skills`, and `.agents/skills`, including `sv default` and `default_agent` manifest behavior.
 - Changed `sv run` to require the explicit `pi` agent and forward Pi arguments after the agent name.
 - Documented source metadata acceleration: index-first reads, default repo-add/`svx` cache warming with `--no-warm-cache`, and bounded parallel fallback metadata reads.
 - Redesigned interactive source skill detail pages as framed, color-accented cards with wrapped descriptions, safe styled metadata, status feedback, and the concise footer `a add • q back`.

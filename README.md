@@ -1,12 +1,12 @@
 # sv
 
-`sv` manages project-local AI agent skills for Pi. It copies valid skills from one or more Git-backed source repositories into the current project's `.pi/skills` directory and records where installed skills came from so they can be synced reliably.
+`sv` manages project-local AI agent skills for supported project agents. It copies valid skills from one or more Git-backed source repositories into the current project's default agent skill directory and records where installed skills came from so they can be synced reliably.
 
 Start with [getting started](docs/getting-started.md) for the shortest setup path. For copy-paste workflows, see [examples](docs/examples.md). For a command-focused walkthrough, see the [usage guide](docs/usage.md). For a compact command reference, see [commands](docs/commands.md). For table columns, picker behavior, wrapping, and duplicate-name guidance, see [reading sv output](docs/output.md). For test commands and marker usage, see [testing sv](docs/testing.md). For common fixes, see [troubleshooting](docs/troubleshooting.md).
 
 ## Installation
 
-`sv` is a Python CLI package and requires Python 3.14 or newer. Install it with your preferred Python package tool, then run it from the root of the project whose Pi skills you want to manage.
+`sv` is a Python CLI package and requires Python 3.14 or newer. Install it with your preferred Python package tool, then run it from the root of the project whose agent skills you want to manage.
 
 ```bash
 # After publication:
@@ -45,10 +45,20 @@ Global cache metadata and skill bodies live under:
 
 Source metadata for normal browsing/install commands and default `sv status` checks is cached locally for 24 hours. `sv list`, `sv search`, TTY `sv repo list` nested skill browsing, all `sv add` modes, and plain `sv status` use fresh cached metadata when available and refresh lazily when metadata is missing or stale. `sv repo add` and `svx` warm this same machine-local catalog cache by default; `--no-warm-cache` skips only that best-effort local warm step. Use `sv status --refresh` when you need an immediate current-source status check. `sv sync` and `sv update` still refresh metadata by default before changing local skills. `--cached` requires existing metadata and errors if metadata is missing. Skill bodies are cached by content hash and pruned lazily after 30 days unused or when the skill-body cache exceeds 256 MiB. For non-index sources, the body hash is recorded after the first successful materialization. If cached metadata points at a skill whose body is not cached, normal mode refreshes that repo before source materialization; `--cached` fails instead of refreshing.
 
-Project Pi skills live under:
+Project skills can be installed under one supported project agent folder:
+`.pi/skills`, `.claude/skills`, or `.agents/skills`.
 
-```text
-.pi/skills/
+Use `sv default` to show the current project default agent. Use
+`sv default pi`, `sv default claude`, or `sv default agents` to set it.
+The selected value is stored in `.sv/manifest.toml` as `default_agent`.
+Changing it affects future project commands only; sv does not migrate existing
+skill folders between agents.
+
+```bash
+sv default
+sv default pi
+sv default claude
+sv default agents
 ```
 
 ## Parallel work
@@ -139,7 +149,7 @@ sv add --all
 sv add --all --repo HamdiMaz/Skills
 ```
 
-Use `--repo` to bulk-add only from one configured source. If multiple repos provide the same skill folder name, `sv add --all` stops before copying anything and asks you to choose sources explicitly with `repo_id:skill` or `repo_id:path/to/skill` references. If a skill already exists in `.pi/skills`, sv prints a friendly message and leaves it unchanged. In a skill-vault repository, `sv add --replace` can replace an existing vault skill target; non-TTY vault replacement requires that flag and warns about local edits before overwriting.
+Use `--repo` to bulk-add only from one configured source. If multiple repos provide the same skill folder name, `sv add --all` stops before copying anything and asks you to choose sources explicitly with `repo_id:skill` or `repo_id:path/to/skill` references. If a skill already exists in the default agent skill folder, sv prints a friendly message and leaves it unchanged. In a skill-vault repository, `sv add --replace` can replace an existing vault skill target; non-TTY vault replacement requires that flag and warns about local edits before overwriting.
 
 Remove a skill from the current project:
 
@@ -178,7 +188,9 @@ sv run pi <pi args>
 sv run pi --model fast
 ```
 
-`sv run` requires the `pi` executable on your `PATH`. Before launching Pi, `sv` rejects symlinked project skill paths and nested symlinks inside project skill folders so Pi is not pointed at files outside `.pi/skills`. It launches `pi --no-skills --skill .pi/skills` followed by forwarded Pi arguments.
+`sv run` still requires an explicit supported run agent. The supported run agent is `pi`, and it uses `.pi/skills` regardless of the project default agent.
+
+`sv run` requires the `pi` executable on your `PATH`. Before launching Pi, `sv` rejects symlinked project skill paths and nested symlinks inside `.pi/skills` so Pi is not pointed at files outside `.pi/skills`. It launches `pi --no-skills --skill .pi/skills` followed by forwarded Pi arguments.
 
 ## Source repo layout
 
@@ -221,9 +233,9 @@ Existing project skills without manifest entries stay unmanaged during sync. `sv
 
 `sv sync` replaces managed skills from their recorded source repo. It copies the source skill first and keeps a temporary backup of the local skill so the previous version can be restored if replacement or manifest update fails.
 
-Hidden directories matching `.<skill>.sv-*` inside `.pi/skills` are sv internals for in-progress or rolled-back file operations and should not be edited by hand.
+Hidden directories matching `.<skill>.sv-*` inside the active/default agent skill folder are sv internals for in-progress or rolled-back file operations and should not be edited by hand.
 
-For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlinked project skill directories, symlinked source cache paths, symlinked source `skills/` roots, and symlinks inside source or project skill folders before copy/sync/run operations. Symlinked source skill directories are skipped during catalog loading. Manifest reads and writes reject symlinked manifest files or temporary manifest files. TOML config and manifest files are limited to 1 MiB; source `.sv/index.toml` files fetched from configured repos and README files touched by skill-vault table updates are limited to 4 MiB; skill-tree hashing and materialization enforce file-count, byte, depth, and unsafe nested-path-name budgets; index generation enforces skill-candidate and directory-depth budgets; content hashes must use the canonical `sha256:<64 lowercase hex characters>` form before `sv` trusts them. These checks prevent a project or source repo from redirecting add, remove, sync, run, or index operations outside the expected directories, hiding file names with terminal control or Unicode format characters, or feeding unbounded metadata into the CLI.
+For safety, `sv` refuses to manage symlinked project agent skill paths such as `.pi/skills`, `.claude/skills`, or `.agents/skills`, symlinked project skill directories, symlinked source cache paths, symlinked source `skills/` roots, and symlinks inside source or project skill folders before copy/sync/run operations. Symlinked source skill directories are skipped during catalog loading. Manifest reads and writes reject symlinked manifest files or temporary manifest files. TOML config and manifest files are limited to 1 MiB; source `.sv/index.toml` files fetched from configured repos and README files touched by skill-vault table updates are limited to 4 MiB; skill-tree hashing and materialization enforce file-count, byte, depth, and unsafe nested-path-name budgets; index generation enforces skill-candidate and directory-depth budgets; content hashes must use the canonical `sha256:<64 lowercase hex characters>` form before `sv` trusts them. These checks prevent a project or source repo from redirecting add, remove, sync, run, or index operations outside the expected directories, hiding file names with terminal control or Unicode format characters, or feeding unbounded metadata into the CLI.
 
 ## Pi isolation
 
@@ -233,7 +245,7 @@ For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlink
 pi --no-skills --skill .pi/skills
 ```
 
-Start Pi through `sv run pi` when you want to use only project-local skills. `sv run pi` validates the project skill tree for symlinks and bounded size before launching Pi.
+Start Pi through `sv run pi` when you want to use only project-local Pi skills. `sv run pi` validates `.pi/skills` for symlinks and bounded size before launching Pi, regardless of the project default agent.
 
 ## Troubleshooting
 

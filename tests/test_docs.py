@@ -53,6 +53,10 @@ COMMON_DOC_COMMAND_EXAMPLES = [
     "sv remove find-docs",
     "sv sync",
     "sv update",
+    "sv default",
+    "sv default pi",
+    "sv default claude",
+    "sv default agents",
     "sv run pi --model fast",
     "sv repo add HamdiMaz/Skills",
     "sv repo add HamdiMaz/Skills --no-warm-cache",
@@ -364,6 +368,18 @@ def test_command_reference_documents_search():
     assert "descriptions match by text substring" in command_reference
 
 
+def test_docs_describe_project_default_agents():
+    commands = Path("docs/commands.md").read_text(encoding="utf-8")
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    for text in (commands, readme):
+        assert "sv default" in text
+        assert ".pi/skills" in text
+        assert ".claude/skills" in text
+        assert ".agents/skills" in text
+        assert "default_agent" in text
+
+
 def test_docs_describe_framed_interactive_search_prompt():
     documented = "\n".join(
         path.read_text(encoding="utf-8")
@@ -460,7 +476,7 @@ def test_docs_describe_sv_jobs_parallelism_control() -> None:
     testing_guide = (DOCS_DIR / "testing.md").read_text(encoding="utf-8")
     usage_guide = (DOCS_DIR / "usage.md").read_text(encoding="utf-8")
 
-    assert readme.index("Project Pi skills live under") < readme.index("## Parallel work")
+    assert readme.index("Project skills can be installed") < readme.index("## Parallel work")
     assert "## Parallel work" in readme
     assert "SV_JOBS=1" in readme
     assert "1 through 64" in readme
@@ -641,7 +657,7 @@ def test_documented_local_markdown_links_exist(
 
 
 def test_local_markdown_links_keep_fragments_for_anchor_validation():
-    assert ("docs/usage.md", 47, "commands.md#global-cache") in _local_markdown_links()
+    assert ("docs/usage.md", 64, "commands.md#global-cache") in _local_markdown_links()
 
 
 def test_readme_links_to_expected_local_docs():

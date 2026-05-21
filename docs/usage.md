@@ -21,24 +21,41 @@ sv search docs --cached
 sv cache status
 sv cache clean
 
-# Add one skill to the current project
+# Add one skill to the current project's default agent folder
 sv add find-docs
 
 # Add a specific source when multiple repos or paths provide the same skill name
 sv add HamdiMaz/Skills:find-docs
 sv add Team/Skills:packages/agents/pi/skills/find-docs
 
-# Safely update unchanged project skills from their recorded sources
+# Show or change the project default agent folder
+sv default
+sv default claude
+
+# Safely update unchanged project skills in the default agent folder
 sv update
 
-# Force-sync installed project skills from their recorded sources
+# Force-sync installed project skills in the default agent folder
 sv sync
 
-# Run Pi with only this project's skills
+# Run Pi with only this project's Pi skills
 sv run pi <pi args>
 ```
 
-Run commands from the project root where `.pi/skills` should be managed. After `sv repo add` succeeds, the first `sv add -l` should usually open quickly because repo-add warming has already populated the local catalog cache.
+Run commands from the project root where the default agent skill folder should be managed.
+
+Project skills can be installed under one supported project agent folder:
+`.pi/skills`, `.claude/skills`, or `.agents/skills`.
+
+Use `sv default` to show the current project default agent. Use
+`sv default pi`, `sv default claude`, or `sv default agents` to set it.
+The selected value is stored in `.sv/manifest.toml` as `default_agent`.
+Changing it affects future project commands only; sv does not migrate existing
+skill folders between agents.
+
+`sv run` still requires an explicit supported run agent. The supported run agent is `pi`, and it uses `.pi/skills` regardless of the project default agent.
+
+After `sv repo add` succeeds, the first `sv add -l` should usually open quickly because repo-add warming has already populated the local catalog cache.
 
 ## Global cache behavior
 
@@ -58,7 +75,7 @@ In non-interactive output, or when the browser is unavailable, `sv list` prints 
 
 | Column | Meaning |
 | --- | --- |
-| `Skill` | The folder name copied into `.pi/skills`. |
+| `Skill` | The folder name copied into the default agent skill folder. |
 | `Source` | The configured source repo ID, or `N sources` when multiple repos provide that skill name. |
 | `Description` | The description parsed from `SKILL.md`, or a prompt to choose from the duplicate section. |
 
@@ -75,7 +92,7 @@ When two repos contain the same skill name, non-interactive `sv list` output gro
 
 ## Duplicate skill names
 
-Duplicate skill names are allowed in source repos, but a Pi project can only have one folder for a given skill name. To avoid accidental overwrites:
+Duplicate skill names are allowed in source repos, but a project can only have one folder for a given skill name in its default agent skill folder. To avoid accidental overwrites:
 
 1. Use `sv list` to find the `Add as` value in the `Duplicate skill names` section.
 2. Install one source explicitly with `sv add <repo>:<skill>` or the path-aware `Add as` value from the table.
@@ -83,8 +100,8 @@ Duplicate skill names are allowed in source repos, but a Pi project can only hav
 
 ## Updating project skills
 
-- `sv update` pulls configured source repos and refreshes only managed project skills whose local folders still match their recorded baseline. It preserves local edits by skipping modified skills and marking them as modified with an update available.
-- `sv sync` force-syncs managed project skills from their recorded origins.
+- `sv update` pulls configured source repos and refreshes only managed project skills in the default agent skill folder whose local folders still match their recorded baseline. It preserves local edits by skipping modified skills and marking them as modified with an update available.
+- `sv sync` force-syncs managed project skills in the default agent skill folder from their recorded origins.
 
 Force-synced skill folders are replaced with the source version, so local edits inside managed skill folders are overwritten by `sv sync`. Local-only or ambiguous legacy skills are skipped with a clear message.
 
