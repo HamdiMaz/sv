@@ -121,6 +121,25 @@ def test_interactive_table_renders_headers_highlighted_row_and_footer(monkeypatc
     )
 
 
+def test_interactive_table_default_result_page_shows_ten_rows(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "90")
+    state = TableState(
+        ["Skill"],
+        [[f"skill-{index}"] for index in range(1, 12)],
+    )
+    stdout = StringIO()
+
+    line_count = _render_interactive_table(state, stdout)
+
+    visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert line_count == 14
+    assert visible_lines[3:13] == [f"skill-{index}" for index in range(1, 11)]
+    assert (
+        visible_lines[13]
+        == "Showing 1-10 of 11 • ↑/↓ move • ←/→ page • / search • Enter details • q back"
+    )
+
+
 def test_interactive_table_truncates_every_line_when_columns_exceed_width(monkeypatch):
     monkeypatch.setenv("COLUMNS", "2")
     state = TableState(["A", "B", "C"], [["alpha", "beta", "gamma"]])
