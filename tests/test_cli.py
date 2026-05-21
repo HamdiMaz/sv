@@ -1413,6 +1413,39 @@ def test_add_uses_manifest_default_agent(tmp_path: Path, capsys):
     assert "Added Claude skill 'alpha'" in capsys.readouterr().out
 
 
+def test_add_all_uses_manifest_default_agent(tmp_path: Path, capsys):
+    project = tmp_path / "project"
+    alpha = _cli_source_skill(tmp_path, "alpha")
+    beta = _cli_source_skill(tmp_path, "beta")
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+
+    exit_code = cli_module._handle_add_all(
+        [alpha, beta],
+        cwd=project,
+        adapter=cli_module.PiAdapter(),
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    assert (
+        project / ".claude" / "skills" / "beta" / "notes.md"
+    ).read_text() == "beta source\n"
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / "beta").exists()
+    document = load_manifest_document(project / ".claude" / "skills")
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "claude"
+    assert document.skills["beta"].target_agent == "claude"
+    output = capsys.readouterr().out
+    assert "Added Claude skill 'alpha'" in output
+    assert "Added Claude skill 'beta'" in output
+
+
 def test_add_infers_single_existing_agent_folder_and_persists_default(
     tmp_path: Path, capsys
 ):
@@ -1763,6 +1796,9 @@ def test_add_help_explains_skill_argument(capsys):
     help_text = capsys.readouterr().out
     assert "Skill name or repo:skill reference" in help_text
     assert "choose a source" in help_text
+    assert "active/default project agent skills directory" in help_text
+    assert "sv default <agent>" in help_text
+    assert ".pi/skills directory" not in help_text
 
 
 def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(capsys, monkeypatch):

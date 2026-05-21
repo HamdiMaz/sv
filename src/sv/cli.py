@@ -278,8 +278,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Add source skills to this project or skill-vault.",
         description=(
             "Add one or more source skills. In normal projects, skills are installed "
-            "to this project's .pi/skills directory. In a skill-vault repo, skills "
-            "are installed to skills/<name>."
+            "to the active/default project agent skills directory. Use "
+            "'sv default <agent>' to view or choose the default agent. In a "
+            "skill-vault repo, skills are installed to skills/<name>."
         ),
         epilog=(
             "Examples:\n"
