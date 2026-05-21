@@ -94,6 +94,8 @@ class AddAllSkillsResult:
     """Summary of adding every source skill to a Pi project."""
 
     results: list[AddSkillResult]
+    target_kind: str = _PI_TARGET.target_kind
+    target_agent: str | None = _PI_TARGET.target_agent
 
 
 @dataclass(frozen=True)
@@ -553,7 +555,9 @@ def _add_all_skills_parallel(
         raise
 
     return AddAllSkillsResult(
-        results=[result for result in ordered_results if result is not None]
+        results=[result for result in ordered_results if result is not None],
+        target_kind=target_style.target_kind,
+        target_agent=target_style.target_agent,
     )
 
 
@@ -624,7 +628,9 @@ def _remove_skill(
     _reject_symlinked_project_skill(target, target_style)
     if not target.is_dir():
         if target_style.target_kind == _PI_TARGET.target_kind:
-            raise SvError(f"Pi skill '{skill_name}' was not found in this project.")
+            raise SvError(
+                f"{target_style.skill_label} '{skill_name}' was not found in this project."
+            )
         raise SvError(f"Vault skill '{skill_name}' was not found in this skill-vault.")
 
     original_manifest = ProjectManifestStore(project_skills_dir).load()
@@ -770,7 +776,7 @@ def _sync_skills(
             backfilled=[],
             no_skills_dir=True,
             target_kind=target_style.target_kind,
-        target_agent=target_style.target_agent,
+            target_agent=target_style.target_agent,
         )
 
     by_repo_name_path: dict[tuple[str, str, str], ProjectSourceSkill] = {}
@@ -901,7 +907,7 @@ def _update_skills(
             backfilled=[],
             no_skills_dir=True,
             target_kind=target_style.target_kind,
-        target_agent=target_style.target_agent,
+            target_agent=target_style.target_agent,
         )
 
     manifest = _load_manifest_for_target(project_skills_dir, target_style)
