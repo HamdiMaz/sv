@@ -126,7 +126,7 @@ sv add -l
 ```
 
 Use ↑/↓ to move, ←/→ to page through skills, Space to select, Enter to add,
-and `q` to cancel. Press `/` to open the framed search prompt. Enter applies the typed search, empty Enter clears the active search, and Esc cancels without changing the current results. The picker renders inline, shows 5 skills at a time, displays a compact help/status line with the visible range and controls, and
+and `q` to cancel. Press `/` to open the framed search prompt. Enter applies the typed search, empty Enter clears the active search, and Esc cancels without changing the current results. The picker renders inline, shows 10 skills at a time, displays a compact help/status line with the visible range and controls, and
 scrolls as you move. Each picker row includes the source repo ID so duplicate skill names are easy to distinguish without repeating the skill name twice. Long picker labels and the help line are truncated to the terminal width, and control characters from source metadata are escaped before display so the inline UI stays stable. If you select two sources for the same skill name, `sv` stops before copying anything and asks you to choose only one source. When a source repo is already cached, `sv add -l` reads the
 cache without pulling first so the picker opens quickly. Run `sv list` when you
 want to refresh source caches without changing project skills; use `sv update`

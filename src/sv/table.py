@@ -11,6 +11,7 @@ from typing import TextIO
 import unicodedata
 
 from sv.errors import SvError
+from sv.result_page import DEFAULT_RESULT_PAGE_SIZE
 from sv.search import (
     SearchPromptConfig,
     SearchPromptResult,
@@ -24,7 +25,7 @@ from sv.terminal import escape_terminal_controls
 
 CellWidths = Mapping[str | int, int]
 
-VIEWPORT_SIZE = 5
+VIEWPORT_SIZE = DEFAULT_RESULT_PAGE_SIZE
 
 _RESET = "\x1b[0m"
 _BOLD = "\x1b[1m"

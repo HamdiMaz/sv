@@ -35,13 +35,13 @@ def display_width(value: str) -> int:
     return width
 
 
-def test_selection_state_scrolls_after_cursor_moves_beyond_fifth_item():
-    state = SelectionState([f"skill-{index}" for index in range(1, 7)])
+def test_selection_state_scrolls_after_cursor_moves_beyond_tenth_item():
+    state = SelectionState([f"skill-{index}" for index in range(1, 12)])
 
-    for _ in range(4):
+    for _ in range(9):
         state.move_down()
 
-    assert state.cursor == 4
+    assert state.cursor == 9
     assert state.viewport_start == 0
     assert [skill for _, skill in state.visible_items()] == [
         "skill-1",
@@ -49,11 +49,16 @@ def test_selection_state_scrolls_after_cursor_moves_beyond_fifth_item():
         "skill-3",
         "skill-4",
         "skill-5",
+        "skill-6",
+        "skill-7",
+        "skill-8",
+        "skill-9",
+        "skill-10",
     ]
 
     state.move_down()
 
-    assert state.cursor == 5
+    assert state.cursor == 10
     assert state.viewport_start == 1
     assert [skill for _, skill in state.visible_items()] == [
         "skill-2",
@@ -61,6 +66,11 @@ def test_selection_state_scrolls_after_cursor_moves_beyond_fifth_item():
         "skill-4",
         "skill-5",
         "skill-6",
+        "skill-7",
+        "skill-8",
+        "skill-9",
+        "skill-10",
+        "skill-11",
     ]
 
 
@@ -80,35 +90,44 @@ def test_selection_state_scrolls_back_up_to_hidden_item():
 
 
 def test_selection_state_pages_right_and_left_by_visible_window():
-    state = SelectionState([f"skill-{index}" for index in range(1, 13)])
+    state = SelectionState([f"skill-{index}" for index in range(1, 24)])
 
     state.page_next()
 
-    assert state.cursor == 5
-    assert state.viewport_start == 5
+    assert state.cursor == 10
+    assert state.viewport_start == 10
     assert [skill for _, skill in state.visible_items()] == [
-        "skill-6",
-        "skill-7",
-        "skill-8",
-        "skill-9",
-        "skill-10",
+        "skill-11",
+        "skill-12",
+        "skill-13",
+        "skill-14",
+        "skill-15",
+        "skill-16",
+        "skill-17",
+        "skill-18",
+        "skill-19",
+        "skill-20",
     ]
 
     state.page_next()
 
-    assert state.cursor == 10
-    assert state.viewport_start == 10
-    assert [skill for _, skill in state.visible_items()] == ["skill-11", "skill-12"]
+    assert state.cursor == 20
+    assert state.viewport_start == 20
+    assert [skill for _, skill in state.visible_items()] == [
+        "skill-21",
+        "skill-22",
+        "skill-23",
+    ]
 
     state.page_next()
 
-    assert state.cursor == 10
-    assert state.viewport_start == 10
+    assert state.cursor == 20
+    assert state.viewport_start == 20
 
     state.page_previous()
 
-    assert state.cursor == 5
-    assert state.viewport_start == 5
+    assert state.cursor == 10
+    assert state.viewport_start == 10
 
 
 def test_selection_state_toggles_and_returns_selected_items_in_list_order():
@@ -163,14 +182,14 @@ def test_render_can_remove_cursor_highlight_after_selection_finishes():
     ]
 
 
-def test_render_outputs_inline_colored_five_item_list_without_alternate_screen():
-    state = SelectionState([f"skill {index}" for index in range(1, 7)])
+def test_render_outputs_inline_colored_ten_item_list_without_alternate_screen():
+    state = SelectionState([f"skill {index}" for index in range(1, 12)])
     state.selected.add(1)
     stdout = StringIO()
 
     line_count = _render(state, stdout)
 
-    assert line_count == 6
+    assert line_count == 11
     output = stdout.getvalue()
     assert "\x1b[?1049h" not in output
     assert "\x1b[2J" not in output
@@ -180,7 +199,12 @@ def test_render_outputs_inline_colored_five_item_list_without_alternate_screen()
         "\x1b[38;5;252m[ ]\x1b[0m skill 3",
         "\x1b[38;5;252m[ ]\x1b[0m skill 4",
         "\x1b[38;5;252m[ ]\x1b[0m skill 5",
-        "\x1b[38;5;245mShowing 1-5 of 6 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / search • q cancel\x1b[0m",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 6",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 7",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 8",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 9",
+        "\x1b[38;5;252m[ ]\x1b[0m skill 10",
+        "\x1b[38;5;245mShowing 1-10 of 11 • ↑/↓ move • ←/→ page • Space select • Enter confirm • / search • q cancel\x1b[0m",
     ]
 
 
@@ -598,14 +622,14 @@ def test_select_skills_handles_navigation_and_unknown_keys(monkeypatch):
     monkeypatch.setattr("sv.selector._read_key", _fake_read_key)
 
     selected = select_skills(
-        [f"skill-{index}" for index in range(1, 8)],
+        [f"skill-{index}" for index in range(1, 13)],
         stdin=TtyStream(),
         stdout=output,
     )
 
     assert selected == []
     rendered = visible_text(output.getvalue())
-    assert "Showing 1-5 of 7" in rendered
+    assert "Showing 1-10 of 12" in rendered
 
 
 def test_render_handles_empty_state_help_line():
