@@ -3409,7 +3409,12 @@ def _handle_remove_all(
 
     if not yes and not _can_prompt_for_confirmation():
         raise SvError("Non-TTY 'sv remove --all' requires --yes.")
-    if not _confirm_skill_removal(entries, context=context, yes=yes):
+    if not _confirm_skill_removal(
+        entries,
+        context=context,
+        target_agent_name=_context_target_agent(context, active_agent),
+        yes=yes,
+    ):
         print("No skills removed.")
         return 0
 
@@ -3462,7 +3467,12 @@ def _handle_remove_interactive(
     selected_entries = [entries_by_name[skill] for skill in selected_skills]
     if not yes and not _can_prompt_for_confirmation():
         raise SvError("Non-TTY 'sv remove -l' requires --yes.")
-    if not _confirm_skill_removal(selected_entries, context=context, yes=yes):
+    if not _confirm_skill_removal(
+        selected_entries,
+        context=context,
+        target_agent_name=_context_target_agent(context, active_agent),
+        yes=yes,
+    ):
         print("No skills removed.")
         return 0
 
@@ -3534,14 +3544,18 @@ def _removal_source_status(entry: ManifestEntry) -> str:
 
 
 def _confirm_skill_removal(
-    entries: Sequence[ManifestEntry], *, context: LocalContext, yes: bool
+    entries: Sequence[ManifestEntry],
+    *,
+    context: LocalContext,
+    target_agent_name: str | None,
+    yes: bool,
 ) -> bool:
     if yes:
         return True
     if not _can_prompt_for_confirmation():
         return True
     target_kind = _context_target_kind(context)
-    label = _result_skills_label(target_kind, _context_target_agent(context))
+    label = _result_skills_label(target_kind, target_agent_name)
     print(f"The following sv-managed {label} will be removed:")
     print(
         format_table(
@@ -4097,7 +4111,11 @@ def _project_status_rows(entries: Sequence[ManifestEntry]) -> list[list[str]]:
     return [
         [
             _escape_control_characters(entry.name),
-            _escape_control_characters(entry.target_agent or ""),
+            _escape_control_characters(
+                project_agent_for(entry.target_agent).display_name
+                if entry.target_agent
+                else ""
+            ),
             _escape_control_characters(entry.target_path or ""),
             _manifest_source_reference(entry),
             _status_state_label(entry),

@@ -1592,6 +1592,241 @@ def test_sync_uses_only_default_agent(tmp_path: Path):
     ).read_text() == "pi local\n"
 
 
+def test_update_uses_only_default_agent(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    source_entry = _cli_source_skill(tmp_path)
+    paths = cli_module.SvPaths.from_home(tmp_path / "home")
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    cli_module._handle_add(
+        "alpha",
+        [source_entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    pi_skill.mkdir(parents=True)
+    (pi_skill / "notes.md").write_text("pi local\n")
+    document = load_manifest_document(project / ".pi" / "skills")
+    document.skills["project-agent:pi:.pi/skills/alpha:alpha"] = _managed_entry_for_agent(
+        "alpha", "pi"
+    )
+    save_manifest_document(project / ".pi" / "skills", document)
+    (source_entry.source_path / "notes.md").write_text("source v2\n")
+    monkeypatch.setattr(
+        cli_module,
+        "_load_config_for_source_command",
+        lambda paths_arg: cli_module.SvConfig(repos=[]),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_catalog_for_source_command",
+        lambda repos, paths_arg, git_runner, **kwargs: [source_entry],
+    )
+
+    exit_code = cli_module._handle_update(
+        project,
+        paths,
+        cli_module.PiAdapter(),
+        git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+        record_global_source_state=False,
+        cache_policy=cli_module.CachePolicy.cache_only(),
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "source v2\n"
+    assert (pi_skill / "notes.md").read_text() == "pi local\n"
+
+
+def test_status_refresh_uses_default_agent_name(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+    paths = cli_module.SvPaths.from_home(tmp_path / "home")
+    local_refresh_calls = []
+    source_refresh_calls = []
+    monkeypatch.setattr(cli_module, "_status_catalog_if_configured", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        cli_module,
+        "refresh_project_agent_skill_local_states",
+        lambda project_skills_dir, agent_name: local_refresh_calls.append(
+            (project_skills_dir, agent_name)
+        ),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "refresh_project_agent_skill_states",
+        lambda catalog, project_skills_dir, agent_name: source_refresh_calls.append(
+            (project_skills_dir, agent_name)
+        ),
+    )
+
+    exit_code = cli_module._handle_status(
+        project,
+        paths,
+        cli_module.PiAdapter(),
+        git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+        record_global_source_state=False,
+        cache_policy=cli_module.CachePolicy.cache_only(),
+    )
+
+    assert exit_code == 0
+    assert local_refresh_calls == [(project / ".claude" / "skills", "claude")]
+    assert source_refresh_calls == []
+
+
+def test_status_source_refresh_uses_default_agent_name(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+    paths = cli_module.SvPaths.from_home(tmp_path / "home")
+    source_refresh_calls = []
+    monkeypatch.setattr(
+        cli_module, "_status_catalog_if_configured", lambda *args, **kwargs: [object()]
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "refresh_project_agent_skill_states",
+        lambda catalog, project_skills_dir, agent_name: source_refresh_calls.append(
+            (project_skills_dir, agent_name)
+        ),
+    )
+
+    exit_code = cli_module._handle_status(
+        project,
+        paths,
+        cli_module.PiAdapter(),
+        git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+        record_global_source_state=False,
+        cache_policy=cli_module.CachePolicy.cache_only(),
+    )
+
+    assert exit_code == 0
+    assert source_refresh_calls == [(project / ".claude" / "skills", "claude")]
+
+
+def test_status_project_agent_errors_use_default_agent_labels(tmp_path: Path):
+    project = tmp_path / "project"
+    claude_skills = project / ".claude" / "skills"
+    claude_skills.mkdir(parents=True)
+    manifest = project / ".sv" / "manifest.toml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        "schema_version = 1\n"
+        'default_agent = "claude"\n'
+        "\n"
+        "[[skills]]\n"
+        'name = "../outside"\n'
+        'target_kind = "project-agent"\n'
+        'target_agent = "claude"\n'
+        'target_path = ".claude/skills/../outside"\n'
+        'source_repo_id = "Org/Skills"\n'
+        'source_repo_url = "https://github.com/Org/Skills.git"\n'
+        'source_path = "skills/outside"\n'
+        'description = "Bad skill."\n',
+    )
+
+    with pytest.raises(SvError, match="Invalid Claude skill directory"):
+        cli_module._handle_status(
+            project,
+            cli_module.SvPaths.from_home(tmp_path / "home"),
+            cli_module.PiAdapter(),
+            git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+            record_global_source_state=False,
+            cache_policy=cli_module.CachePolicy.cache_only(),
+        )
+
+    (project / ".sv" / "manifest.toml").unlink()
+    claude_skills.rmdir()
+    claude_skills.symlink_to(project / "elsewhere")
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+
+    with pytest.raises(SvError, match="symlinked Claude skills path"):
+        cli_module._handle_status(
+            project,
+            cli_module.SvPaths.from_home(tmp_path / "home"),
+            cli_module.PiAdapter(),
+            git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+            record_global_source_state=False,
+            cache_policy=cli_module.CachePolicy.cache_only(),
+        )
+
+
+def test_status_table_displays_agent_display_names(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+
+    result = run_sv(["status", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "alpha       Claude" in result.stdout
+    assert "alpha       claude" not in result.stdout
+
+
+def test_remove_interactive_resolves_default_agent_once(tmp_path: Path, monkeypatch, capsys):
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+    resolver_calls = []
+
+    def resolve_once(context, *, allow_pi_fallback):
+        resolver_calls.append((context.repo_root, allow_pi_fallback))
+        return cli_module.ActiveProjectAgent("claude", project / ".claude" / "skills")
+
+    monkeypatch.setattr(cli_module, "_resolve_active_project_agent", resolve_once)
+    monkeypatch.setattr(cli_module, "_can_prompt_for_confirmation", lambda: True)
+    monkeypatch.setattr(cli_module, "_confirm_prompt", lambda prompt: False)
+
+    exit_code = cli_module._handle_remove_interactive(
+        project,
+        cli_module.PiAdapter(),
+        lambda skills, **kwargs: ["alpha"],
+    )
+
+    assert exit_code == 0
+    assert len(resolver_calls) == 1
+    assert claude_skill.exists()
+    assert "following sv-managed Claude skills" in capsys.readouterr().out
+
+
 def test_add_infers_single_existing_agent_folder_and_persists_default(
     tmp_path: Path, capsys
 ):
