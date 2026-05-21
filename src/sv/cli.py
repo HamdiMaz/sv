@@ -115,6 +115,7 @@ _TTY_DETAIL_HEADER = "\x1b[38;5;183m"
 _TTY_DETAIL_RULE = "\x1b[38;5;60m"
 _SOURCE_SKILL_DETAIL_CARD_PREFERRED_WIDTH = 58
 _SOURCE_SKILL_DETAIL_CARD_MIN_WIDTH = 18
+_SOURCE_SKILL_DETAIL_FOOTER_HELP = "a add • q back"
 
 
 @dataclass(frozen=True)
@@ -2273,12 +2274,17 @@ def _browse_repo_source_skills(
         return
 
     rows, entries = _interactive_source_skill_rows(catalog)
+    detail_footer_help = _SOURCE_SKILL_DETAIL_FOOTER_HELP
 
     def render_detail(row: Sequence[str], status: str | None) -> list[DetailLine]:
         entry = _entry_for_interactive_row(row, rows, entries)
         if entry is None:
-            return _format_source_skill_unavailable_detail_card(status)
-        return _format_source_skill_detail_card(entry, status=status)
+            return _format_source_skill_unavailable_detail_card(
+                status, footer_help=detail_footer_help
+            )
+        return _format_source_skill_detail_card(
+            entry, status=status, footer_help=detail_footer_help
+        )
 
     def add_detail(row: Sequence[str]) -> str:
         return _source_skill_detail_action(row, rows, entries, cwd=cwd, adapter=adapter)
@@ -2292,6 +2298,7 @@ def _browse_repo_source_skills(
         rows,
         detail_renderer=render_detail,
         detail_actions={"a": add_detail},
+        detail_key_help="",
         key_actions={"a": install_all},
         key_help="a add all",
         clear_on_exit=True,
@@ -2586,12 +2593,17 @@ def _browse_source_skills(
     context: LocalContext | None = None,
 ) -> int:
     rows, entries = _interactive_source_skill_rows(catalog)
+    detail_footer_help = _SOURCE_SKILL_DETAIL_FOOTER_HELP
 
     def render_detail(row: Sequence[str], status: str | None) -> list[DetailLine]:
         entry = _entry_for_interactive_row(row, rows, entries)
         if entry is None:
-            return _format_source_skill_unavailable_detail_card(status)
-        return _format_source_skill_detail_card(entry, status=status)
+            return _format_source_skill_unavailable_detail_card(
+                status, footer_help=detail_footer_help
+            )
+        return _format_source_skill_detail_card(
+            entry, status=status, footer_help=detail_footer_help
+        )
 
     def add_detail(row: Sequence[str]) -> str:
         return _source_skill_detail_action(
@@ -2604,7 +2616,7 @@ def _browse_source_skills(
         row_ranker=_source_skill_ranker(entries),
         detail_renderer=render_detail,
         detail_actions={"a": add_detail},
-        detail_key_help="a add • q back",
+        detail_key_help="",
         search_title="Search skills",
     )
     return 0
@@ -2695,39 +2707,55 @@ def _source_skill_detail_status_style(status: str) -> str:
 
 
 def _format_source_skill_detail_card(
-    entry: SourceSkill, status: str | None = None
+    entry: SourceSkill,
+    status: str | None = None,
+    *,
+    footer_help: str | None = _SOURCE_SKILL_DETAIL_FOOTER_HELP,
 ) -> list[DetailLine]:
     title = _escape_control_characters(f"{entry.name} ● available")
     source = _escape_control_characters(f"Source  {entry.repo_id}")
     source_path = _escape_control_characters(f"Path    {entry.source_relative_path}")
-    card_width = _source_skill_detail_card_width((title, source, source_path))
+    safe_status = _escape_control_characters(status) if status is not None else None
+    safe_footer_help = (
+        _escape_control_characters(footer_help) if footer_help else None
+    )
+    width_rows = [title, source, source_path]
+    if safe_status is not None:
+        width_rows.append(safe_status)
+    if safe_footer_help is not None:
+        width_rows.append(safe_footer_help)
+    card_width = _source_skill_detail_card_width(width_rows)
+
     lines = [
         detail_line(_detail_card_rule("╭─ Skill", "╮", card_width), style="accent"),
-        detail_line(_detail_card_row(title, card_width), style="title"),
+        detail_line(_detail_card_row(title, card_width)),
         detail_line(_detail_card_row(source, card_width)),
         detail_line(_detail_card_row(source_path, card_width)),
         detail_line(
-            _detail_card_rule("├─ Description", "╯", card_width), style="accent"
+            _detail_card_rule("├─ Description", "┤", card_width), style="accent"
         ),
-        *[
-            detail_line(line, indent=2)
-            for line in _wrap_detail_card_body(entry.description, card_width)
-        ],
+        *_detail_card_body_rows(entry.description, card_width),
     ]
-    if status is not None:
-        safe_status = _escape_control_characters(status)
+    if safe_status is not None:
+        lines.append(
+            detail_line(_detail_card_rule("├─ Status", "┤", card_width), style="accent")
+        )
+        lines.extend(
+            _detail_card_body_rows(
+                safe_status,
+                card_width,
+                style=_source_skill_detail_status_style(safe_status),
+                already_escaped=True,
+            )
+        )
+    if safe_footer_help is not None:
         lines.extend(
             [
-                detail_line(""),
-                detail_line("Status", style="accent"),
-                detail_line(
-                    safe_status,
-                    style=_source_skill_detail_status_style(safe_status),
-                    wrap=True,
-                    indent=2,
-                ),
+                detail_line(_detail_card_rule("├", "┤", card_width), style="accent"),
+                detail_line(_detail_card_row(safe_footer_help, card_width)),
             ]
         )
+    lines.append(detail_line(_detail_card_rule("╰", "╯", card_width), style="accent"))
     return lines
 
 
@@ -2737,7 +2765,8 @@ def _source_skill_detail_card_width(rows: Sequence[str]) -> int:
     desired_width = max(
         _SOURCE_SKILL_DETAIL_CARD_PREFERRED_WIDTH,
         _SOURCE_SKILL_DETAIL_CARD_MIN_WIDTH,
-        _display_width("├─ Description╯"),
+        _display_width("├─ Description┤"),
+        _display_width("├─ Status┤"),
         min(row_width, terminal_width),
     )
     return min(desired_width, terminal_width)
@@ -2754,15 +2783,38 @@ def _detail_card_rule(left: str, right: str, width: int) -> str:
 def _detail_card_row(text: str, width: int) -> str:
     if width < 3:
         return _fit_display_width(f"│ {text}│", width)
-    content_width = width - 3
+    content_width = _detail_card_content_width(width)
     content = _fit_display_width(text, content_width)
     padding = " " * max(content_width - _display_width(content), 0)
     return f"│ {content}{padding}│"
 
 
-def _wrap_detail_card_body(text: str, card_width: int) -> list[str]:
-    safe_text = _escape_control_characters(text)
-    return _wrap_message_to_display_width(safe_text, max(card_width - 2, 1))
+def _detail_card_content_width(width: int) -> int:
+    return max(width - 3, 1)
+
+
+def _detail_card_body_rows(
+    text: str,
+    card_width: int,
+    *,
+    style: str = "",
+    already_escaped: bool = False,
+) -> list[DetailLine]:
+    return [
+        detail_line(_detail_card_row(line, card_width), style=style)
+        for line in _wrap_detail_card_body(
+            text, card_width, already_escaped=already_escaped
+        )
+    ]
+
+
+def _wrap_detail_card_body(
+    text: str, card_width: int, *, already_escaped: bool = False
+) -> list[str]:
+    safe_text = text if already_escaped else _escape_control_characters(text)
+    return _wrap_message_to_display_width(
+        safe_text, _detail_card_content_width(card_width)
+    )
 
 
 def _fit_display_width(value: str, width: int) -> str:
@@ -2779,12 +2831,32 @@ def _fit_display_width(value: str, width: int) -> str:
 
 def _format_source_skill_unavailable_detail_card(
     status: str | None = None,
+    *,
+    footer_help: str | None = _SOURCE_SKILL_DETAIL_FOOTER_HELP,
 ) -> list[DetailLine]:
-    safe_status = status or "Selected skill is no longer available."
-    return [
-        detail_line("Status", style="accent"),
-        detail_line(safe_status, wrap=True, indent=2),
+    safe_status = _escape_control_characters(
+        status or "Selected skill is no longer available."
+    )
+    safe_footer_help = (
+        _escape_control_characters(footer_help) if footer_help else None
+    )
+    width_rows = [safe_status]
+    if safe_footer_help is not None:
+        width_rows.append(safe_footer_help)
+    card_width = _source_skill_detail_card_width(width_rows)
+    lines = [
+        detail_line(_detail_card_rule("╭─ Status", "╮", card_width), style="accent"),
+        *_detail_card_body_rows(safe_status, card_width, already_escaped=True),
     ]
+    if safe_footer_help is not None:
+        lines.extend(
+            [
+                detail_line(_detail_card_rule("├", "┤", card_width), style="accent"),
+                detail_line(_detail_card_row(safe_footer_help, card_width)),
+            ]
+        )
+    lines.append(detail_line(_detail_card_rule("╰", "╯", card_width), style="accent"))
+    return lines
 
 
 def _format_source_skill_unavailable_detail(status: str | None = None) -> str:
