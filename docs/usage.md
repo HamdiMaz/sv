@@ -35,7 +35,7 @@ sv update
 sv sync
 
 # Run Pi with only this project's skills
-sv run -- <pi args>
+sv run pi <pi args>
 ```
 
 Run commands from the project root where `.pi/skills` should be managed. After `sv repo add` succeeds, the first `sv add -l` should usually open quickly because repo-add warming has already populated the local catalog cache.

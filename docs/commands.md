@@ -22,7 +22,7 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv remove --all --yes` | You want non-interactive bulk removal. | Confirms bulk removal without prompting, which is required for non-TTY `--all` use. |
 | `sv update` | You want a safe refresh of sources and unchanged local skills. | Refreshes configured sources, updates only managed skill folders without local modifications, and preserves local edits by marking modified skills with update-available state. Uses the same trusted-index optimization as sync. |
 | `sv sync` | You want installed skills force-refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |
-| `sv run -- <pi args>` | You want Pi to use only project-local skills. | Validates `.pi/skills` for symlinks and bounded skill trees, then runs `pi --no-skills --skill .pi/skills ...`. |
+| `sv run pi [pi args]` | You want Pi to use only project-local skills. | Uses the explicit supported agent name `pi`, validates `.pi/skills` for symlinks and bounded skill trees, then runs `pi --no-skills --skill .pi/skills ...`. |
 
 ## Source repo commands
 
@@ -40,6 +40,8 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `svx <repo> --no-warm-cache` | Add a source repo through `svx` without the default best-effort local cache warm step. |
 
 `sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. Use `sv repo -l` as a shorter spelling of `sv repo list`; it accepts the same cache flags. In non-TTY output, repo-list cache flags parse successfully but the plain repo table does not load source metadata. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful. Cache warming after `sv repo add` or `svx` is local and best-effort: warnings do not undo the repo configuration, and `--no-warm-cache` skips only that warm step.
+
+`sv run` requires an explicit agent name after `run`; the supported agent is `pi`. Put Pi arguments after the agent name, for example `sv run pi --model fast`.
 
 ## Index publishing
 

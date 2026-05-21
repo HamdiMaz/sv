@@ -52,7 +52,7 @@ COMMON_DOC_COMMAND_EXAMPLES = [
     "sv remove find-docs",
     "sv sync",
     "sv update",
-    "sv run -- --model fast",
+    "sv run pi --model fast",
     "sv repo add HamdiMaz/Skills",
     "sv repo add HamdiMaz/Skills --no-warm-cache",
     "sv repo list",
@@ -64,7 +64,9 @@ COMMON_DOC_COMMAND_EXAMPLES = [
 
 def _documented_paths() -> list[Path]:
     paths = [README_PATH]
-    paths.extend(sorted(DOCS_DIR.glob("*.md")))
+    paths.extend(
+        path for path in sorted(DOCS_DIR.glob("*.md")) if not path.name.endswith("-plan.md")
+    )
     return paths
 
 
@@ -266,6 +268,16 @@ def test_documented_sv_commands_parse(document_path, line_number, command):
 @pytest.mark.parametrize("command", COMMON_DOC_COMMAND_EXAMPLES)
 def test_common_documented_sv_command_examples_parse(command):
     _parse_sv_command(command)
+
+
+def test_docs_use_explicit_run_agent_name():
+    docs_text = "\n".join(
+        path.read_text(encoding="utf-8") for path in _documented_paths()
+    )
+
+    assert "sv run -- --model fast" not in docs_text
+    assert "sv run -- <pi args>" not in docs_text
+    assert "sv run pi --model fast" in docs_text
 
 
 @pytest.mark.parametrize(

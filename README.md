@@ -77,7 +77,7 @@ sv repo add HamdiMaz/Skills
 sv list
 sv add find-docs
 sv sync
-sv run -- <pi args>
+sv run pi <pi args>
 ```
 
 The first `sv repo add` warms the local catalog cache by default; use `--no-warm-cache` to skip that warm step for config-only or offline setup.
@@ -174,11 +174,11 @@ Treat configured source repositories and their source-published `.sv/index.toml`
 Run Pi with global skill discovery disabled and only project skills enabled:
 
 ```bash
-sv run -- <pi args>
-sv run -- --model fast
+sv run pi <pi args>
+sv run pi --model fast
 ```
 
-`sv run` requires the `pi` executable on your `PATH`. Before launching Pi, `sv` rejects symlinked project skill paths and nested symlinks inside project skill folders so Pi is not pointed at files outside `.pi/skills`. Use `--` before Pi options so they are forwarded to Pi instead of parsed by `sv`.
+`sv run` requires the `pi` executable on your `PATH`. Before launching Pi, `sv` rejects symlinked project skill paths and nested symlinks inside project skill folders so Pi is not pointed at files outside `.pi/skills`. It launches `pi --no-skills --skill .pi/skills` followed by forwarded Pi arguments.
 
 ## Source repo layout
 

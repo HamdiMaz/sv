@@ -58,7 +58,7 @@ sv update
 ## 5. Run Pi with project skills only
 
 ```bash
-sv run -- <pi args>
+sv run pi <pi args>
 ```
 
 This validates `.pi/skills` for symlinks and bounded skill trees, then launches Pi as:
