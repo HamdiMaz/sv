@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import hashlib
@@ -97,8 +98,8 @@ from sv.terminal import escape_terminal_controls
 from sv.tomlutil import load_toml_document
 from sv.ui import (
     CellWidths,
-    LoadingReporter,
     DetailLine,
+    LoadingReporter,
     browse_tty_table,
     detail_line,
     format_plain_table as format_table,
@@ -1273,6 +1274,9 @@ def _catalog_for_source_command(
             refresh_entry_on_body_miss if allow_source_fallback else None
         ),
         warn=warn,
+        source_materialization=lambda entry: _source_materialization_loading_context(
+            loading_reporter, entry
+        ),
     )
 
 
@@ -2412,6 +2416,28 @@ def _source_refresh_loading_message(repos: Sequence[RepoConfig]) -> str:
         repo_id = _escape_control_characters(repos[0].id)
         return f"Refreshing source repo {repo_id}"
     return f"Refreshing {len(repos)} source repos"
+
+
+_LOCAL_SOURCE_BACKENDS = {"local-cache", "git-local", "git-local-source"}
+
+
+def _source_backend_is_local(source_backend: str) -> bool:
+    backend = source_backend.removeprefix("cache:")
+    return backend in _LOCAL_SOURCE_BACKENDS
+
+
+def _source_materialization_loading_message(entry: SourceSkill) -> str:
+    reference = _escape_control_characters(entry.qualified_reference)
+    return f"Materializing source skill {reference}"
+
+
+def _source_materialization_loading_context(
+    loading_reporter: LoadingReporter | None,
+    entry: SourceSkill,
+) -> AbstractContextManager[None]:
+    if loading_reporter is None or _source_backend_is_local(entry.source_backend):
+        return nullcontext()
+    return loading_reporter.operation(_source_materialization_loading_message(entry))
 
 
 def _escape_output_path(path: Path) -> str:
