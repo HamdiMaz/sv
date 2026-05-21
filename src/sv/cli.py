@@ -14,7 +14,7 @@ import threading
 from typing import Any
 import unicodedata
 
-from sv.agents import PiAdapter
+from sv.agents import PiAdapter, project_agent_for
 from sv.catalog import (
     SourceSkill,
     build_source_catalog,
@@ -3095,7 +3095,7 @@ def _format_add_result(result: AddSkillResult) -> str:
     )
     target = _escape_output_path(result.target)
     source = f" from {requested_source}" if requested_source else ""
-    skill_label = _result_skill_label(result.target_kind)
+    skill_label = _result_skill_label(result.target_kind, result.target_agent)
     if result.status == "exists":
         message = (
             f"{skill_label.capitalize()} '{result.skill}' already exists at {target}"
@@ -3124,16 +3124,16 @@ def _print_add_result(result: AddSkillResult) -> None:
     print(_format_add_result(result))
 
 
-def _result_skill_label(target_kind: str) -> str:
+def _result_skill_label(target_kind: str, target_agent: str | None = "pi") -> str:
     if target_kind == "skill-vault":
         return "vault skill"
-    return "Pi skill"
+    return project_agent_for(target_agent or "pi").skill_label
 
 
-def _result_skills_label(target_kind: str) -> str:
+def _result_skills_label(target_kind: str, target_agent: str | None = "pi") -> str:
     if target_kind == "skill-vault":
         return "vault skills"
-    return "Pi skills"
+    return project_agent_for(target_agent or "pi").skills_label
 
 
 def _handle_remove(
@@ -3378,7 +3378,7 @@ def _same_manifest_target(first: ManifestEntry, second: ManifestEntry) -> bool:
 def _print_remove_result(result: RemoveSkillResult) -> None:
     target = _escape_output_path(result.target)
     print(
-        f"Removed {_result_skill_label(result.target_kind)} '{result.skill}' from {target}"
+        f"Removed {_result_skill_label(result.target_kind, result.target_agent)} '{result.skill}' from {target}"
     )
 
 
@@ -3884,8 +3884,8 @@ def _handle_update(
 
 
 def _print_update_result(result: SyncResult) -> None:
-    skill_label = _result_skill_label(result.target_kind)
-    skills_label = _result_skills_label(result.target_kind)
+    skill_label = _result_skill_label(result.target_kind, result.target_agent)
+    skills_label = _result_skills_label(result.target_kind, result.target_agent)
     if result.no_skills_dir:
         print(f"No {skills_label} found to update.")
         return
@@ -3918,8 +3918,8 @@ def _print_update_result(result: SyncResult) -> None:
 
 
 def _print_sync_result(result: SyncResult) -> None:
-    skill_label = _result_skill_label(result.target_kind)
-    skills_label = _result_skills_label(result.target_kind)
+    skill_label = _result_skill_label(result.target_kind, result.target_agent)
+    skills_label = _result_skills_label(result.target_kind, result.target_agent)
     if result.no_skills_dir:
         print(f"No {skills_label} found to sync.")
         return

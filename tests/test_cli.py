@@ -10,7 +10,7 @@ import sv.process as process_module
 from sv.catalog import SourceSkill
 from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, handle
 from sv.errors import SvError
-from sv.project import AddSkillResult, SyncResult, SyncSkip
+from sv.project import AddSkillResult, RemoveSkillResult, SyncResult, SyncSkip
 from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
@@ -935,6 +935,49 @@ def test_print_sync_result_escapes_manifest_repo_ids(capsys):
     output = capsys.readouterr().out
     assert_no_raw_control_characters(output)
     assert "Bad\\x1b[2JRepo" in output
+
+
+def test_project_agent_result_formatting_uses_result_target_agent_label(
+    tmp_path: Path, capsys
+):
+    _print_add_result(
+        AddSkillResult(
+            skill="alpha",
+            target=tmp_path / "project" / ".claude" / "skills" / "alpha",
+            status="added",
+            target_agent="claude",
+        )
+    )
+    cli_module._print_remove_result(
+        RemoveSkillResult(
+            skill="beta",
+            target=tmp_path / "project" / ".agents" / "skills" / "beta",
+            target_agent="agents",
+        )
+    )
+    _print_sync_result(
+        SyncResult(
+            updated=["gamma"],
+            skipped=[],
+            backfilled=[],
+            target_agent="claude",
+        )
+    )
+    cli_module._print_update_result(
+        SyncResult(
+            updated=["delta"],
+            skipped=[],
+            backfilled=[],
+            target_agent="agents",
+        )
+    )
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"Added Claude skill 'alpha' to {tmp_path}/project/.claude/skills/alpha",
+        f"Removed Agents skill 'beta' from {tmp_path}/project/.agents/skills/beta",
+        "Synced Claude skill 'gamma'.",
+        "Updated Agents skill 'delta'.",
+    ]
 
 
 def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path, run_sv):

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 import os
 import shutil
@@ -817,6 +818,25 @@ def test_sync_project_skills_cleans_prepared_temps_when_one_prepare_fails(
 
     assert not (project_skills / "alpha" / "notes.md").exists()
     assert not (project_skills / "beta" / "notes.md").exists()
+    assert_no_partial_sv_dirs(project_skills)
+
+
+def test_sync_project_agent_skills_uses_agent_label_when_prepare_fails(
+    tmp_path: Path,
+) -> None:
+    project_skills = tmp_path / "project" / ".claude" / "skills"
+    source_skill = make_source_skill(tmp_path / "source", "beta")
+    add_project_agent_skill(source_skill, project_skills, "claude")
+    failing_source_skill = replace(
+        source_skill,
+        _materializer=lambda destination: (_ for _ in ()).throw(
+            SvError("simulated materialization failure")
+        ),
+    )
+
+    with pytest.raises(SvError, match="Failed to sync Claude skill 'beta'"):
+        sync_project_agent_skills([failing_source_skill], project_skills, "claude")
+
     assert_no_partial_sv_dirs(project_skills)
 
 

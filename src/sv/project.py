@@ -1556,7 +1556,10 @@ def _materialize_entry_for_replace(
     target: Path,
     target_style: _TargetStyle = _PI_TARGET,
 ) -> _MaterializedSkillMetadata:
-    if target_style.target_kind == _PI_TARGET.target_kind:
+    if (
+        target_style.target_kind == _PI_TARGET.target_kind
+        and target_style.target_agent == _PI_TARGET.target_agent
+    ):
         error_message = f"Failed to sync skill '{target.name}'"
     else:
         error_message = f"Failed to sync {target_style.skill_label} '{target.name}'"
@@ -1576,7 +1579,10 @@ def _replace_with_materialized_entry(
     """Replace target with materialized source while preserving target on failure."""
     temp_target = _sync_temp_target(target)
     backup_target = target.with_name(f".{target.name}.sv-sync-backup")
-    if target_style.target_kind == _PI_TARGET.target_kind:
+    if (
+        target_style.target_kind == _PI_TARGET.target_kind
+        and target_style.target_agent == _PI_TARGET.target_agent
+    ):
         error_message = f"Failed to sync skill '{target.name}'"
     else:
         error_message = f"Failed to sync {target_style.skill_label} '{target.name}'"
