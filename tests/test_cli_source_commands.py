@@ -528,6 +528,7 @@ def test_list_and_add_from_local_git_source(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
     capsys.readouterr()
 

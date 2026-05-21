@@ -49,6 +49,28 @@ def _manifest_entry(entry: SourceSkill) -> ManifestEntry:
     )
 
 
+def test_existing_pi_project_without_default_still_adds_to_pi_when_pi_folder_exists(
+    tmp_path: Path,
+):
+    source_root = tmp_path / "source"
+    entry = _write_source_skill(
+        source_root,
+        "alpha",
+        repo_id="Org/Skills",
+        notes="alpha from source\n",
+    )
+    project = tmp_path / "project"
+    (project / ".pi").mkdir(parents=True)
+    adapter = PiAdapter()
+
+    result = add_project_skill(entry, adapter.project_skill_dir(project))
+
+    assert result.target == project / ".pi" / "skills" / "alpha"
+    assert result.target_agent == "pi"
+    manifest = load_manifest(project / ".pi" / "skills")
+    assert manifest["alpha"].target_agent == "pi"
+
+
 def test_pi_project_add_and_remove_contract_targets_project_pi_skills_dir(tmp_path: Path):
     adapter = PiAdapter()
     project = tmp_path / "project"

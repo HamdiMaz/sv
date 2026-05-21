@@ -592,9 +592,9 @@ def test_cli_project_and_vault_status_entry_filters_and_symlink_rejections(tmp_p
         },
     )
     with pytest.raises(SvError, match="symlinked Pi skill"):
-        cli_module._project_status_entries(project_skills)
+        cli_module._project_status_entries(project_skills, "pi")
     (project_skills / "linked").unlink()
-    project_entries = cli_module._project_status_entries(project_skills)
+    project_entries = cli_module._project_status_entries(project_skills, "pi")
     assert [
         (entry.name, entry.target_missing, entry.target_invalid)
         for entry in project_entries

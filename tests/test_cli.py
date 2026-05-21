@@ -22,6 +22,7 @@ from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
     display_width,
+    make_catalog_source_skill,
     parse_sv,
 )
 
@@ -1392,24 +1393,6 @@ def test_add_qualified_repo_id_with_control_characters_does_not_touch_source_rep
     assert "\x1b" not in message
 
 
-def _cli_source_skill(tmp_path: Path, name: str = "alpha") -> SourceSkill:
-    source = tmp_path / "source"
-    skill_dir = source / "skills" / name
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: {name.title()} skill.\n---\n"
-    )
-    (skill_dir / "notes.md").write_text(f"{name} source\n")
-    return SourceSkill(
-        name=name,
-        description=f"{name.title()} skill.",
-        repo_id="Org/Skills",
-        repo_url="https://github.com/Org/Skills.git",
-        repo_path=source,
-        source_path=skill_dir,
-    )
-
-
 def _managed_entry_for_agent(
     name: str, agent: str, repo_id: str = "Org/Skills"
 ) -> ManifestEntry:
@@ -1426,9 +1409,29 @@ def _managed_entry_for_agent(
     )
 
 
+def test_cli_existing_pi_folder_infers_pi_and_preserves_legacy_behavior(
+    tmp_path: Path, capsys
+):
+    project = tmp_path / "project"
+    (project / ".pi").mkdir(parents=True)
+    entry = make_catalog_source_skill(tmp_path)
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha").is_dir()
+    assert load_manifest_document(project / ".pi" / "skills").default_agent == "pi"
+
+
 def test_add_uses_manifest_default_agent(tmp_path: Path, capsys):
     project = tmp_path / "project"
-    entry = _cli_source_skill(tmp_path)
+    entry = make_catalog_source_skill(tmp_path)
     save_manifest_document(
         project / ".pi" / "skills",
         ManifestDocument(default_agent="claude", skills={}),
@@ -1455,8 +1458,8 @@ def test_add_uses_manifest_default_agent(tmp_path: Path, capsys):
 
 def test_add_all_uses_manifest_default_agent(tmp_path: Path, capsys):
     project = tmp_path / "project"
-    alpha = _cli_source_skill(tmp_path, "alpha")
-    beta = _cli_source_skill(tmp_path, "beta")
+    alpha = make_catalog_source_skill(tmp_path, "alpha")
+    beta = make_catalog_source_skill(tmp_path, "beta")
     save_manifest_document(
         project / ".pi" / "skills",
         ManifestDocument(default_agent="claude", skills={}),
@@ -1605,7 +1608,7 @@ def test_remove_all_removes_only_default_agent_managed_skills(tmp_path: Path, ru
 
 def test_sync_uses_only_default_agent(tmp_path: Path):
     project = tmp_path / "project"
-    source_entry = _cli_source_skill(tmp_path)
+    source_entry = make_catalog_source_skill(tmp_path)
     save_manifest_document(
         project / ".pi" / "skills",
         ManifestDocument(default_agent="claude", skills={}),
@@ -1634,7 +1637,7 @@ def test_sync_uses_only_default_agent(tmp_path: Path):
 
 def test_update_uses_only_default_agent(tmp_path: Path, monkeypatch):
     project = tmp_path / "project"
-    source_entry = _cli_source_skill(tmp_path)
+    source_entry = make_catalog_source_skill(tmp_path)
     paths = cli_module.SvPaths.from_home(tmp_path / "home")
     save_manifest_document(
         project / ".pi" / "skills",
@@ -1872,7 +1875,7 @@ def test_add_infers_single_existing_agent_folder_and_persists_default(
 ):
     project = tmp_path / "project"
     (project / ".agents").mkdir(parents=True)
-    entry = _cli_source_skill(tmp_path)
+    entry = make_catalog_source_skill(tmp_path)
 
     exit_code = cli_module._handle_add(
         "alpha",
@@ -1894,7 +1897,7 @@ def test_add_infers_single_existing_agent_folder_and_persists_default(
 def test_add_non_tty_fails_when_agent_selection_required(tmp_path: Path):
     project = tmp_path / "project"
     project.mkdir()
-    entry = _cli_source_skill(tmp_path)
+    entry = make_catalog_source_skill(tmp_path)
 
     with pytest.raises(SvError, match="sv default pi"):
         cli_module._handle_add(
@@ -1914,7 +1917,7 @@ def test_add_non_tty_fails_when_multiple_agent_folders_exist(tmp_path: Path):
     project = tmp_path / "project"
     (project / ".pi").mkdir(parents=True)
     (project / ".claude").mkdir()
-    entry = _cli_source_skill(tmp_path)
+    entry = make_catalog_source_skill(tmp_path)
 
     with pytest.raises(SvError, match="sv default pi"):
         cli_module._handle_add(
@@ -1934,7 +1937,7 @@ def test_add_interactive_agent_selection_persists_default(
 ):
     project = tmp_path / "project"
     project.mkdir()
-    entry = _cli_source_skill(tmp_path)
+    entry = make_catalog_source_skill(tmp_path)
 
     monkeypatch.setattr(
         cli_module, "_can_browse_tty", lambda stdin=None, stdout=None: True

@@ -3,10 +3,11 @@ import os
 
 import pytest
 
+import sv.cli as cli_module
 from sv.catalog import SourceSkill
 from sv.cli import handle
 from sv.errors import SvError
-from tests.helpers import assert_no_traceback, parse_sv
+from tests.helpers import assert_no_traceback, make_catalog_source_skill, parse_sv
 from sv.project import (
     add_project_skill,
     list_project_skills,
@@ -35,6 +36,26 @@ def _make_source_skill(base: Path, name: str = "alpha") -> SourceSkill:
         repo_path=base / "source",
         source_path=source_skill,
     )
+
+
+def test_add_rejects_symlinked_claude_agent_folder(tmp_path: Path):
+    project = tmp_path / "project"
+    outside = tmp_path / "outside-claude"
+    outside.mkdir()
+    project.mkdir()
+    (project / ".claude").symlink_to(outside, target_is_directory=True)
+    entry = make_catalog_source_skill(tmp_path)
+
+    with pytest.raises(SvError, match="symlinked Claude agent folder"):
+        cli_module._handle_add(
+            "alpha",
+            [entry],
+            project,
+            cli_module.PiAdapter(),
+            cli_module._choose_skill,
+        )
+
+    assert not (outside / "skills" / "alpha").exists()
 
 
 def test_add_project_skill_rejects_symlinked_pi_dir(tmp_path: Path) -> None:

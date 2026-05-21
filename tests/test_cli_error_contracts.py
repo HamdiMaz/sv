@@ -306,7 +306,7 @@ def _unsafe_symlinked_pi_path(tmp_path: Path) -> CliErrorScenario:
         args=["remove", "alpha"],
         home=home,
         project=project,
-        expected_fragment="Refusing to use symlinked Pi skills path",
+        expected_fragment="Refusing to use symlinked Pi agent folder",
     )
 
 

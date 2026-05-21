@@ -254,6 +254,7 @@ def test_add_same_repo_duplicates_in_tty_shows_paths_and_accepts_checkbox_select
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
     repo_id = load_config(SvPaths.from_home(home)).repos[0].id
     capsys.readouterr()
@@ -310,6 +311,7 @@ def test_add_alpha_with_chooser_callback_installs_selected_duplicate_source(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
     repo_ids = [repo.id for repo in load_config(SvPaths.from_home(home)).repos]
@@ -359,6 +361,7 @@ def test_add_qualified_alpha_installs_exact_source(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
     repo_ids = [repo.id for repo in load_config(SvPaths.from_home(home)).repos]
