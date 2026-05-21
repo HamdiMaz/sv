@@ -152,7 +152,9 @@ def test_status_reports_manifest_managed_pi_skills_with_missing_targets(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project_skills = project / ".pi" / "skills"
-    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+    save_manifest(
+        project_skills, {"alpha": _manifest_entry("alpha")}, default_agent="pi"
+    )
 
     result = run_sv(
         ["status"],
@@ -222,7 +224,9 @@ def test_status_with_only_missing_targets_does_not_refresh_unreachable_sources(
     )
     project = tmp_path / "project"
     project_skills = project / ".pi" / "skills"
-    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+    save_manifest(
+        project_skills, {"alpha": _manifest_entry("alpha")}, default_agent="pi"
+    )
 
     result = run_sv(["status"], cwd=project, home=home)
 
@@ -471,7 +475,9 @@ def test_status_in_nested_non_git_project_with_empty_manifest_context_is_not_glo
     project.mkdir()
     metadata = project / ".sv"
     metadata.mkdir()
-    (metadata / "manifest.toml").write_text("schema_version = 1\n", encoding="utf-8")
+    (metadata / "manifest.toml").write_text(
+        'schema_version = 1\ndefault_agent = "pi"\n', encoding="utf-8"
+    )
     nested = project / "src" / "package"
     nested.mkdir(parents=True)
 
@@ -821,6 +827,7 @@ def test_status_in_empty_project_does_not_refresh_unreachable_sources(
         git_runner=default_runner,
     )
     assert add_result.exit_code == 0
+    (project / ".pi").mkdir()
 
     result = run_sv(["status"], cwd=project, home=home, git_runner=default_runner)
 

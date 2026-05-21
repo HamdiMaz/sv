@@ -247,7 +247,7 @@ def test_add_from_git_subdirectory_targets_repo_root(tmp_path, run_sv):
 def test_add_missing_skill_fails_without_git_or_project_skill_dir(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
-    project.mkdir()
+    (project / ".pi").mkdir(parents=True)
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text("schema_version = 1\nrepos = []\n")

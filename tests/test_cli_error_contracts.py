@@ -164,7 +164,7 @@ def _malformed_config(tmp_path: Path) -> CliErrorScenario:
 def _missing_skill(tmp_path: Path) -> CliErrorScenario:
     home = tmp_path / "home"
     project = tmp_path / "project"
-    project.mkdir()
+    (project / ".pi").mkdir(parents=True)
     _write_config(home, "schema_version = 1\nrepos = []\n")
     return CliErrorScenario(
         args=["add", "missing"],

@@ -183,6 +183,7 @@ def test_remove_from_git_subdirectory_targets_repo_root_manifest(
 def test_remove_interactive_skills_with_no_projects_skills_does_nothing_without_git(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
+    (project / ".pi").mkdir(parents=True)
 
     result = run_sv(
         ["remove", "-l"],

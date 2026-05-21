@@ -166,6 +166,86 @@ def test_resolve_active_project_agent_rejects_regular_file_agent_folder(
     assert not (project / ".sv" / "manifest.toml").exists()
 
 
+def test_resolve_active_project_agent_does_not_infer_manifest_agent_without_default(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent=None,
+            skills={
+                "alpha": ManifestEntry(
+                    name="alpha",
+                    repo_id="Org/Skills",
+                    repo_url="https://github.com/Org/Skills.git",
+                    source_path="skills/alpha",
+                    description="Alpha skill.",
+                    target_kind="project-agent",
+                    target_agent="claude",
+                )
+            },
+        ),
+    )
+
+    with pytest.raises(SvError, match="Run 'sv default pi'.*sv default claude"):
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
+
+
+def test_resolve_active_project_agent_rejects_single_folder_with_symlinked_skills_path(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    target = tmp_path / "outside-skills"
+    (project / ".claude").mkdir(parents=True)
+    target.mkdir()
+    (project / ".claude" / "skills").symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Claude skills path"):
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
+
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+@pytest.mark.parametrize(
+    ("skills_setup", "expected"),
+    [
+        ("symlink", "Refusing to use symlinked Claude skills path"),
+        ("file", "Claude skills path"),
+    ],
+)
+def test_default_set_rejects_invalid_agent_skills_path_and_preserves_manifest(
+    tmp_path: Path, run_sv, skills_setup: str, expected: str
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    claude = project / ".claude"
+    claude.mkdir(parents=True)
+    if skills_setup == "symlink":
+        target = tmp_path / "outside-skills"
+        target.mkdir()
+        (claude / "skills").symlink_to(target, target_is_directory=True)
+    else:
+        (claude / "skills").write_text("not a directory", encoding="utf-8")
+    project_skills = project / ".pi" / "skills"
+    save_manifest_document(
+        project_skills,
+        ManifestDocument(default_agent="pi", skills={}),
+    )
+
+    result = run_sv(["default", "claude"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert expected in result.stderr
+    if skills_setup == "file":
+        assert "is not a directory" in result.stderr
+    assert load_manifest_document(project_skills).default_agent == "pi"
+
+
 def test_default_set_from_home_global_manifest_refuses_to_overwrite_sources(
     tmp_path: Path, run_sv
 ):
@@ -1429,6 +1509,20 @@ def test_cli_existing_pi_folder_infers_pi_and_preserves_legacy_behavior(
     assert load_manifest_document(project / ".pi" / "skills").default_agent == "pi"
 
 
+def test_add_requires_default_agent_before_loading_sources(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["add", "alpha"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "No default agent is configured" in result.stderr
+    assert "sv default pi" in result.stderr
+    assert "No skill source repos are configured" not in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
 def test_add_uses_manifest_default_agent(tmp_path: Path, capsys):
     project = tmp_path / "project"
     entry = make_catalog_source_skill(tmp_path)
@@ -1503,6 +1597,49 @@ def test_status_infers_and_persists_single_existing_agent_folder(
     assert "Agents skills" in result.stdout
     document = load_manifest_document(project / ".pi" / "skills")
     assert document.default_agent == "agents"
+
+
+@pytest.mark.parametrize(
+    ("args", "label"),
+    [
+        (["remove", "alpha"], "remove"),
+        (["remove", "--all", "--yes"], "remove --all"),
+        (["remove", "-l", "--yes"], "remove -l"),
+        (["status"], "status"),
+        (["sync"], "sync"),
+        (["update"], "update"),
+    ],
+)
+def test_project_lifecycle_commands_require_default_agent_without_supported_folders(
+    tmp_path: Path, run_sv, args: list[str], label: str
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+
+    result = run_sv(args, cwd=project, home=home)
+
+    assert result.exit_code == 1, label
+    assert "No default agent is configured" in result.stderr
+    assert "sv default pi" in result.stderr
+    assert "No skill source repos are configured" not in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_lifecycle_command_rejects_multiple_supported_folders_without_default(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / ".pi").mkdir()
+    (project / ".claude").mkdir()
+
+    result = run_sv(["status"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "No default agent is configured" in result.stderr
+    assert "sv default pi" in result.stderr
 
 
 def test_status_reports_only_default_agent_entries(tmp_path: Path, run_sv):
@@ -1850,8 +1987,8 @@ def test_remove_interactive_resolves_default_agent_once(tmp_path: Path, monkeypa
     )
     resolver_calls = []
 
-    def resolve_once(context, *, allow_pi_fallback):
-        resolver_calls.append((context.repo_root, allow_pi_fallback))
+    def resolve_once(context):
+        resolver_calls.append(context.repo_root)
         return cli_module.ActiveProjectAgent("claude", project / ".claude" / "skills")
 
     monkeypatch.setattr(cli_module, "_resolve_active_project_agent", resolve_once)
@@ -1865,7 +2002,7 @@ def test_remove_interactive_resolves_default_agent_once(tmp_path: Path, monkeypa
     )
 
     assert exit_code == 0
-    assert len(resolver_calls) == 1
+    assert resolver_calls == [project]
     assert claude_skill.exists()
     assert "following sv-managed Claude skills" in capsys.readouterr().out
 
@@ -2023,7 +2160,7 @@ def test_remove_interactive_removes_selected_project_skills_without_source_repo(
 def test_remove_interactive_reports_no_project_skills(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
-    project.mkdir()
+    (project / ".pi").mkdir(parents=True)
 
     exit_code = handle(parse(["remove", "-l"]), cwd=project, home=home)
 

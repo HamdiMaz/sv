@@ -589,6 +589,8 @@ def handle(
             if args.interactive:
                 if args.all or args.skill is not None or args.repo_id is not None:
                     raise SvError("Use -l by itself, or provide a skill name/--all.")
+                if not local_context.is_skill_vault:
+                    _resolve_active_project_agent(local_context)
                 add_policy = _cache_policy_from_args(args)
                 config = _load_config_for_source_command(paths)
                 catalog = _catalog_for_source_command(
@@ -615,6 +617,8 @@ def handle(
             if args.all and args.skill is not None:
                 raise SvError("Use either a skill name or --all, not both.")
             if args.all:
+                if not local_context.is_skill_vault:
+                    _resolve_active_project_agent(local_context)
                 add_policy = _cache_policy_from_args(args)
                 config = _load_config_for_source_command(paths)
                 selected_repos = config.repos
@@ -648,6 +652,8 @@ def handle(
                 raise SvError("Specify a skill name or use --all.")
 
             _validate_skill_reference(args.skill)
+            if not local_context.is_skill_vault:
+                _resolve_active_project_agent(local_context)
             add_policy = _cache_policy_from_args(args)
             config = _load_config_for_source_command(paths)
             catalog = _catalog_for_source_command(
@@ -745,6 +751,8 @@ def handle(
 
         if args.command == "sync":
             local_context = _detect_local_context(cwd)
+            if not local_context.is_skill_vault:
+                _resolve_active_project_agent(local_context)
             config = _load_config_for_source_command(paths)
             sync_policy = _cache_policy_from_args(
                 args,
@@ -892,9 +900,7 @@ def _handle_default(
     return 0
 
 
-def _resolve_active_project_agent(
-    context: LocalContext, *, allow_pi_fallback: bool = False
-) -> ActiveProjectAgent:
+def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
     document = _load_project_manifest_document(context)
     if document.default_agent is not None:
         agent = project_agent_for(document.default_agent)
@@ -906,29 +912,11 @@ def _resolve_active_project_agent(
     existing_agents = _existing_project_agent_folders(context.repo_root)
     if len(existing_agents) == 1:
         agent = existing_agents[0]
+        _validate_project_agent_folder(context.repo_root, agent)
         _save_project_manifest_document(
             context,
             ManifestDocument(default_agent=agent.name, skills=document.skills),
         )
-        return ActiveProjectAgent(
-            agent.name, agent.project_skill_dir(context.repo_root)
-        )
-
-    manifest_agents = {
-        entry.target_agent
-        for entry in document.skills.values()
-        if entry.target_kind == "project-agent" and entry.target_agent is not None
-    }
-    if len(manifest_agents) == 1:
-        agent = project_agent_for(next(iter(manifest_agents)))
-        _validate_project_agent_folder(context.repo_root, agent)
-        return ActiveProjectAgent(
-            agent.name, agent.project_skill_dir(context.repo_root)
-        )
-
-    if allow_pi_fallback:
-        agent = project_agent_for("pi")
-        _validate_project_agent_folder(context.repo_root, agent)
         return ActiveProjectAgent(
             agent.name, agent.project_skill_dir(context.repo_root)
         )
@@ -973,6 +961,17 @@ def _validate_project_agent_folder(project_root: Path, agent: ProjectAgent) -> N
         raise SvError(
             f"Existing {agent.display_name} agent folder at "
             f"{_escape_output_path(folder)} is not a directory."
+        )
+    skills_path = agent.project_skill_dir(project_root)
+    if skills_path.is_symlink():
+        raise SvError(
+            f"Refusing to use symlinked {agent.display_name} skills path at "
+            f"{_escape_output_path(skills_path)}."
+        )
+    if skills_path.exists() and not skills_path.is_dir():
+        raise SvError(
+            f"Existing {agent.display_name} skills path at "
+            f"{_escape_output_path(skills_path)} is not a directory."
         )
 
 
@@ -3385,7 +3384,7 @@ def _handle_remove(
     if context.is_skill_vault:
         result = remove_vault_skill(skill, context.vault_skills_dir)
     else:
-        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        active_agent = _resolve_active_project_agent(context)
         result = remove_project_agent_skill(
             skill,
             _project_skills_dir(context, active_agent),
@@ -3407,7 +3406,7 @@ def _handle_remove_all(
     active_agent = (
         None
         if context.is_skill_vault
-        else _resolve_active_project_agent(context, allow_pi_fallback=True)
+        else _resolve_active_project_agent(context)
     )
     project_skills_dir = _removal_skills_dir(adapter, context, active_agent)
     entries = _managed_removal_entries(project_skills_dir, context, active_agent)
@@ -3446,7 +3445,7 @@ def _handle_remove_interactive(
     active_agent = (
         None
         if context.is_skill_vault
-        else _resolve_active_project_agent(context, allow_pi_fallback=True)
+        else _resolve_active_project_agent(context)
     )
     project_skills_dir = _removal_skills_dir(adapter, context, active_agent)
     entries = _managed_removal_entries(project_skills_dir, context, active_agent)
@@ -3500,7 +3499,7 @@ def _removal_skills_dir(
     if context.is_skill_vault:
         return context.vault_skills_dir
     if active_agent is None:
-        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        active_agent = _resolve_active_project_agent(context)
     return _project_skills_dir(context, active_agent)
 
 
@@ -3512,7 +3511,7 @@ def _managed_removal_entries(
     if context.is_skill_vault:
         return _vault_status_entries(project_skills_dir)
     if active_agent is None:
-        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        active_agent = _resolve_active_project_agent(context)
     return _project_status_entries(project_skills_dir, active_agent.name)
 
 
@@ -3528,7 +3527,7 @@ def _context_target_agent(
     if context.is_skill_vault:
         return None
     if active_agent is None:
-        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        active_agent = _resolve_active_project_agent(context)
     return active_agent.name
 
 
@@ -3702,7 +3701,7 @@ def _handle_sync(
     if context.is_skill_vault:
         result = sync_vault_skills(catalog, context.vault_skills_dir)
     else:
-        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        active_agent = _resolve_active_project_agent(context)
         result = sync_project_agent_skills(
             catalog,
             _project_skills_dir(context, active_agent),
@@ -3747,7 +3746,7 @@ def _handle_status(
     ):
         return _handle_global_status(paths)
 
-    active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+    active_agent = _resolve_active_project_agent(context)
     project_skills_dir = _project_skills_dir(context, active_agent)
     _reject_symlinked_status_project_skills_path(project_skills_dir, active_agent.name)
     entries = _project_status_entries(project_skills_dir, active_agent.name)
@@ -4175,6 +4174,10 @@ def _handle_update(
     cache_policy: CachePolicy,
     context: LocalContext | None = None,
 ) -> int:
+    context = _detect_local_context(cwd) if context is None else context
+    active_agent = (
+        None if context.is_skill_vault else _resolve_active_project_agent(context)
+    )
     config = _load_config_for_source_command(paths)
     print("Updating source repos...")
     catalog = _catalog_for_source_command(
@@ -4186,13 +4189,12 @@ def _handle_update(
         lightweight_discovery=True,
         allow_partial_failures=False,
     )
-    context = _detect_local_context(cwd) if context is None else context
     _validate_local_index_refresh_config(context)
     if context.is_skill_vault:
         print("Updating vault skills...")
         result = update_vault_skills(catalog, context.vault_skills_dir)
     else:
-        active_agent = _resolve_active_project_agent(context, allow_pi_fallback=True)
+        assert active_agent is not None
         print("Updating project skills...")
         result = update_project_agent_skills(
             catalog,
