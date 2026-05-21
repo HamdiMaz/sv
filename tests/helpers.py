@@ -6,6 +6,8 @@ import subprocess
 from typing import TYPE_CHECKING
 import unicodedata
 
+from sv.catalog import SourceSkill
+
 import pytest
 
 if TYPE_CHECKING:
@@ -119,6 +121,24 @@ def write_source_skill(source: Path, name: str, description: str, body: str) -> 
         f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n"
     )
     (skill_dir / "notes.md").write_text(body)
+
+
+def make_catalog_source_skill(tmp_path: Path, name: str = "alpha") -> SourceSkill:
+    source = tmp_path / "source"
+    skill_dir = source / "skills" / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {name.title()} skill.\n---\n"
+    )
+    (skill_dir / "notes.md").write_text(f"{name} source\n")
+    return SourceSkill(
+        name=name,
+        description=f"{name.title()} skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=source,
+        source_path=skill_dir,
+    )
 
 
 def make_source_repo(tmp_path: Path, name: str = "skill-source") -> Path:

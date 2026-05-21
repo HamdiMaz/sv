@@ -94,11 +94,14 @@ def test_status_in_normal_project_shows_managed_pi_skill_states_and_excludes_man
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     run_git(["init"], project)
     configure_source(source, project, home)
 
     for skill in ("alpha", "beta", "gamma"):
-        add_result = run_sv(["add", skill], cwd=project, home=home, git_runner=default_runner)
+        add_result = run_sv(
+            ["add", skill], cwd=project, home=home, git_runner=default_runner
+        )
         assert add_result.exit_code == 0
 
     manual = project / ".pi" / "skills" / "manual"
@@ -118,7 +121,9 @@ def test_status_in_normal_project_shows_managed_pi_skill_states_and_excludes_man
 
     nested = project / "src" / "package"
     nested.mkdir(parents=True)
-    result = run_sv(["status", "--refresh"], cwd=nested, home=home, git_runner=default_runner)
+    result = run_sv(
+        ["status", "--refresh"], cwd=nested, home=home, git_runner=default_runner
+    )
 
     assert result.exit_code == 0
     assert "Project sv-managed Pi skills" in result.stdout
@@ -147,7 +152,9 @@ def test_status_reports_manifest_managed_pi_skills_with_missing_targets(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project_skills = project / ".pi" / "skills"
-    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+    save_manifest(
+        project_skills, {"alpha": _manifest_entry("alpha")}, default_agent="pi"
+    )
 
     result = run_sv(
         ["status"],
@@ -201,7 +208,6 @@ def test_status_reports_manifest_managed_pi_skills_with_invalid_targets(
     assert_no_raw_control_characters(result.stderr)
 
 
-
 def test_status_with_only_missing_targets_does_not_refresh_unreachable_sources(
     tmp_path: Path, run_sv
 ):
@@ -218,7 +224,9 @@ def test_status_with_only_missing_targets_does_not_refresh_unreachable_sources(
     )
     project = tmp_path / "project"
     project_skills = project / ".pi" / "skills"
-    save_manifest(project_skills, {"alpha": _manifest_entry("alpha")})
+    save_manifest(
+        project_skills, {"alpha": _manifest_entry("alpha")}, default_agent="pi"
+    )
 
     result = run_sv(["status"], cwd=project, home=home)
 
@@ -226,7 +234,6 @@ def test_status_with_only_missing_targets_does_not_refresh_unreachable_sources(
     assert "Project sv-managed Pi skills" in result.stdout
     assert "missing" in result.stdout
     assert result.stderr == ""
-
 
 
 def test_status_reports_manifest_managed_vault_skills_with_missing_targets(
@@ -269,12 +276,16 @@ def test_status_in_skill_vault_shows_vault_states_index_and_readme_freshness(
 
     home = tmp_path / "home"
     vault = tmp_path / "vault"
-    result = run_sv(["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner)
+    result = run_sv(
+        ["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner
+    )
     assert result.exit_code == 0
     configure_source(source, vault, home)
 
     for skill in ("alpha", "beta", "gamma"):
-        add_result = run_sv(["add", skill], cwd=vault, home=home, git_runner=default_runner)
+        add_result = run_sv(
+            ["add", skill], cwd=vault, home=home, git_runner=default_runner
+        )
         assert add_result.exit_code == 0
 
     (vault / "skills" / "alpha" / "notes.md").write_text(
@@ -287,7 +298,9 @@ def test_status_in_skill_vault_shows_vault_states_index_and_readme_freshness(
 
     nested = vault / "docs" / "examples"
     nested.mkdir(parents=True)
-    result = run_sv(["status", "--refresh"], cwd=nested, home=home, git_runner=default_runner)
+    result = run_sv(
+        ["status", "--refresh"], cwd=nested, home=home, git_runner=default_runner
+    )
 
     assert result.exit_code == 0
     assert "Skill-vault sv-managed skills" in result.stdout
@@ -338,12 +351,12 @@ def test_init_from_git_subdirectory_creates_detectable_root_vault(
     assert_no_raw_control_characters(status.stderr)
 
 
-def test_status_in_skill_vault_reports_stale_index_and_readme(
-    tmp_path: Path, run_sv
-):
+def test_status_in_skill_vault_reports_stale_index_and_readme(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     vault = tmp_path / "vault"
-    result = run_sv(["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner)
+    result = run_sv(
+        ["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner
+    )
     assert result.exit_code == 0
 
     manual = vault / "skills" / "manual"
@@ -367,11 +380,12 @@ def test_status_in_skill_vault_freshness_honors_persistent_scan_config(
 ):
     home = tmp_path / "home"
     vault = tmp_path / "vault"
-    result = run_sv(["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner)
+    result = run_sv(
+        ["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner
+    )
     assert result.exit_code == 0
     (vault / ".sv" / "index-config.toml").write_text(
-        "schema_version = 1\n"
-        'exclude_paths = ["skills/draft"]\n',
+        'schema_version = 1\nexclude_paths = ["skills/draft"]\n',
         encoding="utf-8",
     )
     draft = vault / "skills" / "draft"
@@ -393,11 +407,12 @@ def test_status_in_skill_vault_compares_freshness_in_canonical_index_order(
 ):
     home = tmp_path / "home"
     vault = tmp_path / "vault"
-    result = run_sv(["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner)
+    result = run_sv(
+        ["init", str(vault)], cwd=tmp_path, home=home, git_runner=default_runner
+    )
     assert result.exit_code == 0
     (vault / ".sv" / "index-config.toml").write_text(
-        "schema_version = 1\n"
-        'include_paths = ["z-root", "a-root"]\n',
+        'schema_version = 1\ninclude_paths = ["z-root", "a-root"]\n',
         encoding="utf-8",
     )
     alpha = vault / "z-root" / "alpha"
@@ -460,7 +475,9 @@ def test_status_in_nested_non_git_project_with_empty_manifest_context_is_not_glo
     project.mkdir()
     metadata = project / ".sv"
     metadata.mkdir()
-    (metadata / "manifest.toml").write_text("schema_version = 1\n", encoding="utf-8")
+    (metadata / "manifest.toml").write_text(
+        'schema_version = 1\ndefault_agent = "pi"\n', encoding="utf-8"
+    )
     nested = project / "src" / "package"
     nested.mkdir(parents=True)
 
@@ -636,9 +653,7 @@ def test_status_global_context_ignores_project_state_in_global_manifest_path(
     assert_no_traceback(result.stderr)
 
 
-def test_status_outside_git_project_shows_global_source_health(
-    tmp_path: Path, run_sv
-):
+def test_status_outside_git_project_shows_global_source_health(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -715,7 +730,6 @@ def test_status_outside_git_project_shows_unknown_backend_for_legacy_global_stat
     assert_no_raw_control_characters(result.stderr)
 
 
-
 def test_status_without_source_config_still_detects_local_modifications(
     tmp_path: Path, run_sv
 ):
@@ -765,9 +779,7 @@ def test_status_rejects_invalid_manifest_skill_name_before_inspecting_target(
     (project / ".pi" / "skills").mkdir(parents=True)
     outside_target = tmp_path / "outside-target"
     outside_target.mkdir()
-    (project / ".pi" / "outside").symlink_to(
-        outside_target, target_is_directory=True
-    )
+    (project / ".pi" / "outside").symlink_to(outside_target, target_is_directory=True)
 
     result = run_sv(["status"], cwd=project, home=home, git_runner=default_runner)
 
@@ -815,6 +827,7 @@ def test_status_in_empty_project_does_not_refresh_unreachable_sources(
         git_runner=default_runner,
     )
     assert add_result.exit_code == 0
+    (project / ".pi").mkdir()
 
     result = run_sv(["status"], cwd=project, home=home, git_runner=default_runner)
 
@@ -835,13 +848,16 @@ def test_status_uses_fresh_cached_metadata_without_refreshing_source(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
     shutil.rmtree(source / ".git")
 
     def fail_git(args, cwd=None):
-        raise AssertionError(f"plain status with fresh cache must not refresh source: {args}")
+        raise AssertionError(
+            f"plain status with fresh cache must not refresh source: {args}"
+        )
 
     result = run_sv(["status"], cwd=project, home=home, git_runner=fail_git)
 
@@ -866,6 +882,7 @@ def test_status_refresh_flag_refreshes_sources_even_when_metadata_cache_is_fresh
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
@@ -873,7 +890,9 @@ def test_status_refresh_flag_refreshes_sources_even_when_metadata_cache_is_fresh
     run_git(["add", "skills/alpha"], source)
     run_git(["commit", "-m", "update alpha"], source)
 
-    result = run_sv(["status", "--refresh"], cwd=project, home=home, git_runner=default_runner)
+    result = run_sv(
+        ["status", "--refresh"], cwd=project, home=home, git_runner=default_runner
+    )
 
     assert result.exit_code == 0
     assert "alpha" in result.stdout
@@ -884,13 +903,12 @@ def test_status_refresh_flag_refreshes_sources_even_when_metadata_cache_is_fresh
     assert_no_raw_control_characters(result.stderr)
 
 
-def test_status_refreshes_source_when_metadata_cache_is_missing(
-    tmp_path: Path, run_sv
-):
+def test_status_refreshes_source_when_metadata_cache_is_missing(tmp_path: Path, run_sv):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
@@ -919,6 +937,7 @@ def test_status_cached_does_not_refresh_source(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0

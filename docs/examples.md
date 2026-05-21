@@ -51,7 +51,7 @@ sv sync
 ## Run Pi with only project skills
 
 ```bash
-sv run -- <pi args>
+sv run pi <pi args>
 ```
 
 This validates `.pi/skills` for symlinks and bounded skill trees, then launches `pi --no-skills --skill .pi/skills ...` from the current project.

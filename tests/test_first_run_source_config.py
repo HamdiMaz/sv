@@ -27,6 +27,8 @@ def test_commands_fail_helpfully_without_config_in_non_tty(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    if args[0] in {"add", "sync", "update"}:
+        (project / ".pi").mkdir()
 
     def git_runner(git_args, cwd=None):
         raise AssertionError(f"unexpected git call: {git_args}")
@@ -58,6 +60,8 @@ def test_schema_only_config_is_treated_as_first_run_missing_config(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    if args[0] in {"add", "sync", "update"}:
+        (project / ".pi").mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text("schema_version = 1\n")

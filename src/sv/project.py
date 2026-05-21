@@ -7,6 +7,7 @@ import shutil
 import unicodedata
 from typing import Protocol
 
+from sv.agents import project_agent_for
 from sv.config import repo_source_key
 from sv.errors import SvError
 from sv.manifest import ManifestEntry
@@ -58,6 +59,18 @@ _VAULT_TARGET = _TargetStyle(
 )
 
 
+def _project_agent_target(agent_name: str) -> _TargetStyle:
+    agent = project_agent_for(agent_name)
+    return _TargetStyle(
+        target_kind="project-agent",
+        target_agent=agent.name,
+        target_path_prefix=agent.target_path_prefix,
+        skill_label=agent.skill_label,
+        skills_dir_label=agent.skills_dir_label,
+        path_label=agent.path_label,
+    )
+
+
 _MATERIALIZATION = DEFAULT_MATERIALIZATION_ADAPTER
 
 
@@ -73,6 +86,7 @@ class AddSkillResult:
     source_reference: str | None = None
     existing_source_reference: str | None = None
     target_kind: str = _PI_TARGET.target_kind
+    target_agent: str | None = _PI_TARGET.target_agent
 
 
 @dataclass(frozen=True)
@@ -80,6 +94,8 @@ class AddAllSkillsResult:
     """Summary of adding every source skill to a Pi project."""
 
     results: list[AddSkillResult]
+    target_kind: str = _PI_TARGET.target_kind
+    target_agent: str | None = _PI_TARGET.target_agent
 
 
 @dataclass(frozen=True)
@@ -89,6 +105,7 @@ class RemoveSkillResult:
     skill: str
     target: Path
     target_kind: str = _PI_TARGET.target_kind
+    target_agent: str | None = _PI_TARGET.target_agent
 
 
 @dataclass(frozen=True)
@@ -108,6 +125,7 @@ class SyncResult:
     backfilled: list[str]
     no_skills_dir: bool = False
     target_kind: str = _PI_TARGET.target_kind
+    target_agent: str | None = _PI_TARGET.target_agent
 
 
 @dataclass(frozen=True)
@@ -183,10 +201,16 @@ def normalize_skill_name(skill: str) -> str:
     return name
 
 
+def add_project_agent_skill(
+    entry: ProjectSourceSkill, project_skills_dir: Path, agent: str
+) -> AddSkillResult:
+    return _add_skill(entry, project_skills_dir, _project_agent_target(agent))
+
+
 def add_project_skill(
     entry: ProjectSourceSkill, project_skills_dir: Path
 ) -> AddSkillResult:
-    return _add_skill(entry, project_skills_dir, _PI_TARGET)
+    return add_project_agent_skill(entry, project_skills_dir, "pi")
 
 
 def add_vault_skill(
@@ -244,6 +268,7 @@ def _add_skill(
                     else None
                 ),
                 target_kind=target_style.target_kind,
+                target_agent=target_style.target_agent,
             )
 
         metadata = _materialize_entry_for_replace(entry, target, target_style)
@@ -266,6 +291,7 @@ def _add_skill(
             repo_id=entry.repo_id,
             source_reference=_source_reference_for(entry),
             target_kind=target_style.target_kind,
+            target_agent=target_style.target_agent,
         )
 
     metadata = _materialize_entry_for_add(entry, target, target_style)
@@ -290,18 +316,25 @@ def _add_skill(
         repo_id=entry.repo_id,
         source_reference=_source_reference_for(entry),
         target_kind=target_style.target_kind,
+        target_agent=target_style.target_agent,
+    )
+
+
+def add_all_project_agent_skills(
+    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path, agent: str
+) -> AddAllSkillsResult:
+    return _add_all_skills_parallel(
+        catalog,
+        project_skills_dir,
+        _project_agent_target(agent),
+        replace_existing=False,
     )
 
 
 def add_all_project_skills(
     catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
 ) -> AddAllSkillsResult:
-    return _add_all_skills_parallel(
-        catalog,
-        project_skills_dir,
-        _PI_TARGET,
-        replace_existing=False,
-    )
+    return add_all_project_agent_skills(catalog, project_skills_dir, "pi")
 
 
 def add_all_vault_skills(
@@ -361,6 +394,7 @@ def _plan_add_all_skills(
                     else None
                 ),
                 target_kind=target_style.target_kind,
+                target_agent=target_style.target_agent,
             )
             continue
         target_exists = target.exists() or target.is_symlink()
@@ -403,6 +437,7 @@ def _plan_add_all_skills(
                     else None
                 ),
                 target_kind=target_style.target_kind,
+                target_agent=target_style.target_agent,
             )
             continue
         to_prepare.append(
@@ -513,13 +548,16 @@ def _add_all_skills_parallel(
                 repo_id=plan.entry.repo_id,
                 source_reference=_source_reference_for(plan.entry),
                 target_kind=target_style.target_kind,
+                target_agent=target_style.target_agent,
             )
     except Exception:
         _cleanup_prepared_adds(prepared)
         raise
 
     return AddAllSkillsResult(
-        results=[result for result in ordered_results if result is not None]
+        results=[result for result in ordered_results if result is not None],
+        target_kind=target_style.target_kind,
+        target_agent=target_style.target_agent,
     )
 
 
@@ -567,8 +605,14 @@ def _list_skills(project_skills_dir: Path, target_style: _TargetStyle) -> list[s
         ) from exc
 
 
+def remove_project_agent_skill(
+    skill: str, project_skills_dir: Path, agent: str
+) -> RemoveSkillResult:
+    return _remove_skill(skill, project_skills_dir, _project_agent_target(agent))
+
+
 def remove_project_skill(skill: str, project_skills_dir: Path) -> RemoveSkillResult:
-    return _remove_skill(skill, project_skills_dir, _PI_TARGET)
+    return remove_project_agent_skill(skill, project_skills_dir, "pi")
 
 
 def remove_vault_skill(skill: str, vault_skills_dir: Path) -> RemoveSkillResult:
@@ -584,7 +628,9 @@ def _remove_skill(
     _reject_symlinked_project_skill(target, target_style)
     if not target.is_dir():
         if target_style.target_kind == _PI_TARGET.target_kind:
-            raise SvError(f"Pi skill '{skill_name}' was not found in this project.")
+            raise SvError(
+                f"{target_style.skill_label} '{skill_name}' was not found in this project."
+            )
         raise SvError(f"Vault skill '{skill_name}' was not found in this skill-vault.")
 
     original_manifest = ProjectManifestStore(project_skills_dir).load()
@@ -633,14 +679,23 @@ def _remove_skill(
         ) from exc
 
     return RemoveSkillResult(
-        skill=skill_name, target=target, target_kind=target_style.target_kind
+        skill=skill_name,
+        target=target,
+        target_kind=target_style.target_kind,
+        target_agent=target_style.target_agent,
     )
+
+
+def sync_project_agent_skills(
+    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path, agent: str
+) -> SyncResult:
+    return _sync_skills(catalog, project_skills_dir, _project_agent_target(agent))
 
 
 def sync_project_skills(
     catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
 ) -> SyncResult:
-    return _sync_skills(catalog, project_skills_dir, _PI_TARGET)
+    return sync_project_agent_skills(catalog, project_skills_dir, "pi")
 
 
 def sync_vault_skills(
@@ -649,10 +704,16 @@ def sync_vault_skills(
     return _sync_skills(catalog, vault_skills_dir, _VAULT_TARGET)
 
 
+def update_project_agent_skills(
+    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path, agent: str
+) -> SyncResult:
+    return _update_skills(catalog, project_skills_dir, _project_agent_target(agent))
+
+
 def update_project_skills(
     catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
 ) -> SyncResult:
-    return _update_skills(catalog, project_skills_dir, _PI_TARGET)
+    return update_project_agent_skills(catalog, project_skills_dir, "pi")
 
 
 def update_vault_skills(
@@ -661,21 +722,33 @@ def update_vault_skills(
     return _update_skills(catalog, vault_skills_dir, _VAULT_TARGET)
 
 
-def refresh_project_skill_states(
-    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
+def refresh_project_agent_skill_states(
+    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path, agent: str
 ) -> None:
-    """Refresh canonical manifest hash/state fields for managed Pi skills.
+    """Refresh canonical manifest hash/state fields for managed project-agent skills.
 
     This records the latest checked local content hash and deterministic state flags
     without mutating skill folders. Installed hashes are preserved unless a later
     successful install/replacement writes a new manifest entry.
     """
-    _refresh_skill_states(catalog, project_skills_dir, _PI_TARGET)
+    _refresh_skill_states(catalog, project_skills_dir, _project_agent_target(agent))
+
+
+def refresh_project_skill_states(
+    catalog: Sequence[ProjectSourceSkill], project_skills_dir: Path
+) -> None:
+    refresh_project_agent_skill_states(catalog, project_skills_dir, "pi")
+
+
+def refresh_project_agent_skill_local_states(
+    project_skills_dir: Path, agent: str
+) -> None:
+    """Refresh local hash/modified fields for managed project-agent skills only."""
+    _refresh_local_skill_states(project_skills_dir, _project_agent_target(agent))
 
 
 def refresh_project_skill_local_states(project_skills_dir: Path) -> None:
-    """Refresh local hash/modified fields for managed Pi skills only."""
-    _refresh_local_skill_states(project_skills_dir, _PI_TARGET)
+    refresh_project_agent_skill_local_states(project_skills_dir, "pi")
 
 
 def refresh_vault_skill_states(
@@ -703,6 +776,7 @@ def _sync_skills(
             backfilled=[],
             no_skills_dir=True,
             target_kind=target_style.target_kind,
+            target_agent=target_style.target_agent,
         )
 
     by_repo_name_path: dict[tuple[str, str, str], ProjectSourceSkill] = {}
@@ -816,6 +890,7 @@ def _sync_skills(
         backfilled=backfilled,
         no_skills_dir=False,
         target_kind=target_style.target_kind,
+        target_agent=target_style.target_agent,
     )
 
 
@@ -832,6 +907,7 @@ def _update_skills(
             backfilled=[],
             no_skills_dir=True,
             target_kind=target_style.target_kind,
+            target_agent=target_style.target_agent,
         )
 
     manifest = _load_manifest_for_target(project_skills_dir, target_style)
@@ -999,6 +1075,7 @@ def _update_skills(
         backfilled=[],
         no_skills_dir=False,
         target_kind=target_style.target_kind,
+        target_agent=target_style.target_agent,
     )
 
 
@@ -1479,7 +1556,10 @@ def _materialize_entry_for_replace(
     target: Path,
     target_style: _TargetStyle = _PI_TARGET,
 ) -> _MaterializedSkillMetadata:
-    if target_style.target_kind == _PI_TARGET.target_kind:
+    if (
+        target_style.target_kind == _PI_TARGET.target_kind
+        and target_style.target_agent == _PI_TARGET.target_agent
+    ):
         error_message = f"Failed to sync skill '{target.name}'"
     else:
         error_message = f"Failed to sync {target_style.skill_label} '{target.name}'"
@@ -1499,7 +1579,10 @@ def _replace_with_materialized_entry(
     """Replace target with materialized source while preserving target on failure."""
     temp_target = _sync_temp_target(target)
     backup_target = target.with_name(f".{target.name}.sv-sync-backup")
-    if target_style.target_kind == _PI_TARGET.target_kind:
+    if (
+        target_style.target_kind == _PI_TARGET.target_kind
+        and target_style.target_agent == _PI_TARGET.target_agent
+    ):
         error_message = f"Failed to sync skill '{target.name}'"
     else:
         error_message = f"Failed to sync {target_style.skill_label} '{target.name}'"
@@ -1530,10 +1613,6 @@ def _upsert_manifest_entry_for_target(
 ) -> None:
     store = ProjectManifestStore(project_skills_dir)
     entries = store.load()
-    if target_style.target_kind == _PI_TARGET.target_kind:
-        entries[entry.name] = entry
-        store.save(entries)
-        return
     for key, existing_entry in entries.items():
         if existing_entry.name == entry.name and _manifest_entry_matches_target(
             existing_entry, target_style
@@ -1563,11 +1642,6 @@ def _remove_manifest_entry_for_target(
 ) -> None:
     store = ProjectManifestStore(project_skills_dir)
     entries = store.load()
-    if target_style.target_kind == _PI_TARGET.target_kind:
-        if skill_name in entries:
-            del entries[skill_name]
-            store.save(entries)
-        return
     for key, existing_entry in list(entries.items()):
         if existing_entry.name == skill_name and _manifest_entry_matches_target(
             existing_entry, target_style

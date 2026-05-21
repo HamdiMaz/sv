@@ -132,6 +132,7 @@ def test_duplicate_choice_error_has_no_raw_control_characters(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
 
@@ -164,7 +165,7 @@ def _malformed_config(tmp_path: Path) -> CliErrorScenario:
 def _missing_skill(tmp_path: Path) -> CliErrorScenario:
     home = tmp_path / "home"
     project = tmp_path / "project"
-    project.mkdir()
+    (project / ".pi").mkdir(parents=True)
     _write_config(home, "schema_version = 1\nrepos = []\n")
     return CliErrorScenario(
         args=["add", "missing"],
@@ -229,7 +230,7 @@ def _pi_launch_os_error(tmp_path: Path) -> CliErrorScenario:
         raise OSError("denied\x1b[2J")
 
     return CliErrorScenario(
-        args=["run"],
+        args=["run", "pi"],
         home=home,
         project=project,
         process_runner=process_runner,
@@ -306,7 +307,7 @@ def _unsafe_symlinked_pi_path(tmp_path: Path) -> CliErrorScenario:
         args=["remove", "alpha"],
         home=home,
         project=project,
-        expected_fragment="Refusing to use symlinked Pi skills path",
+        expected_fragment="Refusing to use symlinked Pi agent folder",
     )
 
 

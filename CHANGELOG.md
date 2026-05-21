@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Documented TTY-only stderr loading indicators for source refresh and remote materialization while preserving script-friendly non-interactive output.
+- Added project default agent documentation for `.pi/skills`, `.claude/skills`, and `.agents/skills`, including `sv default` and `default_agent` manifest behavior.
+- Changed `sv run` to require the explicit `pi` agent and forward Pi arguments after the agent name.
 - Documented source metadata acceleration: index-first reads, default repo-add/`svx` cache warming with `--no-warm-cache`, and bounded parallel fallback metadata reads.
 - Redesigned interactive source skill detail pages as color-accented cards with a plain title row, fully bordered metadata/description/status sections, safe styled metadata, and an in-card `a add • q back` footer.
 - Polished TTY `/` search with a framed inline prompt, contextual titles, and visible `empty Enter` clear guidance.

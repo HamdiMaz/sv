@@ -49,6 +49,7 @@ def test_local_git_user_journey_smoke(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
 
     repo_add = run_sv(
         ["repo", "add", str(source)],
@@ -123,7 +124,7 @@ def test_local_git_user_journey_smoke(tmp_path, run_sv):
         return 0
 
     run_result = run_sv(
-        ["run", "--", "--help"],
+        ["run", "pi", "--help"],
         cwd=project,
         home=home,
         process_runner=process_runner,
@@ -137,6 +138,7 @@ def test_epic1_source_discovery_and_materialization_acceptance(tmp_path, run_sv)
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
 
     indexed_source = tmp_path / "indexed-source"
     _write_skill_at(

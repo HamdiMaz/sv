@@ -31,6 +31,7 @@ def test_sync_with_no_pi_skills_dir_reports_no_skills_to_sync(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     result = run_sv(["sync"], cwd=project, home=home, git_runner=default_runner)
@@ -39,7 +40,9 @@ def test_sync_with_no_pi_skills_dir_reports_no_skills_to_sync(tmp_path, run_sv):
     assert "No Pi skills found to sync." in result.stdout
 
 
-def test_sync_updates_managed_skill_with_recorded_origin_when_duplicates_exist(tmp_path, run_sv):
+def test_sync_updates_managed_skill_with_recorded_origin_when_duplicates_exist(
+    tmp_path, run_sv
+):
     source_a = make_source_repo(tmp_path, "source-a")
     source_b = make_source_repo(tmp_path, "source-b")
     write_source_skill(source_b, "alpha", "Alpha from B.", "alpha b v1\n")
@@ -49,6 +52,7 @@ def test_sync_updates_managed_skill_with_recorded_origin_when_duplicates_exist(t
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
     repo_ids = [repo.id for repo in load_config(SvPaths.from_home(home)).repos]
@@ -85,6 +89,7 @@ def test_sync_from_git_subdirectory_targets_repo_root(tmp_path, run_sv):
     project = tmp_path / "project"
     nested = project / "nested" / "work"
     nested.mkdir(parents=True)
+    (project / ".pi").mkdir()
     run_git(["init"], project)
     configure_source(source, project, home)
 
@@ -104,10 +109,15 @@ def test_sync_from_git_subdirectory_targets_repo_root(tmp_path, run_sv):
 
     _assert_sync_success(result)
     assert "Synced Pi skill 'alpha'." in result.stdout
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v2\n"
     assert not (nested / ".pi").exists()
     assert not (nested / ".sv").exists()
-    assert load_manifest(project / ".pi" / "skills")["alpha"].target_path == ".pi/skills/alpha"
+    assert (
+        load_manifest(project / ".pi" / "skills")["alpha"].target_path
+        == ".pi/skills/alpha"
+    )
 
 
 def test_sync_from_git_subdirectory_migrates_legacy_pi_manifest(tmp_path, run_sv):
@@ -116,6 +126,7 @@ def test_sync_from_git_subdirectory_migrates_legacy_pi_manifest(tmp_path, run_sv
     project = tmp_path / "project"
     nested = project / "nested" / "work"
     nested.mkdir(parents=True)
+    (project / ".pi").mkdir()
     run_git(["init"], project)
     configure_source(source, project, home)
     repo_id = load_config(SvPaths.from_home(home)).repos[0].id
@@ -148,11 +159,14 @@ def test_sync_from_git_subdirectory_migrates_legacy_pi_manifest(tmp_path, run_sv
     assert manifest_entry.target_path == ".pi/skills/alpha"
 
 
-def test_sync_replaces_locally_modified_managed_skill_and_clears_state(tmp_path, run_sv):
+def test_sync_replaces_locally_modified_managed_skill_and_clears_state(
+    tmp_path, run_sv
+):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     add_result = run_sv(
@@ -169,7 +183,9 @@ def test_sync_replaces_locally_modified_managed_skill_and_clears_state(tmp_path,
     run_git(["add", "skills/alpha"], source)
     run_git(["commit", "-m", "update alpha"], source)
 
-    update_result = run_sv(["update"], cwd=project, home=home, git_runner=default_runner)
+    update_result = run_sv(
+        ["update"], cwd=project, home=home, git_runner=default_runner
+    )
     _assert_sync_success(update_result)
     pre_sync_entry = load_manifest(managed.parent)["alpha"]
     assert pre_sync_entry.modified is True
@@ -195,6 +211,7 @@ def test_sync_skips_local_skill_with_missing_recorded_source(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
     project_skills = project / ".pi" / "skills"
     local = project_skills / "alpha"
@@ -236,6 +253,7 @@ def test_sync_marks_missing_source_orphan_and_reattaches_when_it_reappears(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     add_result = run_sv(
@@ -285,6 +303,7 @@ def test_sync_aborts_on_partial_source_refresh_failure_without_marking_orphan(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
 
     add_result = run_sv(
@@ -347,7 +366,9 @@ def test_sync_skips_ambiguous_legacy_skill(tmp_path, run_sv):
     result = run_sv(["sync"], cwd=project, home=home, git_runner=default_runner)
     _assert_sync_success(result)
     assert "No matching Pi skills found to sync." in result.stdout
-    assert "Skipped local Pi skill 'alpha': multiple source repos match" in result.stdout
+    assert (
+        "Skipped local Pi skill 'alpha': multiple source repos match" in result.stdout
+    )
     assert (legacy / "notes.md").read_text() == "legacy local\n"
     assert_no_partial_sv_dirs(project_skills)
 
@@ -376,6 +397,7 @@ def test_sync_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path, run_
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
@@ -386,7 +408,9 @@ def test_sync_refreshes_sources_even_when_metadata_cache_is_fresh(tmp_path, run_
     result = run_sv(["sync"], cwd=project, home=home, git_runner=default_runner)
 
     _assert_sync_success(result)
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha v2\n"
 
 
 def test_sync_cached_uses_cached_body_and_does_not_refresh_source(tmp_path, run_sv):
@@ -394,6 +418,7 @@ def test_sync_cached_uses_cached_body_and_does_not_refresh_source(tmp_path, run_
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0
@@ -415,6 +440,7 @@ def test_sync_fails_closed_when_refresh_fails_even_with_cache(tmp_path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
 
     assert run_sv(["add", "alpha"], cwd=project, home=home).exit_code == 0

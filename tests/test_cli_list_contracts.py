@@ -295,6 +295,7 @@ def test_list_and_add_coalesce_equivalent_repo_aliases(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     paths = SvPaths.from_home(home)
     paths.config_file.parent.mkdir(parents=True)
     paths.config_file.write_text(
@@ -492,6 +493,7 @@ def test_add_accepts_path_qualified_reference_for_same_repo_duplicate(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
     repo_id = load_config(SvPaths.from_home(home)).repos[0].id
 

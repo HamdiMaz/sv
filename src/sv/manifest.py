@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from sv.config import SvPaths
 
 MANIFEST_SCHEMA_VERSION = 1
+SUPPORTED_DEFAULT_AGENTS = frozenset({"pi", "claude", "agents"})
+_DEFAULT_AGENT_UNSET = object()
 GLOBAL_MANIFEST_DOCUMENT = "sv global manifest"
 CANONICAL_MANIFEST_DOCUMENT = "sv project manifest"
 LEGACY_MANIFEST_DOCUMENT = "sv manifest"
@@ -66,6 +68,12 @@ class ManifestEntry:
     def __post_init__(self) -> None:
         if self.target_path is None:
             object.__setattr__(self, "target_path", f".pi/skills/{self.name}")
+
+
+@dataclass(frozen=True)
+class ManifestDocument:
+    skills: dict[str, ManifestEntry]
+    default_agent: str | None = None
 
 
 def global_manifest_path(paths: SvPaths) -> Path:
@@ -296,17 +304,21 @@ def legacy_manifest_path(project_skills_dir: Path) -> Path:
 
 
 def load_manifest(project_skills_dir: Path) -> dict[str, ManifestEntry]:
+    return load_manifest_document(project_skills_dir).skills
+
+
+def load_manifest_document(project_skills_dir: Path) -> ManifestDocument:
     path = manifest_path(project_skills_dir)
     document_name = CANONICAL_MANIFEST_DOCUMENT
     _reject_symlinked_manifest_read_path(path, document_name)
     if not path.is_file():
         if not _should_check_legacy_manifest(project_skills_dir):
-            return {}
+            return ManifestDocument(skills={})
         path = legacy_manifest_path(project_skills_dir)
         document_name = LEGACY_MANIFEST_DOCUMENT
         _reject_symlinked_manifest_read_path(path, "legacy sv manifest")
         if not path.is_file():
-            return {}
+            return ManifestDocument(skills={})
 
     data = require_schema_version(
         load_toml_document(path, document_name),
@@ -316,7 +328,13 @@ def load_manifest(project_skills_dir: Path) -> dict[str, ManifestEntry]:
         require_present=document_name == CANONICAL_MANIFEST_DOCUMENT,
     )
 
-    return _parse_manifest_entries(data.get("skills", []), path, document_name)
+    default_agent = None
+    if document_name == CANONICAL_MANIFEST_DOCUMENT:
+        default_agent = _parse_default_agent(data.get("default_agent"), path, document_name)
+    return ManifestDocument(
+        skills=_parse_manifest_entries(data.get("skills", []), path, document_name),
+        default_agent=default_agent,
+    )
 
 
 def _reject_symlinked_manifest_read_path(path: Path, label: str) -> None:
@@ -543,6 +561,21 @@ def _expect_string(
     return value
 
 
+def _parse_default_agent(value: Any, path: Path, document_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise SvError(
+            f"Invalid {document_name} at {path}: default_agent must be a string."
+        )
+    if value not in SUPPORTED_DEFAULT_AGENTS:
+        supported = ", ".join(sorted(SUPPORTED_DEFAULT_AGENTS))
+        raise SvError(
+            f"Invalid {document_name} at {path}: default_agent must be one of: {supported}."
+        )
+    return value
+
+
 def _optional_string(
     value: Any, field: str, index: int, path: Path, document_name: str
 ) -> str | None:
@@ -600,13 +633,46 @@ def _optional_bool(
     return value
 
 
-def save_manifest(project_skills_dir: Path, entries: dict[str, ManifestEntry]) -> None:
+def save_manifest(
+    project_skills_dir: Path,
+    entries: dict[str, ManifestEntry],
+    *,
+    default_agent: str | None | object = _DEFAULT_AGENT_UNSET,
+) -> None:
+    resolved_default_agent: str | None
+    if default_agent is _DEFAULT_AGENT_UNSET:
+        resolved_default_agent = _existing_default_agent(project_skills_dir)
+    elif default_agent is None or isinstance(default_agent, str):
+        resolved_default_agent = default_agent
+    else:
+        raise TypeError("default_agent must be str or None")
+    save_manifest_document(
+        project_skills_dir,
+        ManifestDocument(skills=entries, default_agent=resolved_default_agent),
+    )
+
+
+def _existing_default_agent(project_skills_dir: Path) -> str | None:
+    path = manifest_path(project_skills_dir)
+    if not path.is_file() or path.is_symlink():
+        return None
+    return load_manifest_document(project_skills_dir).default_agent
+
+
+def save_manifest_document(project_skills_dir: Path, document: ManifestDocument) -> None:
     path = manifest_path(project_skills_dir)
     try:
         _reject_symlinked_manifest_dir(path.parent)
+        default_agent = _parse_default_agent(
+            document.default_agent,
+            path,
+            CANONICAL_MANIFEST_DOCUMENT,
+        )
         lines: list[str] = [f"schema_version = {MANIFEST_SCHEMA_VERSION}"]
+        if default_agent is not None:
+            lines.append(f'default_agent = "{toml_escape(default_agent)}"')
         for index, entry in enumerate(
-            (entries[name] for name in sorted(entries)), start=1
+            (document.skills[name] for name in sorted(document.skills)), start=1
         ):
             _validate_manifest_entry_hashes(
                 entry, index, path, CANONICAL_MANIFEST_DOCUMENT
@@ -691,9 +757,12 @@ def remove_manifest_entry(project_skills_dir: Path, skill_name: str) -> None:
 
 
 def _project_root_for_skills_dir(project_skills_dir: Path) -> Path:
+    if (
+        project_skills_dir.name == "skills"
+        and project_skills_dir.parent.name in {".pi", ".claude", ".agents"}
+    ):
+        return project_skills_dir.parent.parent
     if project_skills_dir.name == "skills":
-        if project_skills_dir.parent.name == ".pi":
-            return project_skills_dir.parent.parent
         return project_skills_dir.parent
     return project_skills_dir
 

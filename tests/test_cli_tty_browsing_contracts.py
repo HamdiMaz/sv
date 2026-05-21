@@ -75,6 +75,13 @@ def _non_tty_runtime(*, cwd: Path, home: Path) -> Runtime:
     )
 
 
+def _make_pi_project(tmp_path: Path) -> Path:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".pi").mkdir()
+    return project
+
+
 def test_detail_card_helpers_fit_narrow_widths_and_escape_status():
     assert cli_module._detail_card_rule("╭─ Skill", "╮", 4) == "╭..."
     assert cli_module._detail_card_row("alpha", 2) == ".."
@@ -98,8 +105,7 @@ def test_tty_list_browses_source_skills_with_details_by_default(
     run_git(["add", "skills"], source)
     run_git(["commit", "-m", "add docs search fixtures"], source)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     configure_source(source, project, home)
     monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
@@ -491,8 +497,7 @@ def test_tty_search_browses_ranked_matches_with_details_by_default(
     run_git(["add", "skills"], source)
     run_git(["commit", "-m", "add docs search fixtures"], source)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     configure_source(source, project, home)
     monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
@@ -585,8 +590,7 @@ def test_tty_detail_add_reports_escaped_refresh_errors(
 ):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     configure_source(source, project, home)
     monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
@@ -725,8 +729,7 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
     run_git(["add", "skills"], source)
     run_git(["commit", "-m", "add repo browser fixtures"], source)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     configure_source(source, project, home)
     repo_id = derive_repo_id(str(source))
     monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
@@ -786,8 +789,7 @@ def test_tty_repo_skill_browser_detail_action_installs_one_skill(
 ):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     configure_source(source, project, home)
     monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))

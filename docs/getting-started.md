@@ -1,6 +1,6 @@
 # Getting started with sv
 
-This is the shortest path from a new install to a project-local Pi skill set.
+This is the shortest path from a new install to a project-local agent skill set.
 
 ## 1. Add a skill source
 
@@ -33,9 +33,19 @@ sv add Team/Skills:packages/agents/pi/skills/find-docs
 
 ## 3. Add skills to your project
 
-Run from the project root:
+Run from the project root. Project skills can be installed under one supported project agent folder:
+`.pi/skills`, `.claude/skills`, or `.agents/skills`.
+
+Use `sv default` to show the current project default agent. Use
+`sv default pi`, `sv default claude`, or `sv default agents` to set it.
+The selected value is stored in `.sv/manifest.toml` as `default_agent`.
+Changing it affects future project commands only; sv does not migrate existing
+skill folders between agents.
+
+Set an explicit default agent before the first non-interactive add, then install into that default agent skill folder:
 
 ```bash
+sv default pi
 sv add find-docs
 ```
 
@@ -58,8 +68,10 @@ sv update
 ## 5. Run Pi with project skills only
 
 ```bash
-sv run -- <pi args>
+sv run pi <pi args>
 ```
+
+`sv run` still requires an explicit supported run agent. The supported run agent is `pi`, and it uses `.pi/skills` regardless of the project default agent.
 
 This validates `.pi/skills` for symlinks and bounded skill trees, then launches Pi as:
 

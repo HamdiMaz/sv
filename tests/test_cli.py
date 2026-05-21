@@ -10,11 +10,19 @@ import sv.process as process_module
 from sv.catalog import SourceSkill
 from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, handle
 from sv.errors import SvError
-from sv.project import AddSkillResult, SyncResult, SyncSkip
+from sv.manifest import (
+    ManifestDocument,
+    ManifestEntry,
+    load_manifest_document,
+    save_manifest,
+    save_manifest_document,
+)
+from sv.project import AddSkillResult, RemoveSkillResult, SyncResult, SyncSkip
 from tests.helpers import (
     assert_no_raw_control_characters,
     assert_no_traceback,
     display_width,
+    make_catalog_source_skill,
     parse_sv,
 )
 
@@ -35,6 +43,324 @@ def _write_skill(skill_dir: Path, name: str, description: str = "Alpha skill.") 
         f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",
         encoding="utf-8",
     )
+
+
+def test_default_show_reports_unset_agent(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["default"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project default agent: unset" in result.stdout
+    assert "Supported agents: pi, claude, agents" in result.stdout
+
+
+def test_default_set_writes_manifest_default_without_migrating_skills(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    skill = project_skills / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
+    save_manifest(
+        project_skills,
+        {
+            "alpha": ManifestEntry(
+                name="alpha",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/alpha",
+                description="Alpha skill.",
+            )
+        },
+    )
+
+    result = run_sv(["default", "claude"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Default agent set to Claude" in result.stdout
+    document = load_manifest_document(project_skills)
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "pi"
+    assert skill.is_dir()
+
+
+def test_default_show_reports_current_default(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    save_manifest_document(
+        project_skills,
+        ManifestDocument(default_agent="agents", skills={}),
+    )
+
+    result = run_sv(["default"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project default agent: Agents" in result.stdout
+    assert ".agents/skills" in result.stdout
+
+
+def test_default_rejects_unsupported_agent(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["default", "bad"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Unsupported agent 'bad'" in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_default_show_does_not_infer_or_persist_single_existing_folder(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".agents").mkdir(parents=True)
+
+    result = run_sv(["default"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project default agent: unset" in result.stdout
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_resolve_active_project_agent_rejects_manifest_default_symlinked_folder(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    target = tmp_path / "outside-claude"
+    target.mkdir()
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    (project / ".claude").symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Claude agent folder"):
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
+
+
+def test_resolve_active_project_agent_rejects_regular_file_agent_folder(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".agents").write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(SvError, match="Agents agent folder .* is not a directory"):
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
+
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_resolve_active_project_agent_does_not_infer_manifest_agent_without_default(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent=None,
+            skills={
+                "alpha": ManifestEntry(
+                    name="alpha",
+                    repo_id="Org/Skills",
+                    repo_url="https://github.com/Org/Skills.git",
+                    source_path="skills/alpha",
+                    description="Alpha skill.",
+                    target_kind="project-agent",
+                    target_agent="claude",
+                )
+            },
+        ),
+    )
+
+    with pytest.raises(SvError, match="Run 'sv default pi'.*sv default claude"):
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
+
+
+def test_resolve_active_project_agent_rejects_single_folder_with_symlinked_skills_path(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    target = tmp_path / "outside-skills"
+    (project / ".claude").mkdir(parents=True)
+    target.mkdir()
+    (project / ".claude" / "skills").symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Claude skills path"):
+        cli_module._resolve_active_project_agent(
+            cli_module.LocalContext(repo_root=project)
+        )
+
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+@pytest.mark.parametrize(
+    ("skills_setup", "expected"),
+    [
+        ("symlink", "Refusing to use symlinked Claude skills path"),
+        ("file", "Claude skills path"),
+    ],
+)
+def test_default_set_rejects_invalid_agent_skills_path_and_preserves_manifest(
+    tmp_path: Path, run_sv, skills_setup: str, expected: str
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    claude = project / ".claude"
+    claude.mkdir(parents=True)
+    if skills_setup == "symlink":
+        target = tmp_path / "outside-skills"
+        target.mkdir()
+        (claude / "skills").symlink_to(target, target_is_directory=True)
+    else:
+        (claude / "skills").write_text("not a directory", encoding="utf-8")
+    project_skills = project / ".pi" / "skills"
+    save_manifest_document(
+        project_skills,
+        ManifestDocument(default_agent="pi", skills={}),
+    )
+
+    result = run_sv(["default", "claude"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert expected in result.stderr
+    if skills_setup == "file":
+        assert "is not a directory" in result.stderr
+    assert load_manifest_document(project_skills).default_agent == "pi"
+
+
+def test_default_set_from_home_global_manifest_refuses_to_overwrite_sources(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    global_manifest = home / ".sv" / "manifest.toml"
+    global_manifest.parent.mkdir(parents=True)
+    global_manifest.write_text("schema_version = 1\nsources = []\n", encoding="utf-8")
+
+    result = run_sv(["default", "claude"], cwd=home, home=home)
+
+    assert result.exit_code == 1
+    assert "sv default is for project agent folders" in result.stderr
+    assert (
+        global_manifest.read_text(encoding="utf-8")
+        == "schema_version = 1\nsources = []\n"
+    )
+
+
+def test_add_from_home_global_manifest_with_existing_pi_folder_preserves_sources(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    global_manifest = home / ".sv" / "manifest.toml"
+    global_manifest.parent.mkdir(parents=True)
+    global_manifest.write_text("schema_version = 1\nsources = []\n", encoding="utf-8")
+    (home / ".pi").mkdir(parents=True)
+
+    result = run_sv(["add", "alpha"], cwd=home, home=home)
+
+    assert result.exit_code == 1
+    assert global_manifest.read_text(encoding="utf-8") == "schema_version = 1\nsources = []\n"
+
+
+def test_default_show_from_home_global_manifest_refuses_project_output(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    global_manifest = home / ".sv" / "manifest.toml"
+    global_manifest.parent.mkdir(parents=True)
+    global_manifest.write_text("schema_version = 1\nsources = []\n", encoding="utf-8")
+
+    result = run_sv(["default"], cwd=home, home=home)
+
+    assert result.exit_code == 1
+    assert "sv default is for project agent folders" in result.stderr
+    assert global_manifest.read_text(encoding="utf-8") == "schema_version = 1\nsources = []\n"
+
+
+def test_default_set_rejects_symlinked_agent_folder(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    target = tmp_path / "outside-claude"
+    project.mkdir()
+    target.mkdir()
+    (project / ".claude").symlink_to(target, target_is_directory=True)
+
+    result = run_sv(["default", "claude"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked Claude agent folder" in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_default_rejects_skill_vault_context(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    (vault / "skills").mkdir()
+    index_file = vault / ".sv" / "index.toml"
+    index_file.parent.mkdir()
+    index_file.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-21T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+    manifest_file = vault / ".sv" / "manifest.toml"
+    manifest_file.write_text("schema_version = 1\n", encoding="utf-8")
+
+    result = run_sv(["default"], cwd=vault, home=home)
+
+    assert result.exit_code == 1
+    assert "sv default is for project agent folders" in result.stderr
+    assert manifest_file.read_text(encoding="utf-8") == "schema_version = 1\n"
+    assert not (vault / ".pi").exists()
+    assert not (vault / ".claude").exists()
+    assert not (vault / ".agents").exists()
+
+
+def test_default_set_rejects_non_git_skill_vault_context(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    vault = tmp_path / "vault"
+    (vault / "skills").mkdir(parents=True)
+    index_file = vault / ".sv" / "index.toml"
+    index_file.parent.mkdir()
+    index_file.write_text(
+        "schema_version = 1\n"
+        'kind = "skill-vault"\n'
+        'generated_by = "sv"\n'
+        'generated_at = "2026-05-21T00:00:00Z"\n',
+        encoding="utf-8",
+    )
+    manifest_file = vault / ".sv" / "manifest.toml"
+    original_manifest = "schema_version = 1\n"
+    manifest_file.write_text(original_manifest, encoding="utf-8")
+
+    result = run_sv(["default", "claude"], cwd=vault, home=home)
+
+    assert result.exit_code == 1
+    assert "sv default is for project agent folders" in result.stderr
+    assert manifest_file.read_text(encoding="utf-8") == original_manifest
+    assert not (vault / ".claude").exists()
+    assert not (vault / ".pi").exists()
+    assert not (vault / ".agents").exists()
 
 
 def test_index_command_uses_cli_and_configured_scan_paths(tmp_path: Path, run_sv):
@@ -137,9 +463,7 @@ def test_init_command_scaffolds_named_folder(tmp_path: Path, run_sv):
     assert git_calls == [(["git", "init"], target)]
 
 
-def test_init_command_does_not_reinitialize_existing_git_repo(
-    tmp_path: Path, run_sv
-):
+def test_init_command_does_not_reinitialize_existing_git_repo(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "existing"
     (project / ".git").mkdir(parents=True)
@@ -292,7 +616,9 @@ def test_init_command_rejects_named_folder_inside_existing_git_worktree(
         git_calls.append((list(args), cwd))
         raise AssertionError(f"unexpected git call: {args}")
 
-    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(
+        parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner
+    )
 
     assert result.exit_code == 1
     assert "Refusing to initialize a nested skill-vault" in result.stderr
@@ -317,7 +643,9 @@ def test_init_command_rejects_named_folder_inside_existing_sv_root(
         git_calls.append((list(args), cwd))
         raise AssertionError(f"unexpected git call: {args}")
 
-    result = run_sv(parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner)
+    result = run_sv(
+        parse(["init", "nested"]), cwd=project, home=home, git_runner=git_runner
+    )
 
     assert result.exit_code == 1
     assert "Refusing to initialize a nested skill-vault" in result.stderr
@@ -464,9 +792,7 @@ def test_init_command_from_non_git_project_index_subdirectory_rejects_without_si
     assert git_calls == []
 
 
-def test_init_command_reports_target_file_without_git_call(
-    tmp_path: Path, run_sv
-):
+def test_init_command_reports_target_file_without_git_call(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -475,7 +801,9 @@ def test_init_command_reports_target_file_without_git_call(
     def git_runner(args, cwd=None):
         raise AssertionError(f"unexpected git call: {args}")
 
-    result = run_sv(parse(["init", "vault"]), cwd=workspace, home=home, git_runner=git_runner)
+    result = run_sv(
+        parse(["init", "vault"]), cwd=workspace, home=home, git_runner=git_runner
+    )
 
     assert result.exit_code == 1
     assert "Failed to create target folder" in result.stderr
@@ -680,9 +1008,7 @@ def test_init_command_preserves_existing_readme_content(tmp_path: Path, run_sv):
     )
 
 
-def test_init_command_appends_readme_block_after_double_newline(
-    tmp_path: Path, run_sv
-):
+def test_init_command_appends_readme_block_after_double_newline(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     (project / ".git").mkdir(parents=True)
@@ -718,7 +1044,9 @@ def test_init_command_reports_malformed_readme_markers(tmp_path: Path, run_sv):
     )
 
     assert result.exit_code == 1
-    assert "README must contain exactly one sv skill table start marker" in result.stderr
+    assert (
+        "README must contain exactly one sv skill table start marker" in result.stderr
+    )
     assert not (project / ".sv" / "index.toml").exists()
     assert not (project / ".sv" / "manifest.toml").exists()
 
@@ -728,10 +1056,7 @@ def test_init_command_reports_reversed_readme_markers(tmp_path: Path, run_sv):
     project = tmp_path / "project"
     (project / ".git").mkdir(parents=True)
     (project / "README.md").write_text(
-        "# Team\n"
-        "<!-- sv:skills:end -->\n"
-        "stale\n"
-        "<!-- sv:skills:start -->\n",
+        "# Team\n<!-- sv:skills:end -->\nstale\n<!-- sv:skills:start -->\n",
         encoding="utf-8",
     )
 
@@ -743,7 +1068,9 @@ def test_init_command_reports_reversed_readme_markers(tmp_path: Path, run_sv):
     )
 
     assert result.exit_code == 1
-    assert "README sv skill table end marker appears before start marker" in result.stderr
+    assert (
+        "README sv skill table end marker appears before start marker" in result.stderr
+    )
     assert not (project / ".sv" / "index.toml").exists()
     assert not (project / ".sv" / "manifest.toml").exists()
 
@@ -825,9 +1152,7 @@ def test_index_command_escapes_output_path(tmp_path: Path, run_sv):
     assert "\\x1b[31m" in result.stdout
 
 
-def test_index_command_updates_readme_only_for_skill_vaults(
-    tmp_path: Path, run_sv
-):
+def test_index_command_updates_readme_only_for_skill_vaults(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
     skill = project / "skills" / "alpha"
@@ -899,9 +1224,7 @@ def test_index_command_updates_readme_only_for_skill_vaults(
     )
 
 
-def test_print_add_result_escapes_existing_manifest_repo_id(
-    tmp_path: Path, capsys
-):
+def test_print_add_result_escapes_existing_manifest_repo_id(tmp_path: Path, capsys):
     _print_add_result(
         AddSkillResult(
             skill="alpha",
@@ -937,6 +1260,73 @@ def test_print_sync_result_escapes_manifest_repo_ids(capsys):
     assert "Bad\\x1b[2JRepo" in output
 
 
+def test_project_agent_result_formatting_uses_result_target_agent_label(
+    tmp_path: Path, capsys
+):
+    _print_add_result(
+        AddSkillResult(
+            skill="alpha",
+            target=tmp_path / "project" / ".claude" / "skills" / "alpha",
+            status="added",
+            target_agent="claude",
+        )
+    )
+    cli_module._print_remove_result(
+        RemoveSkillResult(
+            skill="beta",
+            target=tmp_path / "project" / ".agents" / "skills" / "beta",
+            target_agent="agents",
+        )
+    )
+    _print_sync_result(
+        SyncResult(
+            updated=["gamma"],
+            skipped=[],
+            backfilled=[],
+            target_agent="claude",
+        )
+    )
+    cli_module._print_update_result(
+        SyncResult(
+            updated=["delta"],
+            skipped=[],
+            backfilled=[],
+            target_agent="agents",
+        )
+    )
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"Added Claude skill 'alpha' to {tmp_path}/project/.claude/skills/alpha",
+        f"Removed Agents skill 'beta' from {tmp_path}/project/.agents/skills/beta",
+        "Synced Claude skill 'gamma'.",
+        "Updated Agents skill 'delta'.",
+    ]
+
+
+def test_run_pi_ignores_project_default_agent(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    calls = []
+
+    def process_runner(command):
+        calls.append(command)
+        return 0
+
+    result = run_sv(
+        ["run", "pi", "--help"],
+        cwd=project,
+        home=home,
+        process_runner=process_runner,
+    )
+
+    assert result.exit_code == 0
+    assert calls == [["pi", "--no-skills", "--skill", ".pi/skills", "--help"]]
+
+
 def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -948,7 +1338,7 @@ def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path, run_sv
         return 23
 
     result = run_sv(
-        parse(["run", "--", "--model", "fast"]),
+        parse(["run", "pi", "--model", "fast"]),
         cwd=project,
         home=home,
         process_runner=process_runner,
@@ -967,7 +1357,7 @@ def test_run_reports_missing_pi_binary(tmp_path: Path, run_sv):
         raise FileNotFoundError(command[0])
 
     result = run_sv(
-        parse(["run"]),
+        parse(["run", "pi"]),
         cwd=project,
         home=home,
         process_runner=process_runner,
@@ -977,9 +1367,7 @@ def test_run_reports_missing_pi_binary(tmp_path: Path, run_sv):
     assert "Unable to run 'pi'" in result.stderr
 
 
-def test_run_reports_process_launch_os_errors_without_traceback(
-    tmp_path: Path, capsys
-):
+def test_run_reports_process_launch_os_errors_without_traceback(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -988,7 +1376,7 @@ def test_run_reports_process_launch_os_errors_without_traceback(
         raise PermissionError("denied")
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
@@ -997,9 +1385,7 @@ def test_run_reports_process_launch_os_errors_without_traceback(
     assert_no_traceback(captured.err)
 
 
-def test_run_escapes_control_characters_in_launch_errors(
-    tmp_path: Path, capsys
-):
+def test_run_escapes_control_characters_in_launch_errors(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -1008,7 +1394,7 @@ def test_run_escapes_control_characters_in_launch_errors(
         raise PermissionError("denied\x1b[2J")
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
@@ -1023,9 +1409,7 @@ def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys):
     outside_skills = tmp_path / "outside-skills"
     outside_skills.mkdir()
     (project / ".pi").mkdir(parents=True)
-    (project / ".pi" / "skills").symlink_to(
-        outside_skills, target_is_directory=True
-    )
+    (project / ".pi" / "skills").symlink_to(outside_skills, target_is_directory=True)
     calls = []
 
     def process_runner(command):
@@ -1033,7 +1417,7 @@ def test_run_rejects_symlinked_project_skills_path(tmp_path: Path, capsys):
         return 0
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
@@ -1056,7 +1440,7 @@ def test_run_rejects_symlinked_project_skill_directory(tmp_path: Path, capsys):
         return 0
 
     exit_code = handle(
-        parse(["run"]), cwd=project, home=home, process_runner=process_runner
+        parse(["run", "pi"]), cwd=project, home=home, process_runner=process_runner
     )
 
     assert exit_code == 1
@@ -1119,6 +1503,640 @@ def test_add_qualified_repo_id_with_control_characters_does_not_touch_source_rep
     assert "\x1b" not in message
 
 
+def _managed_entry_for_agent(
+    name: str, agent: str, repo_id: str = "Org/Skills"
+) -> ManifestEntry:
+    folder = {"pi": ".pi", "claude": ".claude", "agents": ".agents"}[agent]
+    return ManifestEntry(
+        name=name,
+        repo_id=repo_id,
+        repo_url=f"https://github.com/{repo_id}.git",
+        source_path=f"skills/{name}",
+        description=f"{name.title()} skill.",
+        target_kind="project-agent",
+        target_agent=agent,
+        target_path=f"{folder}/skills/{name}",
+    )
+
+
+def test_cli_existing_pi_folder_infers_pi_and_preserves_legacy_behavior(
+    tmp_path: Path, capsys
+):
+    project = tmp_path / "project"
+    (project / ".pi").mkdir(parents=True)
+    entry = make_catalog_source_skill(tmp_path)
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (project / ".pi" / "skills" / "alpha").is_dir()
+    assert load_manifest_document(project / ".pi" / "skills").default_agent == "pi"
+
+
+def test_add_requires_default_agent_before_loading_sources(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["add", "alpha"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "No default agent is configured" in result.stderr
+    assert "sv default pi" in result.stderr
+    assert "No skill source repos are configured" not in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_add_uses_manifest_default_agent(tmp_path: Path, capsys):
+    project = tmp_path / "project"
+    entry = make_catalog_source_skill(tmp_path)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    document = load_manifest_document(project / ".claude" / "skills")
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "claude"
+    assert "Added Claude skill 'alpha'" in capsys.readouterr().out
+
+
+def test_add_all_uses_manifest_default_agent(tmp_path: Path, capsys):
+    project = tmp_path / "project"
+    alpha = make_catalog_source_skill(tmp_path, "alpha")
+    beta = make_catalog_source_skill(tmp_path, "beta")
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+
+    exit_code = cli_module._handle_add_all(
+        [alpha, beta],
+        cwd=project,
+        adapter=cli_module.PiAdapter(),
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    assert (
+        project / ".claude" / "skills" / "beta" / "notes.md"
+    ).read_text() == "beta source\n"
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".pi" / "skills" / "beta").exists()
+    document = load_manifest_document(project / ".claude" / "skills")
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "claude"
+    assert document.skills["beta"].target_agent == "claude"
+    output = capsys.readouterr().out
+    assert "Added Claude skill 'alpha'" in output
+    assert "Added Claude skill 'beta'" in output
+
+
+def test_status_infers_and_persists_single_existing_agent_folder(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / ".agents").mkdir()
+
+    result = run_sv(["status", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Agents skills" in result.stdout
+    document = load_manifest_document(project / ".pi" / "skills")
+    assert document.default_agent == "agents"
+
+
+@pytest.mark.parametrize(
+    ("args", "label"),
+    [
+        (["remove", "alpha"], "remove"),
+        (["remove", "--all", "--yes"], "remove --all"),
+        (["remove", "-l", "--yes"], "remove -l"),
+        (["status"], "status"),
+        (["sync"], "sync"),
+        (["update"], "update"),
+    ],
+)
+def test_project_lifecycle_commands_require_default_agent_without_supported_folders(
+    tmp_path: Path, run_sv, args: list[str], label: str
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+
+    result = run_sv(args, cwd=project, home=home)
+
+    assert result.exit_code == 1, label
+    assert "No default agent is configured" in result.stderr
+    assert "sv default pi" in result.stderr
+    assert "No skill source repos are configured" not in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_lifecycle_command_rejects_multiple_supported_folders_without_default(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / ".pi").mkdir()
+    (project / ".claude").mkdir()
+
+    result = run_sv(["status"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "No default agent is configured" in result.stderr
+    assert "sv default pi" in result.stderr
+
+
+def test_status_reports_only_default_agent_entries(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    claude_skill = project / ".claude" / "skills" / "beta"
+    pi_skill.mkdir(parents=True)
+    claude_skill.mkdir(parents=True)
+    (pi_skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
+    (claude_skill / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: Beta skill.\n---\n"
+    )
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={
+                "alpha": _managed_entry_for_agent("alpha", "pi"),
+                "beta": _managed_entry_for_agent("beta", "claude"),
+            },
+        ),
+    )
+
+    result = run_sv(["status", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project sv-managed Claude skills" in result.stdout
+    assert "beta" in result.stdout
+    assert "alpha" not in result.stdout
+
+
+def test_remove_removes_only_default_agent_skill(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    pi_skill.mkdir(parents=True)
+    claude_skill.mkdir(parents=True)
+    (pi_skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
+    (claude_skill / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: Beta skill.\n---\n"
+    )
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={
+                "alpha": _managed_entry_for_agent("alpha", "pi"),
+                "project-agent:claude:.claude/skills/alpha:alpha": _managed_entry_for_agent(
+                    "alpha", "claude"
+                ),
+            },
+        ),
+    )
+
+    result = run_sv(["remove", "alpha"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Removed Claude skill 'alpha'" in result.stdout
+    assert pi_skill.is_dir()
+    assert not claude_skill.exists()
+    remaining = load_manifest_document(project / ".pi" / "skills")
+    assert remaining.default_agent == "claude"
+    assert [
+        (entry.name, entry.target_agent) for entry in remaining.skills.values()
+    ] == [("alpha", "pi")]
+
+
+def test_remove_all_removes_only_default_agent_managed_skills(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    agents_skill = project / ".agents" / "skills" / "beta"
+    pi_skill.mkdir(parents=True)
+    agents_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="agents",
+            skills={
+                "alpha": _managed_entry_for_agent("alpha", "pi"),
+                "beta": _managed_entry_for_agent("beta", "agents"),
+            },
+        ),
+    )
+
+    result = run_sv(["remove", "--all", "--yes"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert pi_skill.is_dir()
+    assert not agents_skill.exists()
+    remaining_agents = {
+        entry.target_agent
+        for entry in load_manifest_document(project / ".pi" / "skills").skills.values()
+    }
+    assert remaining_agents == {"pi"}
+
+
+def test_sync_uses_only_default_agent(tmp_path: Path):
+    project = tmp_path / "project"
+    source_entry = make_catalog_source_skill(tmp_path)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    cli_module._handle_add(
+        "alpha",
+        [source_entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+    (project / ".pi" / "skills" / "alpha").mkdir(parents=True)
+    (project / ".pi" / "skills" / "alpha" / "notes.md").write_text("pi local\n")
+    (source_entry.source_path / "notes.md").write_text("source v2\n")
+
+    exit_code = cli_module._handle_sync([source_entry], project, cli_module.PiAdapter())
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "source v2\n"
+    assert (
+        project / ".pi" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "pi local\n"
+
+
+def test_update_uses_only_default_agent(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    source_entry = make_catalog_source_skill(tmp_path)
+    paths = cli_module.SvPaths.from_home(tmp_path / "home")
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    cli_module._handle_add(
+        "alpha",
+        [source_entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+    pi_skill = project / ".pi" / "skills" / "alpha"
+    pi_skill.mkdir(parents=True)
+    (pi_skill / "notes.md").write_text("pi local\n")
+    document = load_manifest_document(project / ".pi" / "skills")
+    document.skills["project-agent:pi:.pi/skills/alpha:alpha"] = _managed_entry_for_agent(
+        "alpha", "pi"
+    )
+    save_manifest_document(project / ".pi" / "skills", document)
+    (source_entry.source_path / "notes.md").write_text("source v2\n")
+    monkeypatch.setattr(
+        cli_module,
+        "_load_config_for_source_command",
+        lambda paths_arg: cli_module.SvConfig(repos=()),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_catalog_for_source_command",
+        lambda repos, paths_arg, git_runner, **kwargs: [source_entry],
+    )
+
+    exit_code = cli_module._handle_update(
+        project,
+        paths,
+        cli_module.PiAdapter(),
+        git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+        record_global_source_state=False,
+        cache_policy=cli_module.CachePolicy.cache_only(),
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "source v2\n"
+    assert (pi_skill / "notes.md").read_text() == "pi local\n"
+
+
+def test_status_refresh_uses_default_agent_name(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+    paths = cli_module.SvPaths.from_home(tmp_path / "home")
+    local_refresh_calls = []
+    source_refresh_calls = []
+    monkeypatch.setattr(cli_module, "_status_catalog_if_configured", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        cli_module,
+        "refresh_project_agent_skill_local_states",
+        lambda project_skills_dir, agent_name: local_refresh_calls.append(
+            (project_skills_dir, agent_name)
+        ),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "refresh_project_agent_skill_states",
+        lambda catalog, project_skills_dir, agent_name: source_refresh_calls.append(
+            (project_skills_dir, agent_name)
+        ),
+    )
+
+    exit_code = cli_module._handle_status(
+        project,
+        paths,
+        cli_module.PiAdapter(),
+        git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+        record_global_source_state=False,
+        cache_policy=cli_module.CachePolicy.cache_only(),
+    )
+
+    assert exit_code == 0
+    assert local_refresh_calls == [(project / ".claude" / "skills", "claude")]
+    assert source_refresh_calls == []
+
+
+def test_status_source_refresh_uses_default_agent_name(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+    paths = cli_module.SvPaths.from_home(tmp_path / "home")
+    source_refresh_calls = []
+    monkeypatch.setattr(
+        cli_module, "_status_catalog_if_configured", lambda *args, **kwargs: [object()]
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "refresh_project_agent_skill_states",
+        lambda catalog, project_skills_dir, agent_name: source_refresh_calls.append(
+            (project_skills_dir, agent_name)
+        ),
+    )
+
+    exit_code = cli_module._handle_status(
+        project,
+        paths,
+        cli_module.PiAdapter(),
+        git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+        record_global_source_state=False,
+        cache_policy=cli_module.CachePolicy.cache_only(),
+    )
+
+    assert exit_code == 0
+    assert source_refresh_calls == [(project / ".claude" / "skills", "claude")]
+
+
+def test_status_project_agent_errors_use_default_agent_labels(tmp_path: Path):
+    project = tmp_path / "project"
+    claude_skills = project / ".claude" / "skills"
+    claude_skills.mkdir(parents=True)
+    manifest = project / ".sv" / "manifest.toml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        "schema_version = 1\n"
+        'default_agent = "claude"\n'
+        "\n"
+        "[[skills]]\n"
+        'name = "../outside"\n'
+        'target_kind = "project-agent"\n'
+        'target_agent = "claude"\n'
+        'target_path = ".claude/skills/../outside"\n'
+        'source_repo_id = "Org/Skills"\n'
+        'source_repo_url = "https://github.com/Org/Skills.git"\n'
+        'source_path = "skills/outside"\n'
+        'description = "Bad skill."\n',
+    )
+
+    with pytest.raises(SvError, match="Invalid Claude skill directory"):
+        cli_module._handle_status(
+            project,
+            cli_module.SvPaths.from_home(tmp_path / "home"),
+            cli_module.PiAdapter(),
+            git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+            record_global_source_state=False,
+            cache_policy=cli_module.CachePolicy.cache_only(),
+        )
+
+    (project / ".sv" / "manifest.toml").unlink()
+    claude_skills.rmdir()
+    claude_skills.symlink_to(project / "elsewhere")
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+
+    with pytest.raises(SvError, match="symlinked Claude skills path"):
+        cli_module._handle_status(
+            project,
+            cli_module.SvPaths.from_home(tmp_path / "home"),
+            cli_module.PiAdapter(),
+            git_runner=lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""),
+            record_global_source_state=False,
+            cache_policy=cli_module.CachePolicy.cache_only(),
+        )
+
+
+def test_status_table_displays_agent_display_names(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+
+    result = run_sv(["status", "--cached"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "alpha       Claude" in result.stdout
+    assert "alpha       claude" not in result.stdout
+
+
+def test_remove_interactive_resolves_default_agent_once(tmp_path: Path, monkeypatch, capsys):
+    project = tmp_path / "project"
+    claude_skill = project / ".claude" / "skills" / "alpha"
+    claude_skill.mkdir(parents=True)
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(
+            default_agent="claude",
+            skills={"alpha": _managed_entry_for_agent("alpha", "claude")},
+        ),
+    )
+    resolver_calls = []
+
+    def resolve_once(context):
+        resolver_calls.append(context.repo_root)
+        return cli_module.ActiveProjectAgent("claude", project / ".claude" / "skills")
+
+    monkeypatch.setattr(cli_module, "_resolve_active_project_agent", resolve_once)
+    monkeypatch.setattr(cli_module, "_can_prompt_for_confirmation", lambda: True)
+    monkeypatch.setattr(cli_module, "_confirm_prompt", lambda prompt: False)
+
+    exit_code = cli_module._handle_remove_interactive(
+        project,
+        cli_module.PiAdapter(),
+        lambda skills, **kwargs: ["alpha"],
+    )
+
+    assert exit_code == 0
+    assert resolver_calls == [project]
+    assert claude_skill.exists()
+    assert "following sv-managed Claude skills" in capsys.readouterr().out
+
+
+def test_add_infers_single_existing_agent_folder_and_persists_default(
+    tmp_path: Path, capsys
+):
+    project = tmp_path / "project"
+    (project / ".agents").mkdir(parents=True)
+    entry = make_catalog_source_skill(tmp_path)
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".agents" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    document = load_manifest_document(project / ".agents" / "skills")
+    assert document.default_agent == "agents"
+    assert document.skills["alpha"].target_agent == "agents"
+
+
+def test_add_non_tty_fails_when_agent_selection_required(tmp_path: Path):
+    project = tmp_path / "project"
+    project.mkdir()
+    entry = make_catalog_source_skill(tmp_path)
+
+    with pytest.raises(SvError, match="sv default pi"):
+        cli_module._handle_add(
+            "alpha",
+            [entry],
+            project,
+            cli_module.PiAdapter(),
+            cli_module._choose_skill,
+        )
+
+    assert not (project / ".pi").exists()
+    assert not (project / ".claude").exists()
+    assert not (project / ".agents").exists()
+
+
+def test_add_non_tty_fails_when_multiple_agent_folders_exist(tmp_path: Path):
+    project = tmp_path / "project"
+    (project / ".pi").mkdir(parents=True)
+    (project / ".claude").mkdir()
+    entry = make_catalog_source_skill(tmp_path)
+
+    with pytest.raises(SvError, match="sv default pi"):
+        cli_module._handle_add(
+            "alpha",
+            [entry],
+            project,
+            cli_module.PiAdapter(),
+            cli_module._choose_skill,
+        )
+
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert not (project / ".claude" / "skills" / "alpha").exists()
+
+
+def test_add_interactive_agent_selection_persists_default(
+    monkeypatch, tmp_path: Path, capsys
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    entry = make_catalog_source_skill(tmp_path)
+
+    monkeypatch.setattr(
+        cli_module, "_can_browse_tty", lambda stdin=None, stdout=None: True
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_browse_tty_table",
+        lambda headers, rows, **kwargs: [
+            "Claude",
+            ".claude/skills",
+            "missing",
+            "claude",
+        ],
+    )
+
+    exit_code = cli_module._handle_add(
+        "alpha",
+        [entry],
+        project,
+        cli_module.PiAdapter(),
+        cli_module._choose_skill,
+    )
+
+    assert exit_code == 0
+    assert (
+        project / ".claude" / "skills" / "alpha" / "notes.md"
+    ).read_text() == "alpha source\n"
+    document = load_manifest_document(project / ".claude" / "skills")
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "claude"
+
+
 def test_malformed_config_reports_cli_error(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -1172,7 +2190,7 @@ def test_remove_interactive_removes_selected_project_skills_without_source_repo(
 def test_remove_interactive_reports_no_project_skills(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
-    project.mkdir()
+    (project / ".pi").mkdir(parents=True)
 
     exit_code = handle(parse(["remove", "-l"]), cwd=project, home=home)
 
@@ -1319,9 +2337,7 @@ def test_repo_add_reports_unresolvable_home_without_traceback(tmp_path: Path, ca
     assert "Traceback" not in captured.err
 
 
-def test_repo_remove_escapes_control_characters_in_missing_repo(
-    tmp_path: Path, capsys
-):
+def test_repo_remove_escapes_control_characters_in_missing_repo(tmp_path: Path, capsys):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -1371,11 +2387,24 @@ def test_add_help_explains_skill_argument(capsys):
     help_text = capsys.readouterr().out
     assert "Skill name or repo:skill reference" in help_text
     assert "choose a source" in help_text
+    assert "active/default project agent skills directory" in help_text
+    assert "sv default <agent>" in help_text
+    assert ".pi/skills directory" not in help_text
 
 
-def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(
-    capsys, monkeypatch
-):
+def test_remove_help_explains_default_agent_target(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        parse(["remove", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "active/default project agent skills directory" in help_text
+    assert "sv default <agent>" in help_text
+    assert "Pi skills from .pi/skills" not in help_text
+    assert ".pi/skills directory" not in help_text
+
+
+def test_print_wrapped_omits_indent_when_terminal_is_too_narrow(capsys, monkeypatch):
     monkeypatch.setenv("COLUMNS", "4")
 
     _print_wrapped("one two three")
@@ -1388,7 +2417,9 @@ def test_print_wrapped_honors_display_width_for_wide_unicode(capsys, monkeypatch
 
     _print_wrapped("Duplicate 日本語日本語日本語 skill names")
 
-    assert all(display_width(line) <= 20 for line in capsys.readouterr().out.splitlines())
+    assert all(
+        display_width(line) <= 20 for line in capsys.readouterr().out.splitlines()
+    )
 
 
 def test_print_wrapped_replaces_overwide_character_at_one_column(capsys, monkeypatch):
@@ -1425,7 +2456,9 @@ def test_default_process_runner_delegates_to_subprocess_call(monkeypatch):
     assert calls == [["pi", "--help"]]
 
 
-def test_main_parses_arguments_and_uses_current_project_paths(monkeypatch, tmp_path: Path):
+def test_main_parses_arguments_and_uses_current_project_paths(
+    monkeypatch, tmp_path: Path
+):
     project = tmp_path / "project"
     home = tmp_path / "home"
     parsed_calls = []
@@ -1518,9 +2551,7 @@ def test_unknown_commands_are_reported_without_tracebacks(tmp_path: Path, capsys
     assert_no_traceback(captured.err)
 
 
-def test_unknown_repo_subcommand_is_reported_without_tracebacks(
-    tmp_path: Path, capsys
-):
+def test_unknown_repo_subcommand_is_reported_without_tracebacks(tmp_path: Path, capsys):
     exit_code = handle(
         Namespace(command="repo", repo_command="mystery"), cwd=tmp_path, home=tmp_path
     )
@@ -1539,10 +2570,14 @@ def test_empty_repo_qualified_add_reference_fails_before_git(tmp_path: Path, cap
     def git_runner(args, cwd=None):
         raise AssertionError(f"unexpected git call: {args}")
 
-    exit_code = handle(parse(["add", ":alpha"]), cwd=project, home=home, git_runner=git_runner)
+    exit_code = handle(
+        parse(["add", ":alpha"]), cwd=project, home=home, git_runner=git_runner
+    )
 
     assert exit_code == 1
-    assert "Invalid skill reference ':alpha'. Use repo:skill." in capsys.readouterr().err
+    assert (
+        "Invalid skill reference ':alpha'. Use repo:skill." in capsys.readouterr().err
+    )
 
 
 def test_missing_qualified_skill_reference_reports_exact_reference(tmp_path: Path):
@@ -1578,7 +2613,9 @@ def test_duplicate_add_choice_can_be_cancelled(tmp_path: Path, capsys):
 def test_add_all_and_interactive_report_empty_catalog(tmp_path: Path, capsys):
     project = tmp_path / "project"
 
-    assert cli_module._handle_add_all([], cwd=project, adapter=cli_module.PiAdapter()) == 0
+    assert (
+        cli_module._handle_add_all([], cwd=project, adapter=cli_module.PiAdapter()) == 0
+    )
     assert (
         cli_module._handle_add_interactive(
             [],
@@ -1717,11 +2754,15 @@ def test_choose_skill_accepts_empty_checkbox_selection(monkeypatch, tmp_path: Pa
     assert cli_module._choose_skill([_source_skill(tmp_path, "source")]) is None
 
 
-def _source_skill(tmp_path: Path, repo_folder: str, *, repo_id: str = "Org/Skills") -> SourceSkill:
+def _source_skill(
+    tmp_path: Path, repo_folder: str, *, repo_id: str = "Org/Skills"
+) -> SourceSkill:
     source = tmp_path / repo_folder
     skill_dir = source / "skills" / "alpha"
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: alpha\ndescription: Alpha skill.\n---\n")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
     return SourceSkill(
         name="alpha",
         description="Alpha skill.",
@@ -1768,7 +2809,9 @@ def test_cli_rejects_invalid_remove_argument_combinations(tmp_path: Path, run_sv
         assert message in result.stderr
 
 
-def test_cli_list_and_search_without_source_config_print_guidance(tmp_path: Path, run_sv):
+def test_cli_list_and_search_without_source_config_print_guidance(
+    tmp_path: Path, run_sv
+):
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
@@ -1783,8 +2826,12 @@ def test_cli_list_and_search_without_source_config_print_guidance(tmp_path: Path
 
 
 def test_cli_global_status_records_source_state_in_every_cwd(tmp_path: Path):
-    assert cli_module._should_record_global_source_state(tmp_path / "project", tmp_path / "home")
-    assert cli_module._should_record_global_source_state(tmp_path / "home", tmp_path / "home")
+    assert cli_module._should_record_global_source_state(
+        tmp_path / "project", tmp_path / "home"
+    )
+    assert cli_module._should_record_global_source_state(
+        tmp_path / "home", tmp_path / "home"
+    )
 
 
 def test_cli_prompt_for_initial_sources_handles_cancel_custom_repo_and_retries(
@@ -1864,7 +2911,4 @@ def test_handle_validates_sv_jobs_from_injected_environment(tmp_path):
     )
 
     assert exit_code == 1
-    assert (
-        "SV_JOBS must be an integer between 1 and 64."
-        in stderr.getvalue()
-    )
+    assert "SV_JOBS must be an integer between 1 and 64." in stderr.getvalue()

@@ -1,6 +1,6 @@
 # sv command reference
 
-Use `sv` from the project root where you want Pi skills installed under `.pi/skills`.
+Use `sv` from the project root where you want project skills installed under the default agent skill folder.
 
 ## Daily commands
 
@@ -10,19 +10,20 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `sv status` | You want local managed-skill state. | Reports modified, update-available, orphan, missing/invalid target, index, and README status for projects, skill-vaults, or global source context. Uses fresh cached source metadata when available; use `sv status --refresh` for an immediate current-source check or `sv status --cached` to avoid source refreshes. Global source index/catalog hashes are abbreviated to the first 12 digest characters for readable tables; full hashes stay in `~/.sv/manifest.toml`. |
 | `sv list` | You want to see available source skills. | Uses fresh cached metadata when available, refreshes lazily when it expires, and supports `--refresh` to force a source refresh. If no repos are configured, prints the `sv repo add` next step. TTY output opens an interactive browser. Press `/` to open the framed search prompt with ranked results; Enter applies the typed search, empty Enter clears the active search, and Esc cancels without changing the current results. Enter opens a framed inline detail card, detail `a` adds the shown skill and shows the add result/status, detail `q`/Esc returns to the list, and list `q`/Esc exits; non-TTY output prints the compact table and duplicate-name `Add as` section. |
 | `sv search <query>` | You want to find source skills by text. | Searches skill name, description, repo, and source path. Non-TTY output is a ranked table; TTY output opens the searchable browser. Press `/` to open the framed search prompt with ranked results; Enter applies the typed search, empty Enter clears the active search, and Esc cancels without changing the current results. Enter opens a framed inline detail card, detail `a` adds the shown skill and shows the add result/status, detail `q`/Esc returns to the list, and list `q`/Esc exits. |
-| `sv add <skill>` | One configured repo provides the skill name. | Never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
+| `sv add <skill>` | One configured repo provides the skill name. | Installs into the default agent skill folder and never overwrites an existing project skill. If multiple repos match in an interactive terminal, shows a compact source-choice table before prompting. |
 | `sv add <repo>:<skill>` or `sv add <repo>:<path/to/skill>` | Multiple repos or source paths provide the same skill name. | Copy the exact `Add as` value from the `Duplicate skill names` section in `sv list`. |
 | `sv add -l` | You want to select several skills interactively. | Requires a TTY. Press `/` to open the framed search prompt. Enter applies the typed search, empty Enter clears the active search, and Esc cancels without changing the current results. Use Space to select and Enter to confirm. |
 | `sv add --all` | You want every non-conflicting source skill. | Stops before copying if duplicate skill names exist across repos. |
 | `sv add --all --repo <repo>` | You want every non-conflicting skill from one source. | Restricts bulk add to the configured repo ID, useful when other repos contain duplicate skill names. |
-| `sv add --replace <skill>` | You are adding inside a skill-vault and intentionally want to replace an existing vault skill. | Project `.pi/skills` adds still never overwrite; non-TTY vault replacement requires `--replace`. |
-| `sv remove <skill>` | You want to remove one project skill. | Updates the canonical `.sv/manifest.toml` project manifest. |
+| `sv add --replace <skill>` | You are adding inside a skill-vault and intentionally want to replace an existing vault skill. | Normal project adds to the default agent skill folder still never overwrite; non-TTY vault replacement requires `--replace`. |
+| `sv remove <skill>` | You want to remove one project skill from the default agent skill folder. | Updates the canonical `.sv/manifest.toml` project manifest. |
 | `sv remove -l` | You want to remove several sv-managed entries interactively. | Lists managed local skills, not source skills, and may include stale missing/invalid manifest entries so they can be pruned. |
 | `sv remove --all` | You want to remove every sv-managed local skill. | Removes managed skills only; manual/unmanaged skill folders are kept. Confirmed bulk removal also prunes stale manifest entries whose managed skill folder is missing or no longer a directory. |
 | `sv remove --all --yes` | You want non-interactive bulk removal. | Confirms bulk removal without prompting, which is required for non-TTY `--all` use. |
+| `sv default [pi|claude|agents]` | You want to show or change the project default agent folder. | Without an argument, prints the current default and supported values. With an agent, writes `default_agent` to `.sv/manifest.toml`. |
 | `sv update` | You want a safe refresh of sources and unchanged local skills. | Refreshes configured sources, updates only managed skill folders without local modifications, and preserves local edits by marking modified skills with update-available state. Uses the same trusted-index optimization as sync. |
 | `sv sync` | You want installed skills force-refreshed from their recorded sources. | Refreshes configured sources first; overwrites managed skill folders. Trust configured sources: when a refreshed source index reports the same content hash already recorded in the project manifest, `sv` skips re-materializing that skill as an optimization. |
-| `sv run -- <pi args>` | You want Pi to use only project-local skills. | Validates `.pi/skills` for symlinks and bounded skill trees, then runs `pi --no-skills --skill .pi/skills ...`. |
+| `sv run pi [pi args]` | You want Pi to use only project-local skills. | Uses the explicit supported agent name `pi`, validates `.pi/skills` for symlinks and bounded skill trees, then runs `pi --no-skills --skill .pi/skills ...`. |
 
 ## Source repo commands
 
@@ -40,6 +41,17 @@ Use `sv` from the project root where you want Pi skills installed under `.pi/ski
 | `svx <repo> --no-warm-cache` | Add a source repo through `svx` without the default best-effort local cache warm step. |
 
 `sv repo remove` only changes global configuration. It does not delete cached clones and does not remove skills already installed in projects. Use `sv repo -l` as a shorter spelling of `sv repo list`; it accepts the same cache flags. In non-TTY output, repo-list cache flags parse successfully but the plain repo table does not load source metadata. `svx` is a shortcut for adding a source repo from scripts or shells where a shorter command is useful. Cache warming after `sv repo add` or `svx` is local and best-effort: warnings do not undo the repo configuration, and `--no-warm-cache` skips only that warm step.
+
+Project skills can be installed under one supported project agent folder:
+`.pi/skills`, `.claude/skills`, or `.agents/skills`.
+
+Use `sv default` to show the current project default agent. Use
+`sv default pi`, `sv default claude`, or `sv default agents` to set it.
+The selected value is stored in `.sv/manifest.toml` as `default_agent`.
+Changing it affects future project commands only; sv does not migrate existing
+skill folders between agents.
+
+`sv run` still requires an explicit supported run agent. The supported run agent is `pi`, and it uses `.pi/skills` regardless of the project default agent. Put Pi arguments after the agent name, for example `sv run pi --model fast`.
 
 ## Index publishing
 
@@ -63,7 +75,7 @@ Search is case-insensitive across skill name, description, repo, and source path
 
 ## Duplicate skill names
 
-A project can only contain one `.pi/skills/<name>` folder. When multiple source repos provide the same skill name:
+A project can only contain one folder for a given skill name in its default agent skill folder. When multiple source repos provide the same skill name:
 
 1. Run `sv list`.
 2. Copy the `Add as` value from the `Duplicate skill names` section for the source you want.

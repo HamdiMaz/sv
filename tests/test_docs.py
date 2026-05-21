@@ -26,6 +26,7 @@ README_PATH = _PROJECT_ROOT / "README.md"
 CHANGELOG_PATH = _PROJECT_ROOT / "CHANGELOG.md"
 DOCS_DIR = _PROJECT_ROOT / "docs"
 WORKFLOW_PATH = _PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+NO_AGENT_RUN_SEPARATOR_RE = re.compile(r"\bsv\s+run\s+--(?:\s|$)")
 
 FULL_RELEASE_COMMANDS = [
     "uv run ruff check .",
@@ -52,7 +53,11 @@ COMMON_DOC_COMMAND_EXAMPLES = [
     "sv remove find-docs",
     "sv sync",
     "sv update",
-    "sv run -- --model fast",
+    "sv default",
+    "sv default pi",
+    "sv default claude",
+    "sv default agents",
+    "sv run pi --model fast",
     "sv repo add HamdiMaz/Skills",
     "sv repo add HamdiMaz/Skills --no-warm-cache",
     "sv repo list",
@@ -64,7 +69,10 @@ COMMON_DOC_COMMAND_EXAMPLES = [
 
 def _documented_paths() -> list[Path]:
     paths = [README_PATH]
-    paths.extend(sorted(DOCS_DIR.glob("*.md")))
+    paths.extend(
+        # Exclude non-user-facing implementation planning artifacts from docs checks.
+        path for path in sorted(DOCS_DIR.glob("*.md")) if not path.name.endswith("-plan.md")
+    )
     return paths
 
 
@@ -269,6 +277,32 @@ def test_common_documented_sv_command_examples_parse(command):
 
 
 @pytest.mark.parametrize(
+    "stale_example",
+    [
+        "sv run -- --model fast",
+        "sv run -- --help",
+        "sv run -- <args>",
+        "sv run --",
+    ],
+)
+def test_no_agent_run_separator_pattern_rejects_stale_forms(stale_example):
+    assert NO_AGENT_RUN_SEPARATOR_RE.search(stale_example)
+
+
+def test_no_agent_run_separator_pattern_allows_explicit_agent_name():
+    assert NO_AGENT_RUN_SEPARATOR_RE.search("sv run pi --model fast") is None
+
+
+def test_docs_use_explicit_run_agent_name():
+    docs_text = "\n".join(
+        path.read_text(encoding="utf-8") for path in _documented_paths()
+    )
+
+    assert NO_AGENT_RUN_SEPARATOR_RE.search(docs_text) is None
+    assert "sv run pi --model fast" in docs_text
+
+
+@pytest.mark.parametrize(
     "command",
     [
         "sv repo add ExampleOrg/Skills --no-warm-cache",
@@ -332,6 +366,68 @@ def test_command_reference_documents_search():
     assert "name, description, repo, and source path" in command_reference
     assert "fuzzy matching for skill names, repo IDs, aliases, and source paths" in command_reference
     assert "descriptions match by text substring" in command_reference
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        README_PATH,
+        DOCS_DIR / "commands.md",
+        DOCS_DIR / "usage.md",
+        DOCS_DIR / "getting-started.md",
+        DOCS_DIR / "output.md",
+        DOCS_DIR / "troubleshooting.md",
+    ],
+)
+def test_required_docs_describe_project_default_agents(path: Path):
+    text = path.read_text(encoding="utf-8")
+
+    for snippet in [
+        "sv default",
+        ".pi/skills",
+        ".claude/skills",
+        ".agents/skills",
+        "default_agent",
+        "default agent",
+    ]:
+        assert snippet in text, (
+            f"{path.relative_to(_PROJECT_ROOT)} should document the project "
+            f"default-agent contract and mention {snippet!r}."
+        )
+
+
+def test_output_docs_describe_complete_default_agent_contract():
+    output = (DOCS_DIR / "output.md").read_text(encoding="utf-8")
+
+    for snippet in [
+        "Project skills can be installed under one supported project agent folder",
+        ".pi/skills",
+        ".claude/skills",
+        ".agents/skills",
+        "sv default",
+        "sv default pi",
+        "sv default claude",
+        "sv default agents",
+        ".sv/manifest.toml",
+        "default_agent",
+        "project commands use the default agent",
+        "sv run pi",
+        "uses `.pi/skills` regardless of the project default agent",
+    ]:
+        assert snippet in output, f"docs/output.md is missing {snippet!r}."
+
+
+def test_quick_start_docs_set_default_agent_before_noninteractive_add():
+    readme = README_PATH.read_text(encoding="utf-8")
+    quick_start = readme[readme.index("## Quick start") : readme.index("## Commands")]
+    assert quick_start.index("sv default pi") < quick_start.index("sv add find-docs")
+
+    getting_started = (DOCS_DIR / "getting-started.md").read_text(encoding="utf-8")
+    add_skills = getting_started[
+        getting_started.index("## 3. Add skills to your project") :
+        getting_started.index("## 4. Keep skills updated")
+    ]
+    assert add_skills.index("sv default pi") < add_skills.index("sv add find-docs")
 
 
 def test_docs_describe_framed_interactive_search_prompt():
@@ -430,7 +526,7 @@ def test_docs_describe_sv_jobs_parallelism_control() -> None:
     testing_guide = (DOCS_DIR / "testing.md").read_text(encoding="utf-8")
     usage_guide = (DOCS_DIR / "usage.md").read_text(encoding="utf-8")
 
-    assert readme.index("Project Pi skills live under") < readme.index("## Parallel work")
+    assert readme.index("Project skills can be installed") < readme.index("## Parallel work")
     assert "## Parallel work" in readme
     assert "SV_JOBS=1" in readme
     assert "1 through 64" in readme
@@ -611,7 +707,7 @@ def test_documented_local_markdown_links_exist(
 
 
 def test_local_markdown_links_keep_fragments_for_anchor_validation():
-    assert ("docs/usage.md", 47, "commands.md#global-cache") in _local_markdown_links()
+    assert ("docs/usage.md", 64, "commands.md#global-cache") in _local_markdown_links()
 
 
 def test_readme_links_to_expected_local_docs():
