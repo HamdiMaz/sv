@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import threading
 from typing import Any, TextIO, TypeVar, cast
+import unicodedata
 
 from sv.table import CellWidths, DetailLine, detail_line, format_table
 
@@ -100,7 +101,7 @@ class LoadingReporter:
         self._frames = tuple(frames) or ("-",)
         self._interval_seconds = interval_seconds
         self._lock = threading.RLock()
-        self._stop_event = threading.Event()
+        self._stop_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
         self._active_count = 0
         self._message = ""
@@ -143,10 +144,12 @@ class LoadingReporter:
             if self._active_count > 1:
                 return
             self._message = message
-            self._stop_event.clear()
+            stop_event = threading.Event()
+            self._stop_event = stop_event
             self._render_locked()
             self._thread = threading.Thread(
                 target=self._animate,
+                args=(stop_event,),
                 name="sv-loading-reporter",
                 daemon=True,
             )
@@ -154,27 +157,37 @@ class LoadingReporter:
 
     def _stop(self) -> None:
         thread: threading.Thread | None = None
+        stop_event: threading.Event | None = None
         with self._lock:
             if self._active_count == 0:
                 return
             self._active_count -= 1
             if self._active_count > 0:
                 return
-            self._stop_event.set()
+            stop_event = self._stop_event
+            if stop_event is not None:
+                stop_event.set()
             thread = self._thread
 
         if thread is not None:
             thread.join(timeout=1.0)
 
         with self._lock:
+            if (
+                self._thread is not thread
+                or self._stop_event is not stop_event
+                or self._active_count > 0
+            ):
+                return
             self._thread = None
+            self._stop_event = None
             self._clear_locked()
             self._message = ""
 
-    def _animate(self) -> None:
-        while not self._stop_event.wait(self._interval_seconds):
+    def _animate(self, stop_event: threading.Event) -> None:
+        while not stop_event.wait(self._interval_seconds):
             with self._lock:
-                if self._active_count == 0:
+                if self._stop_event is not stop_event or self._active_count == 0:
                     return
                 self._render_locked()
 
@@ -182,7 +195,7 @@ class LoadingReporter:
         frame = self._frames[self._frame_index % len(self._frames)]
         self._frame_index += 1
         rendered = f"{frame} {self._message}"
-        self._last_render_width = len(rendered)
+        self._last_render_width = _display_width(rendered)
         self._stream.write(f"\r{rendered}")
         self._stream.flush()
 
@@ -192,6 +205,18 @@ class LoadingReporter:
         self._stream.write("\r" + (" " * self._last_render_width) + "\r")
         self._stream.flush()
         self._last_render_width = 0
+
+
+def _display_width(value: str) -> int:
+    return sum(_character_width(char) for char in value)
+
+
+def _character_width(char: str) -> int:
+    if unicodedata.combining(char):
+        return 0
+    if unicodedata.east_asian_width(char) in {"F", "W"}:
+        return 2
+    return 1
 
 
 @dataclass(frozen=True)

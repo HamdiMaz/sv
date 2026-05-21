@@ -1,8 +1,18 @@
 import io
 import subprocess
 import sys
+import unicodedata
 
 from sv.ui import CHOSEN_TTY_UI_APPROACH, PlainOutput, TtyUi, select_tty_items
+
+
+def _display_width(value: str) -> int:
+    width = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    return width
 
 
 class _TtyStringIO(io.StringIO):
@@ -73,6 +83,69 @@ def test_loading_reporter_print_line_clears_and_redraws_active_spinner():
     clear_sequence = "\r" + (" " * len(rendered)) + "\r"
     assert clear_sequence + "warning: using stale cached metadata\n" in output
     assert output.endswith(clear_sequence)
+
+
+def test_loading_reporter_clears_wide_unicode_by_display_width():
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+
+    with reporter.operation("刷新"):
+        pass
+
+    rendered = "| 刷新"
+    assert stream.getvalue().endswith(
+        "\r" + (" " * _display_width(rendered)) + "\r"
+    )
+
+
+def test_loading_reporter_stop_does_not_clear_new_operation_started_during_join(
+    monkeypatch,
+):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+    started_threads = []
+    join_started_new_operation = False
+
+    class JoinControlledThread:
+        def __init__(self, *args, **kwargs):
+            started_threads.append(self)
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            nonlocal join_started_new_operation
+            if not join_started_new_operation:
+                join_started_new_operation = True
+                reporter._start("new operation")
+
+    monkeypatch.setattr(ui_module.threading, "Thread", JoinControlledThread)
+
+    reporter._start("old operation")
+    old_thread = reporter._thread
+
+    reporter._stop()
+
+    assert join_started_new_operation is True
+    assert reporter._active_count == 1
+    assert reporter._message == "new operation"
+    assert reporter._thread is started_threads[1]
+    assert reporter._thread is not old_thread
 
 
 def test_plain_output_import_does_not_load_tty_selector_module():
