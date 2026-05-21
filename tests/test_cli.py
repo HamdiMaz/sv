@@ -132,6 +132,68 @@ def test_default_show_does_not_infer_or_persist_single_existing_folder(
     assert not (project / ".sv" / "manifest.toml").exists()
 
 
+def test_resolve_active_project_agent_rejects_manifest_default_symlinked_folder(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    target = tmp_path / "outside-claude"
+    target.mkdir()
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    (project / ".claude").symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(SvError, match="Refusing to use symlinked Claude agent folder"):
+        cli_module._resolve_active_project_agent(cli_module.LocalContext(repo_root=project))
+
+
+def test_resolve_active_project_agent_rejects_regular_file_agent_folder(
+    tmp_path: Path,
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".agents").write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(SvError, match="Agents agent folder .* is not a directory"):
+        cli_module._resolve_active_project_agent(cli_module.LocalContext(repo_root=project))
+
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_default_set_from_home_global_manifest_refuses_to_overwrite_sources(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    global_manifest = home / ".sv" / "manifest.toml"
+    global_manifest.parent.mkdir(parents=True)
+    global_manifest.write_text("schema_version = 1\nsources = []\n", encoding="utf-8")
+
+    result = run_sv(["default", "claude"], cwd=home, home=home)
+
+    assert result.exit_code == 1
+    assert "sv default is for project agent folders" in result.stderr
+    assert (
+        global_manifest.read_text(encoding="utf-8")
+        == "schema_version = 1\nsources = []\n"
+    )
+
+
+def test_default_set_rejects_symlinked_agent_folder(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    target = tmp_path / "outside-claude"
+    project.mkdir()
+    target.mkdir()
+    (project / ".claude").symlink_to(target, target_is_directory=True)
+
+    result = run_sv(["default", "claude"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Refusing to use symlinked Claude agent folder" in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
 def test_default_rejects_skill_vault_context(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     vault = tmp_path / "vault"

@@ -16,6 +16,7 @@ import unicodedata
 
 from sv.agents import (
     PiAdapter,
+    ProjectAgent,
     normalize_project_agent,
     project_agent_for,
     supported_project_agents,
@@ -538,7 +539,11 @@ def handle(
             return _handle_index(cwd, args=args)
 
         if args.command == "default":
-            return _handle_default(args.agent, cwd)
+            return _handle_default(
+                args.agent,
+                cwd,
+                global_manifest_file=paths.global_manifest_file,
+            )
 
         if args.command == "run":
             invocation = _parse_run_invocation(args.run_args)
@@ -826,11 +831,21 @@ def _save_project_manifest_document(
     save_manifest_document(_manifest_skills_dir_for_project_root(context.repo_root), document)
 
 
-def _handle_default(agent: str | None, cwd: Path) -> int:
-    context = _detect_local_context(cwd)
+def _handle_default(
+    agent: str | None, cwd: Path, *, global_manifest_file: Path | None = None
+) -> int:
+    context = _detect_local_context(cwd, global_manifest_file=global_manifest_file)
     if context.is_skill_vault:
         raise SvError(
             "sv default is for project agent folders; skill-vaults install to skills/<name>."
+        )
+    manifest = project_manifest_path(context.repo_root)
+    has_project_manifest = manifest.is_file() and _is_non_git_project_manifest(
+        manifest, global_manifest_file=global_manifest_file
+    )
+    if agent is not None and manifest.is_file() and not has_project_manifest:
+        raise SvError(
+            "sv default is for project agent folders; refusing to overwrite global source manifest."
         )
     document = _load_project_manifest_document(context)
     if agent is None:
@@ -847,6 +862,7 @@ def _handle_default(agent: str | None, cwd: Path) -> int:
 
     agent_name = normalize_project_agent(agent)
     project_agent = project_agent_for(agent_name)
+    _validate_project_agent_folder(context.repo_root, project_agent)
     _save_project_manifest_document(
         context,
         ManifestDocument(
@@ -865,6 +881,7 @@ def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
     document = _load_project_manifest_document(context)
     if document.default_agent is not None:
         agent = project_agent_for(document.default_agent)
+        _validate_project_agent_folder(context.repo_root, agent)
         return ActiveProjectAgent(agent.name, agent.project_skill_dir(context.repo_root))
 
     existing_agents = _existing_project_agent_folders(context.repo_root)
@@ -887,6 +904,7 @@ def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
         raise SvError(
             "No default agent selected. Run 'sv default <agent>' to choose explicitly."
         )
+    _validate_project_agent_folder(context.repo_root, chosen)
     _save_project_manifest_document(
         context,
         ManifestDocument(default_agent=chosen.name, skills=document.skills),
@@ -899,13 +917,23 @@ def _existing_project_agent_folders(project_root: Path):
     for agent in supported_project_agents():
         folder = project_root / agent.folder
         if folder.exists() or folder.is_symlink():
-            if folder.is_symlink():
-                raise SvError(
-                    f"Refusing to use symlinked {agent.display_name} agent folder at "
-                    f"{_escape_output_path(folder)}."
-                )
+            _validate_project_agent_folder(project_root, agent)
             existing.append(agent)
     return existing
+
+
+def _validate_project_agent_folder(project_root: Path, agent: ProjectAgent) -> None:
+    folder = project_root / agent.folder
+    if folder.is_symlink():
+        raise SvError(
+            f"Refusing to use symlinked {agent.display_name} agent folder at "
+            f"{_escape_output_path(folder)}."
+        )
+    if folder.exists() and not folder.is_dir():
+        raise SvError(
+            f"Existing {agent.display_name} agent folder at "
+            f"{_escape_output_path(folder)} is not a directory."
+        )
 
 
 def _choose_project_agent_interactively(project_root: Path):
