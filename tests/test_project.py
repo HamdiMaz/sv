@@ -16,13 +16,17 @@ from sv.manifest import ManifestEntry, load_manifest, save_manifest
 from sv.project import (
     add_all_project_skills,
     add_all_vault_skills,
+    add_project_agent_skill,
     add_project_skill,
     add_vault_skill,
     list_project_skills,
     normalize_skill_name,
+    remove_project_agent_skill,
     remove_project_skill,
+    sync_project_agent_skills,
     sync_project_skills,
     refresh_project_skill_local_states,
+    update_project_agent_skills,
     update_project_skills,
 )
 
@@ -89,6 +93,96 @@ def test_add_project_skill_from_catalog_writes_manifest(tmp_path: Path):
     manifest = load_manifest(project_skills)
     assert manifest["alpha"].repo_id == "Org/Skills"
     assert manifest["alpha"].source_path == "skills/alpha"
+
+
+def test_add_project_agent_skill_writes_claude_target_metadata(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project = tmp_path / "project"
+    project_skills = project / ".claude" / "skills"
+
+    result = add_project_agent_skill(entry, project_skills, "claude")
+
+    assert result.status == "added"
+    assert result.target == project_skills / "alpha"
+    assert result.target_kind == "project-agent"
+    assert result.target_agent == "claude"
+    manifest = load_manifest(project_skills)
+    assert manifest["alpha"].target_kind == "project-agent"
+    assert manifest["alpha"].target_agent == "claude"
+    assert manifest["alpha"].target_path == ".claude/skills/alpha"
+
+
+def test_project_manifest_keeps_same_skill_for_multiple_agents(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project = tmp_path / "project"
+    pi_skills = project / ".pi" / "skills"
+    claude_skills = project / ".claude" / "skills"
+
+    add_project_agent_skill(entry, pi_skills, "pi")
+    add_project_agent_skill(entry, claude_skills, "claude")
+
+    manifest = load_manifest(pi_skills)
+    assert len(manifest) == 2
+    assert sorted(
+        (item.name, item.target_agent, item.target_path)
+        for item in manifest.values()
+    ) == [
+        ("alpha", "claude", ".claude/skills/alpha"),
+        ("alpha", "pi", ".pi/skills/alpha"),
+    ]
+
+
+def test_remove_project_agent_skill_removes_only_selected_agent(tmp_path: Path):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    project = tmp_path / "project"
+    pi_skills = project / ".pi" / "skills"
+    claude_skills = project / ".claude" / "skills"
+    add_project_agent_skill(entry, pi_skills, "pi")
+    add_project_agent_skill(entry, claude_skills, "claude")
+
+    result = remove_project_agent_skill("alpha", claude_skills, "claude")
+
+    assert result.target_agent == "claude"
+    assert not (claude_skills / "alpha").exists()
+    assert (pi_skills / "alpha").is_dir()
+    remaining = load_manifest(pi_skills)
+    assert [(item.name, item.target_agent) for item in remaining.values()] == [
+        ("alpha", "pi")
+    ]
+
+
+def test_sync_project_agent_skills_syncs_only_selected_agent(tmp_path: Path):
+    source_alpha = make_source_skill(tmp_path / "source", "alpha")
+    project = tmp_path / "project"
+    pi_skills = project / ".pi" / "skills"
+    claude_skills = project / ".claude" / "skills"
+    add_project_agent_skill(source_alpha, pi_skills, "pi")
+    add_project_agent_skill(source_alpha, claude_skills, "claude")
+    (source_alpha.source_path / "notes.md").write_text("alpha synced\n")
+
+    result = sync_project_agent_skills([source_alpha], claude_skills, "claude")
+
+    assert result.target_agent == "claude"
+    assert result.updated == ["alpha"]
+    assert (claude_skills / "alpha" / "notes.md").read_text() == "alpha synced\n"
+    assert (pi_skills / "alpha" / "notes.md").read_text() == "alpha remote\n"
+
+
+def test_update_project_agent_skills_updates_only_selected_agent(tmp_path: Path):
+    source_alpha = make_source_skill(tmp_path / "source", "alpha")
+    project = tmp_path / "project"
+    agents_skills = project / ".agents" / "skills"
+    pi_skills = project / ".pi" / "skills"
+    add_project_agent_skill(source_alpha, agents_skills, "agents")
+    add_project_agent_skill(source_alpha, pi_skills, "pi")
+    (source_alpha.source_path / "notes.md").write_text("alpha updated\n")
+
+    result = update_project_agent_skills([source_alpha], agents_skills, "agents")
+
+    assert result.target_agent == "agents"
+    assert result.updated == ["alpha"]
+    assert (agents_skills / "alpha" / "notes.md").read_text() == "alpha updated\n"
+    assert (pi_skills / "alpha" / "notes.md").read_text() == "alpha remote\n"
 
 
 def test_add_project_skill_validates_materialized_folder_through_adapter(
