@@ -120,7 +120,7 @@ def test_tty_list_browses_source_skills_with_details_by_default(
         assert "Path    " in detail_text
         assert "├─ Description" in detail_text
         assert "Alpha skill." in detail_text
-        assert kwargs["detail_key_help"] == "a add • q back"
+        assert kwargs["detail_key_help"] == ""
         status = kwargs["detail_actions"]["a"](rows[0])
         assert "Added Pi skill 'alpha'" in status
         return None
@@ -153,7 +153,7 @@ def test_tty_list_browses_source_skills_with_details_by_default(
 
 
 @pytest.mark.integration
-def test_tty_list_detail_card_renders_right_edge_and_section_closure(
+def test_tty_list_detail_card_renders_bordered_sections_footer_and_plain_title(
     tmp_path: Path, run_sv, monkeypatch
 ):
     source = make_source_repo(tmp_path)
@@ -165,10 +165,17 @@ def test_tty_list_detail_card_renders_right_edge_and_section_closure(
     monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
     detail_frames = []
+    title_styles = []
+    detail_key_help_values = []
 
     def fake_browse(_headers, rows, **kwargs):
-        detail_frames.append(
-            _detail_visible_lines(kwargs["detail_renderer"](rows[0], None))
+        detail_key_help_values.append(kwargs["detail_key_help"])
+        detail = kwargs["detail_renderer"](rows[0], None)
+        detail_frames.append(_detail_visible_lines(detail))
+        title_styles.extend(
+            getattr(line, "style", "")
+            for line in detail
+            if getattr(line, "text", "").startswith("│ alpha ● available")
         )
         return None
 
@@ -177,7 +184,9 @@ def test_tty_list_detail_card_renders_right_edge_and_section_closure(
     result = run_sv(["list"], cwd=project, home=home)
 
     assert result.exit_code == 0
-    frame = detail_frames[0][:5]
+    assert detail_key_help_values == [""]
+    assert title_styles == [""]
+    frame = detail_frames[0]
     assert frame[0].startswith("╭─ Skill")
     assert frame[0].endswith("╮")
     assert frame[1].startswith("│ alpha ● available")
@@ -187,8 +196,61 @@ def test_tty_list_detail_card_renders_right_edge_and_section_closure(
     assert frame[3].startswith("│ Path    ")
     assert frame[3].endswith("│")
     assert frame[4].startswith("├─ Description")
-    assert frame[4].endswith("╯")
+    assert frame[4].endswith("┤")
+    assert frame[5].startswith("│ Alpha skill.")
+    assert frame[5].endswith("│")
+    assert frame[-3].startswith("├")
+    assert frame[-3].endswith("┤")
+    assert "Description" not in frame[-3]
+    assert "Skill" not in frame[-3]
+    assert frame[-2].startswith("│ a add • q back")
+    assert frame[-2].endswith("│")
+    assert frame[-1].startswith("╰")
+    assert frame[-1].endswith("╯")
     assert {display_width(line) for line in frame} == {display_width(frame[0])}
+
+
+@pytest.mark.integration
+def test_tty_list_detail_card_renders_status_section_before_footer(
+    tmp_path: Path, run_sv, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    detail_frames = []
+    status_styles = []
+
+    def fake_browse(_headers, rows, **kwargs):
+        status = "Added Pi skill 'alpha' to .pi/skills/alpha."
+        detail = kwargs["detail_renderer"](rows[0], status)
+        detail_frames.append(_detail_visible_lines(detail))
+        status_styles.extend(
+            getattr(line, "style", "")
+            for line in detail
+            if getattr(line, "text", "").startswith("│ Added Pi skill")
+        )
+        return None
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+
+    result = run_sv(["list"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    frame = detail_frames[0]
+    status_index = next(
+        index for index, line in enumerate(frame) if line.startswith("├─ Status")
+    )
+    assert frame[status_index].endswith("┤")
+    assert frame[status_index + 1].startswith("│ Added Pi skill")
+    assert frame[status_index + 1].endswith("│")
+    assert frame[-2].startswith("│ a add • q back")
+    assert frame[-1].startswith("╰")
+    assert status_styles == ["success"]
 
 
 @pytest.mark.integration
@@ -451,7 +513,7 @@ def test_tty_search_browses_ranked_matches_with_details_by_default(
         assert "Path    " in detail_text
         assert "├─ Description" in detail_text
         assert "Docs skill." in detail_text
-        assert kwargs["detail_key_help"] == "a add • q back"
+        assert kwargs["detail_key_help"] == ""
         status = kwargs["detail_actions"]["a"](rows[0])
         assert "Added Pi skill 'docs'" in status
         return None
@@ -537,8 +599,12 @@ def test_tty_detail_add_reports_escaped_refresh_errors(
         status = kwargs["detail_actions"]["a"](rows[0])
         statuses.append(status)
         detail = kwargs["detail_renderer"](rows[0], status)
-        assert getattr(detail[-1], "text") == "refresh\\x1b failed"
-        assert getattr(detail[-1], "style") == ""
+        status_line = next(
+            line
+            for line in detail
+            if "refresh\\x1b failed" in getattr(line, "text", "")
+        )
+        assert getattr(status_line, "style") == ""
         return None
 
     monkeypatch.setattr(cli_module, "_refresh_local_index_if_needed", fail_refresh)
@@ -603,11 +669,18 @@ def test_tty_detail_renderer_with_stale_row_preserves_status_line(
 
     assert result.exit_code == 0
     stale_detail = detail_texts[0]
-    assert getattr(stale_detail[1], "text") == "Still open"
-    assert getattr(stale_detail[1], "indent") == 2
-    assert [_detail_visible_text(detail) for detail in detail_texts] == [
-        "Status\n  Still open"
-    ]
+    stale_frame = _detail_visible_lines(stale_detail)
+    assert stale_frame[0].startswith("╭─ Status")
+    assert stale_frame[0].endswith("╮")
+    assert stale_frame[1].startswith("│ Still open")
+    assert stale_frame[1].endswith("│")
+    assert stale_frame[-2].startswith("│ a add • q back")
+    assert stale_frame[-2].endswith("│")
+    assert stale_frame[-1].startswith("╰")
+    assert stale_frame[-1].endswith("╯")
+    assert {display_width(line) for line in stale_frame} == {
+        display_width(stale_frame[0])
+    }
 
 
 @pytest.mark.integration
@@ -670,6 +743,7 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
             assert kwargs["search_title"] == "Search skills"
             assert callable(kwargs.get("key_actions", {}).get("a"))
             assert kwargs.get("key_help") == "a add all"
+            assert kwargs["detail_key_help"] == ""
             assert kwargs.get("clear_on_exit") is True
             assert kwargs.get("on_detail") is None
             kwargs["key_actions"]["a"](rows[0])
@@ -734,8 +808,12 @@ def test_tty_repo_skill_browser_detail_action_installs_one_skill(
             status = kwargs["detail_actions"]["a"](rows[0])
             assert "Added Pi skill 'alpha'" in status
             status_detail = kwargs["detail_renderer"](rows[0], status)
-            assert getattr(status_detail[-1], "text") == status
-            assert getattr(status_detail[-1], "style") == "success"
+            status_line = next(
+                line
+                for line in status_detail
+                if getattr(line, "text", "").startswith("│ Added Pi skill")
+            )
+            assert getattr(status_line, "style") == "success"
         return None
 
     monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)

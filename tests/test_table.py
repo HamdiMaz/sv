@@ -236,6 +236,23 @@ def test_interactive_detail_default_footer_is_concise(monkeypatch):
     assert visible_lines == ["Skill: alpha", "a add • q back"]
 
 
+def test_interactive_detail_omits_empty_footer(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "80")
+    stdout = StringIO()
+
+    line_count = _render_interactive_detail(
+        ["alpha"],
+        lambda row, status: "Skill: " + row[0],
+        None,
+        stdout,
+        detail_key_help="",
+    )
+
+    visible_lines = [visible_text(line) for line in stdout.getvalue().splitlines()]
+    assert line_count == 1
+    assert visible_lines == ["Skill: alpha"]
+
+
 def test_interactive_detail_renders_styled_wrapped_lines_safely(monkeypatch):
     monkeypatch.setenv("COLUMNS", "28")
     stdout = StringIO()
