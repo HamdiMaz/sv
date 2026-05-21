@@ -104,7 +104,7 @@ Now = Callable[[], datetime]
 BackendFactory = Callable[[RepoConfig], Sequence[SourceBackend]]
 AfterStore = Callable[[SourceSkill, str, str], None]
 RefreshEntryOnBodyMiss = Callable[[SourceSkill], SourceSkill | None]
-SourceMaterializationContext = Callable[[SourceSkill], AbstractContextManager[None]]
+SourceMaterializationContext = Callable[[SourceSkill], AbstractContextManager[object]]
 
 
 @dataclass(frozen=True)

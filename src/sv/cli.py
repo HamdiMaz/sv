@@ -2434,7 +2434,7 @@ def _source_materialization_loading_message(entry: SourceSkill) -> str:
 def _source_materialization_loading_context(
     loading_reporter: LoadingReporter | None,
     entry: SourceSkill,
-) -> AbstractContextManager[None]:
+) -> AbstractContextManager[object]:
     if loading_reporter is None or _source_backend_is_local(entry.source_backend):
         return nullcontext()
     return loading_reporter.operation(_source_materialization_loading_message(entry))
