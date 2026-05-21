@@ -233,7 +233,7 @@ For safety, `sv` refuses to manage symlinked `.pi` / `.pi/skills` paths, symlink
 pi --no-skills --skill .pi/skills
 ```
 
-Start Pi through `sv run` when you want to use only project-local skills. `sv run` validates the project skill tree for symlinks and bounded size before launching Pi.
+Start Pi through `sv run pi` when you want to use only project-local skills. `sv run pi` validates the project skill tree for symlinks and bounded size before launching Pi.
 
 ## Troubleshooting
 

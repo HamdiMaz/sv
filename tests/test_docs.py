@@ -26,6 +26,7 @@ README_PATH = _PROJECT_ROOT / "README.md"
 CHANGELOG_PATH = _PROJECT_ROOT / "CHANGELOG.md"
 DOCS_DIR = _PROJECT_ROOT / "docs"
 WORKFLOW_PATH = _PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+NO_AGENT_RUN_SEPARATOR_RE = re.compile(r"\bsv\s+run\s+--(?:\s|$)")
 
 FULL_RELEASE_COMMANDS = [
     "uv run ruff check .",
@@ -65,6 +66,7 @@ COMMON_DOC_COMMAND_EXAMPLES = [
 def _documented_paths() -> list[Path]:
     paths = [README_PATH]
     paths.extend(
+        # Exclude non-user-facing implementation planning artifacts from docs checks.
         path for path in sorted(DOCS_DIR.glob("*.md")) if not path.name.endswith("-plan.md")
     )
     return paths
@@ -270,13 +272,29 @@ def test_common_documented_sv_command_examples_parse(command):
     _parse_sv_command(command)
 
 
+@pytest.mark.parametrize(
+    "stale_example",
+    [
+        "sv run -- --model fast",
+        "sv run -- --help",
+        "sv run -- <args>",
+        "sv run --",
+    ],
+)
+def test_no_agent_run_separator_pattern_rejects_stale_forms(stale_example):
+    assert NO_AGENT_RUN_SEPARATOR_RE.search(stale_example)
+
+
+def test_no_agent_run_separator_pattern_allows_explicit_agent_name():
+    assert NO_AGENT_RUN_SEPARATOR_RE.search("sv run pi --model fast") is None
+
+
 def test_docs_use_explicit_run_agent_name():
     docs_text = "\n".join(
         path.read_text(encoding="utf-8") for path in _documented_paths()
     )
 
-    assert "sv run -- --model fast" not in docs_text
-    assert "sv run -- <pi args>" not in docs_text
+    assert NO_AGENT_RUN_SEPARATOR_RE.search(docs_text) is None
     assert "sv run pi --model fast" in docs_text
 
 
