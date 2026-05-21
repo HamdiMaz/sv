@@ -16,6 +16,7 @@ from tests.helpers import parse_sv
             [
                 "project-local AI agent skills.",
                 "source repos",
+                "default",
                 "cache",
             ],
         ),

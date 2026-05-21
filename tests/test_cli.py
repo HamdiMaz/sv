@@ -1192,6 +1192,30 @@ def test_project_agent_result_formatting_uses_result_target_agent_label(
     ]
 
 
+def test_run_pi_ignores_project_default_agent(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    save_manifest_document(
+        project / ".pi" / "skills",
+        ManifestDocument(default_agent="claude", skills={}),
+    )
+    calls = []
+
+    def process_runner(command):
+        calls.append(command)
+        return 0
+
+    result = run_sv(
+        ["run", "pi", "--help"],
+        cwd=project,
+        home=home,
+        process_runner=process_runner,
+    )
+
+    assert result.exit_code == 0
+    assert calls == [["pi", "--no-skills", "--skill", ".pi/skills", "--help"]]
+
+
 def test_run_builds_isolated_pi_command_and_forwards_args(tmp_path: Path, run_sv):
     home = tmp_path / "home"
     project = tmp_path / "project"
