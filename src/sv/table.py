@@ -432,8 +432,9 @@ def _render_interactive_detail(
     while rendered_lines and rendered_lines[-1].visible == "":
         rendered_lines.pop()
     lines = [line.styled for line in rendered_lines]
-    footer = _fit_text(_sanitize_cell(detail_key_help), terminal_width)
-    lines.append(f"{_FG_MUTED}{footer}{_RESET}")
+    if detail_key_help:
+        footer = _fit_text(_sanitize_cell(detail_key_help), terminal_width)
+        lines.append(f"{_FG_MUTED}{footer}{_RESET}")
 
     stdout.write("\n".join(lines))
     stdout.write("\n")
