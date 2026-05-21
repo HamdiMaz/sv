@@ -10,6 +10,13 @@ import sv.process as process_module
 from sv.catalog import SourceSkill
 from sv.cli import _print_add_result, _print_sync_result, _print_wrapped, handle
 from sv.errors import SvError
+from sv.manifest import (
+    ManifestDocument,
+    ManifestEntry,
+    load_manifest_document,
+    save_manifest,
+    save_manifest_document,
+)
 from sv.project import AddSkillResult, RemoveSkillResult, SyncResult, SyncSkip
 from tests.helpers import (
     assert_no_raw_control_characters,
@@ -35,6 +42,94 @@ def _write_skill(skill_dir: Path, name: str, description: str = "Alpha skill.") 
         f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",
         encoding="utf-8",
     )
+
+
+def test_default_show_reports_unset_agent(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["default"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project default agent: unset" in result.stdout
+    assert "Supported agents: pi, claude, agents" in result.stdout
+
+
+def test_default_set_writes_manifest_default_without_migrating_skills(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    skill = project_skills / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n"
+    )
+    save_manifest(
+        project_skills,
+        {
+            "alpha": ManifestEntry(
+                name="alpha",
+                repo_id="Org/Skills",
+                repo_url="https://github.com/Org/Skills.git",
+                source_path="skills/alpha",
+                description="Alpha skill.",
+            )
+        },
+    )
+
+    result = run_sv(["default", "claude"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Default agent set to Claude" in result.stdout
+    document = load_manifest_document(project_skills)
+    assert document.default_agent == "claude"
+    assert document.skills["alpha"].target_agent == "pi"
+    assert skill.is_dir()
+
+
+def test_default_show_reports_current_default(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project_skills = project / ".pi" / "skills"
+    save_manifest_document(
+        project_skills,
+        ManifestDocument(default_agent="agents", skills={}),
+    )
+
+    result = run_sv(["default"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project default agent: Agents" in result.stdout
+    assert ".agents/skills" in result.stdout
+
+
+def test_default_rejects_unsupported_agent(tmp_path: Path, run_sv):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = run_sv(["default", "bad"], cwd=project, home=home)
+
+    assert result.exit_code == 1
+    assert "Unsupported agent 'bad'" in result.stderr
+    assert not (project / ".sv" / "manifest.toml").exists()
+
+
+def test_default_show_does_not_infer_or_persist_single_existing_folder(
+    tmp_path: Path, run_sv
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    (project / ".agents").mkdir(parents=True)
+
+    result = run_sv(["default"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    assert "Project default agent: unset" in result.stdout
+    assert not (project / ".sv" / "manifest.toml").exists()
 
 
 def test_index_command_uses_cli_and_configured_scan_paths(tmp_path: Path, run_sv):

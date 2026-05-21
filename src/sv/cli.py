@@ -14,7 +14,13 @@ import threading
 from typing import Any
 import unicodedata
 
-from sv.agents import PiAdapter, project_agent_for
+from sv.agents import (
+    PiAdapter,
+    normalize_project_agent,
+    project_agent_for,
+    supported_project_agents,
+    supported_project_agents_text,
+)
 from sv.catalog import (
     SourceSkill,
     build_source_catalog,
@@ -50,8 +56,11 @@ from sv.index import (
 )
 from sv.manifest import (
     GlobalSourceState,
+    ManifestDocument,
     ManifestEntry,
+    load_manifest_document,
     project_manifest_path,
+    save_manifest_document,
 )
 from sv.parallel import configured_jobs, map_ordered
 from sv.process import default_process_runner, default_runner
@@ -138,6 +147,16 @@ class LocalContext:
     @property
     def vault_skills_dir(self) -> Path:
         return self.repo_root / "skills"
+
+
+@dataclass(frozen=True)
+class ActiveProjectAgent:
+    name: str
+    skills_dir: Path
+
+    @property
+    def agent(self):
+        return project_agent_for(self.name)
 
 
 def _add_cache_policy_args(parser: argparse.ArgumentParser) -> None:
@@ -241,6 +260,17 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_cache_policy_args(status_parser)
+
+    default_parser = subparsers.add_parser(
+        "default",
+        help="Show or set this project's default agent folder.",
+        description="Show or set this project's default agent folder.",
+    )
+    default_parser.add_argument(
+        "agent",
+        nargs="?",
+        help="Default project agent to use: pi, claude, or agents.",
+    )
 
     add_parser = subparsers.add_parser(
         "add",
@@ -506,6 +536,9 @@ def handle(
 
         if args.command == "index":
             return _handle_index(cwd, args=args)
+
+        if args.command == "default":
+            return _handle_default(args.agent, cwd)
 
         if args.command == "run":
             invocation = _parse_run_invocation(args.run_args)
@@ -777,6 +810,127 @@ def _build_svx_parser() -> argparse.ArgumentParser:
         help="Skip the default source metadata cache refresh after adding this repo.",
     )
     return parser
+
+
+def _manifest_skills_dir_for_project_root(project_root: Path) -> Path:
+    return project_root / ".pi" / "skills"
+
+
+def _load_project_manifest_document(context: LocalContext) -> ManifestDocument:
+    return load_manifest_document(_manifest_skills_dir_for_project_root(context.repo_root))
+
+
+def _save_project_manifest_document(
+    context: LocalContext, document: ManifestDocument
+) -> None:
+    save_manifest_document(_manifest_skills_dir_for_project_root(context.repo_root), document)
+
+
+def _handle_default(agent: str | None, cwd: Path) -> int:
+    context = _detect_local_context(cwd)
+    if context.is_skill_vault:
+        raise SvError(
+            "sv default is for project agent folders; skill-vaults install to skills/<name>."
+        )
+    document = _load_project_manifest_document(context)
+    if agent is None:
+        if document.default_agent is None:
+            print("Project default agent: unset")
+        else:
+            project_agent = project_agent_for(document.default_agent)
+            print(
+                f"Project default agent: {project_agent.display_name} "
+                f"({project_agent.target_path_prefix})"
+            )
+        print(f"Supported agents: {supported_project_agents_text()}")
+        return 0
+
+    agent_name = normalize_project_agent(agent)
+    project_agent = project_agent_for(agent_name)
+    _save_project_manifest_document(
+        context,
+        ManifestDocument(
+            default_agent=agent_name,
+            skills=document.skills,
+        ),
+    )
+    print(
+        f"Default agent set to {project_agent.display_name} "
+        f"({project_agent.target_path_prefix})."
+    )
+    return 0
+
+
+def _resolve_active_project_agent(context: LocalContext) -> ActiveProjectAgent:
+    document = _load_project_manifest_document(context)
+    if document.default_agent is not None:
+        agent = project_agent_for(document.default_agent)
+        return ActiveProjectAgent(agent.name, agent.project_skill_dir(context.repo_root))
+
+    existing_agents = _existing_project_agent_folders(context.repo_root)
+    if len(existing_agents) == 1:
+        agent = existing_agents[0]
+        _save_project_manifest_document(
+            context,
+            ManifestDocument(default_agent=agent.name, skills=document.skills),
+        )
+        return ActiveProjectAgent(agent.name, agent.project_skill_dir(context.repo_root))
+
+    if not _can_browse_tty():
+        raise SvError(
+            "No default agent is configured and sv needs a target agent. "
+            "Run 'sv default pi', 'sv default claude', or 'sv default agents'."
+        )
+
+    chosen = _choose_project_agent_interactively(context.repo_root)
+    if chosen is None:
+        raise SvError(
+            "No default agent selected. Run 'sv default <agent>' to choose explicitly."
+        )
+    _save_project_manifest_document(
+        context,
+        ManifestDocument(default_agent=chosen.name, skills=document.skills),
+    )
+    return ActiveProjectAgent(chosen.name, chosen.project_skill_dir(context.repo_root))
+
+
+def _existing_project_agent_folders(project_root: Path):
+    existing = []
+    for agent in supported_project_agents():
+        folder = project_root / agent.folder
+        if folder.exists() or folder.is_symlink():
+            if folder.is_symlink():
+                raise SvError(
+                    f"Refusing to use symlinked {agent.display_name} agent folder at "
+                    f"{_escape_output_path(folder)}."
+                )
+            existing.append(agent)
+    return existing
+
+
+def _choose_project_agent_interactively(project_root: Path):
+    headers = ["Agent", "Folder", "Status"]
+    rows = [
+        [
+            agent.display_name,
+            agent.target_path_prefix,
+            "exists" if (project_root / agent.folder).exists() else "missing",
+            agent.name,
+        ]
+        for agent in supported_project_agents()
+    ]
+    selected = _browse_tty_table(
+        headers,
+        rows,
+        key_help="enter choose • q cancel",
+        search_title="Choose default agent",
+        clear_on_exit=True,
+    )
+    if selected is None:
+        return None
+    row_values = [str(value) for value in selected]
+    agent_name = row_values[len(headers)] if len(row_values) > len(headers) else row_values[0]
+    return project_agent_for(agent_name)
 
 
 def _detect_local_context(
