@@ -111,6 +111,8 @@ _TTY_DETAIL_RESET = "\x1b[0m"
 _TTY_DETAIL_BOLD = "\x1b[1m"
 _TTY_DETAIL_HEADER = "\x1b[38;5;183m"
 _TTY_DETAIL_RULE = "\x1b[38;5;60m"
+_SOURCE_SKILL_DETAIL_CARD_PREFERRED_WIDTH = 58
+_SOURCE_SKILL_DETAIL_CARD_MIN_WIDTH = 18
 
 
 @dataclass(frozen=True)
@@ -2626,28 +2628,84 @@ def _source_skill_detail_status_style(status: str) -> str:
 def _format_source_skill_detail_card(
     entry: SourceSkill, status: str | None = None
 ) -> list[DetailLine]:
+    title = _escape_control_characters(f"{entry.name} ● available")
+    source = _escape_control_characters(f"Source  {entry.repo_id}")
+    source_path = _escape_control_characters(f"Path    {entry.source_relative_path}")
+    card_width = _source_skill_detail_card_width((title, source, source_path))
     lines = [
-        detail_line("╭─ Skill" + "─" * 48, style="accent"),
-        detail_line(f"│ {entry.name} ● available", style="title"),
-        detail_line(f"│ Source  {entry.repo_id}"),
-        detail_line(f"│ Path    {entry.source_relative_path}"),
-        detail_line("├─ Description" + "─" * 42, style="accent"),
-        detail_line(entry.description, wrap=True, indent=2),
+        detail_line(_detail_card_rule("╭─ Skill", "╮", card_width), style="accent"),
+        detail_line(_detail_card_row(title, card_width), style="title"),
+        detail_line(_detail_card_row(source, card_width)),
+        detail_line(_detail_card_row(source_path, card_width)),
+        detail_line(
+            _detail_card_rule("├─ Description", "╯", card_width), style="accent"
+        ),
+        *[
+            detail_line(line, indent=2)
+            for line in _wrap_detail_card_body(entry.description, card_width)
+        ],
     ]
     if status is not None:
+        safe_status = _escape_control_characters(status)
         lines.extend(
             [
                 detail_line(""),
                 detail_line("Status", style="accent"),
                 detail_line(
-                    status,
-                    style=_source_skill_detail_status_style(status),
+                    safe_status,
+                    style=_source_skill_detail_status_style(safe_status),
                     wrap=True,
                     indent=2,
                 ),
             ]
         )
     return lines
+
+
+def _source_skill_detail_card_width(rows: Sequence[str]) -> int:
+    terminal_width = max(_table_width(), 1)
+    row_width = max((_display_width(row) + 3 for row in rows), default=0)
+    desired_width = max(
+        _SOURCE_SKILL_DETAIL_CARD_PREFERRED_WIDTH,
+        _SOURCE_SKILL_DETAIL_CARD_MIN_WIDTH,
+        _display_width("├─ Description╯"),
+        min(row_width, terminal_width),
+    )
+    return min(desired_width, terminal_width)
+
+
+def _detail_card_rule(left: str, right: str, width: int) -> str:
+    minimum = f"{left}{right}"
+    if _display_width(minimum) >= width:
+        return _fit_display_width(minimum, width)
+    fill_width = width - _display_width(left) - _display_width(right)
+    return f"{left}{'─' * fill_width}{right}"
+
+
+def _detail_card_row(text: str, width: int) -> str:
+    if width < 3:
+        return _fit_display_width(f"│ {text}│", width)
+    content_width = width - 3
+    content = _fit_display_width(text, content_width)
+    padding = " " * max(content_width - _display_width(content), 0)
+    return f"│ {content}{padding}│"
+
+
+def _wrap_detail_card_body(text: str, card_width: int) -> list[str]:
+    safe_text = _escape_control_characters(text)
+    return _wrap_message_to_display_width(safe_text, max(card_width - 2, 1))
+
+
+def _fit_display_width(value: str, width: int) -> str:
+    if width < 1:
+        return ""
+    if _display_width(value) <= width:
+        return value
+    ellipsis = "..."[:width]
+    if width <= len(ellipsis):
+        return ellipsis
+    chunk, _remaining = _split_display_width(value, width - len(ellipsis))
+    return f"{chunk.rstrip()}{ellipsis}"
 
 
 def _format_source_skill_unavailable_detail_card(

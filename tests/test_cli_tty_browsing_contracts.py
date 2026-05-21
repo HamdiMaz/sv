@@ -11,6 +11,7 @@ from sv.errors import SvError
 from sv.runtime import Runtime
 from tests.helpers import (
     configure_source,
+    display_width,
     make_source_repo,
     write_source_skill,
     run_git,
@@ -59,6 +60,10 @@ def _detail_visible_text(detail) -> str:
     )
 
 
+def _detail_visible_lines(detail) -> list[str]:
+    return _detail_visible_text(detail).splitlines()
+
+
 def _non_tty_runtime(*, cwd: Path, home: Path) -> Runtime:
     return Runtime(
         cwd=cwd,
@@ -67,6 +72,18 @@ def _non_tty_runtime(*, cwd: Path, home: Path) -> Runtime:
         stdin=_NonTty(),
         stdout=_NonTty(),
         stderr=_NonTty(),
+    )
+
+
+def test_detail_card_helpers_fit_narrow_widths_and_escape_status():
+    assert cli_module._detail_card_rule("╭─ Skill", "╮", 4) == "╭..."
+    assert cli_module._detail_card_row("alpha", 2) == ".."
+    assert cli_module._fit_display_width("alpha", 0) == ""
+    assert cli_module._fit_display_width("alpha", 2) == ".."
+    assert cli_module._fit_display_width("alphabet", 5) == "al..."
+    assert (
+        cli_module._format_source_skill_unavailable_detail("bad\x1b")
+        == "Status: bad\\x1b"
     )
 
 
@@ -133,6 +150,45 @@ def test_tty_list_browses_source_skills_with_details_by_default(
     assert "Skill: alpha" not in result.stdout
     assert "Added Pi skill" not in result.stdout
     assert "Add as:" not in result.stdout
+
+
+@pytest.mark.integration
+def test_tty_list_detail_card_renders_right_edge_and_section_closure(
+    tmp_path: Path, run_sv, monkeypatch
+):
+    source = make_source_repo(tmp_path)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    configure_source(source, project, home)
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setattr(sys, "stdin", _TtyProxy(sys.stdin))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    detail_frames = []
+
+    def fake_browse(_headers, rows, **kwargs):
+        detail_frames.append(
+            _detail_visible_lines(kwargs["detail_renderer"](rows[0], None))
+        )
+        return None
+
+    monkeypatch.setattr(cli_module, "_browse_tty_table", fake_browse, raising=False)
+
+    result = run_sv(["list"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    frame = detail_frames[0][:5]
+    assert frame[0].startswith("╭─ Skill")
+    assert frame[0].endswith("╮")
+    assert frame[1].startswith("│ alpha ● available")
+    assert frame[1].endswith("│")
+    assert frame[2].startswith("│ Source  ")
+    assert frame[2].endswith("│")
+    assert frame[3].startswith("│ Path    ")
+    assert frame[3].endswith("│")
+    assert frame[4].startswith("├─ Description")
+    assert frame[4].endswith("╯")
+    assert {display_width(line) for line in frame} == {display_width(frame[0])}
 
 
 @pytest.mark.integration
