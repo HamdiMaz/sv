@@ -1,3 +1,4 @@
+from io import StringIO
 from pathlib import Path
 import sys
 
@@ -7,6 +8,7 @@ from sv import cli as cli_module
 from sv.cli import build_parser, handle
 from sv.config import SvPaths, load_config
 from sv.errors import SvError
+from sv.runtime import Runtime
 from sv.source_cache import catalog_cache_path, load_cached_catalog
 from tests.helpers import configure_source, make_source_repo
 
@@ -27,6 +29,11 @@ class _TtyProxy:
 
     def flush(self):
         return self._wrapped.flush()
+
+
+class _TtyStringIO(StringIO):
+    def isatty(self):
+        return True
 
 
 def test_repo_add_warms_source_metadata_cache_by_default(tmp_path: Path, capsys):
@@ -559,3 +566,69 @@ def test_list_and_add_from_local_git_source(tmp_path: Path, capsys):
 
     assert exit_code == 0
     assert "already exists" in capsys.readouterr().out
+
+
+def test_list_shows_tty_loading_indicator_when_refreshing_source_metadata(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    source = make_source_repo(tmp_path)
+
+    assert (
+        handle(
+            parse(["repo", "add", str(source), "--no-warm-cache"]),
+            cwd=project,
+            home=home,
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    stderr = _TtyStringIO()
+    runtime = Runtime(
+        cwd=project,
+        home=home,
+        env={},
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=stderr,
+    )
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home, runtime=runtime)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "alpha" in captured.out
+    assert "Refreshing source repo" in stderr.getvalue()
+    assert "\r" in stderr.getvalue()
+
+
+def test_list_does_not_show_loading_indicator_for_fresh_cached_metadata(
+    tmp_path: Path, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    source = make_source_repo(tmp_path)
+
+    assert handle(parse(["repo", "add", str(source)]), cwd=project, home=home) == 0
+    capsys.readouterr()
+
+    stderr = _TtyStringIO()
+    runtime = Runtime(
+        cwd=project,
+        home=home,
+        env={},
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=stderr,
+    )
+
+    exit_code = handle(parse(["list"]), cwd=project, home=home, runtime=runtime)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "alpha" in captured.out
+    assert stderr.getvalue() == ""

@@ -97,6 +97,7 @@ from sv.terminal import escape_terminal_controls
 from sv.tomlutil import load_toml_document
 from sv.ui import (
     CellWidths,
+    LoadingReporter,
     DetailLine,
     browse_tty_table,
     detail_line,
@@ -460,6 +461,7 @@ def handle(
     adapter = PiAdapter()
     chooser = _choose_skill if skill_chooser is None else skill_chooser
     record_global_source_state = _should_record_global_source_state(cwd, home)
+    loading_reporter = LoadingReporter(runtime.stderr)
 
     try:
         configured_jobs(runtime.env)
@@ -477,6 +479,7 @@ def handle(
                 skill_selector=skill_selector,
                 record_global_source_state=record_global_source_state,
                 can_browse_tty=_can_browse_tty(runtime.stdin, runtime.stdout),
+                loading_reporter=loading_reporter,
             )
 
         if args.command == "init":
@@ -515,6 +518,7 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 cache_policy=status_policy,
                 context=local_context,
+                loading_reporter=loading_reporter,
             )
 
         if args.command == "add":
@@ -532,6 +536,7 @@ def handle(
                     record_global_source_state=record_global_source_state,
                     lightweight_discovery=True,
                     update=(not args.interactive) or args.refresh,
+                    loading_reporter=loading_reporter,
                 )
                 return _handle_add_interactive(
                     catalog,
@@ -568,6 +573,7 @@ def handle(
                     record_global_source_state=record_global_source_state,
                     lightweight_discovery=True,
                     update=(not args.interactive) or args.refresh,
+                    loading_reporter=loading_reporter,
                 )
                 return _handle_add_all(
                     catalog,
@@ -591,6 +597,7 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
                 update=(not args.interactive) or args.refresh,
+                loading_reporter=loading_reporter,
             )
             return _handle_add(
                 args.skill,
@@ -647,6 +654,7 @@ def handle(
                 policy=_cache_policy_from_args(args),
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
+                loading_reporter=loading_reporter,
             )
             return _handle_list(
                 catalog,
@@ -667,6 +675,7 @@ def handle(
                 policy=_cache_policy_from_args(args),
                 record_global_source_state=record_global_source_state,
                 lightweight_discovery=True,
+                loading_reporter=loading_reporter,
             )
             return _handle_search(
                 args.query,
@@ -691,6 +700,7 @@ def handle(
                 policy=sync_policy,
                 record_global_source_state=record_global_source_state,
                 allow_partial_failures=False,
+                loading_reporter=loading_reporter,
             )
             return _handle_sync(
                 catalog, cwd=cwd, adapter=adapter, context=local_context
@@ -711,6 +721,7 @@ def handle(
                 record_global_source_state=record_global_source_state,
                 cache_policy=update_policy,
                 context=local_context,
+                loading_reporter=loading_reporter,
             )
 
         raise SvError(f"Unknown command: {args.command}")
@@ -937,6 +948,7 @@ def _warm_repo_catalog_cache(
     git_runner,
     *,
     record_global_source_state: bool,
+    loading_reporter: LoadingReporter | None = None,
 ) -> None:
     try:
         _catalog_for_source_command(
@@ -948,13 +960,13 @@ def _warm_repo_catalog_cache(
             lightweight_discovery=True,
             allow_partial_failures=False,
             update=True,
+            loading_reporter=loading_reporter,
         )
     except SvError as exc:
         safe_repo_id = _escape_control_characters(repo.id)
         safe_error = _escape_control_characters(str(exc))
-        print(
-            f"warning: could not warm source metadata cache for {safe_repo_id}: {safe_error}",
-            file=sys.stderr,
+        _loading_warning_printer(loading_reporter)(
+            f"warning: could not warm source metadata cache for {safe_repo_id}: {safe_error}"
         )
 
 
@@ -1180,18 +1192,25 @@ def _catalog_for_source_command(
     lightweight_discovery: bool = True,
     allow_partial_failures: bool = False,
     update: bool = True,
+    loading_reporter: LoadingReporter | None = None,
 ) -> list[SourceSkill]:
+    if loading_reporter is None:
+        loading_reporter = LoadingReporter(sys.stderr)
+    warn = _loading_warning_printer(loading_reporter)
+
     def refresh(selected_repos: Sequence[RepoConfig]) -> CacheRefreshResult:
-        return _update_sources_and_catalog_cache_refresh_from_repos(
-            selected_repos,
-            paths,
-            git_runner,
-            update=update,
-            record_global_source_state=record_global_source_state,
-            lightweight_discovery=lightweight_discovery,
-            allow_partial_failures=allow_partial_failures,
-            warn=_print_stderr_warning,
-        )
+        message = _source_refresh_loading_message(selected_repos)
+        with loading_reporter.operation(message):
+            return _update_sources_and_catalog_cache_refresh_from_repos(
+                selected_repos,
+                paths,
+                git_runner,
+                update=update,
+                record_global_source_state=record_global_source_state,
+                lightweight_discovery=lightweight_discovery,
+                allow_partial_failures=allow_partial_failures,
+                warn=warn,
+            )
 
     catalog = get_catalog_with_cache(
         repos,
@@ -1199,7 +1218,7 @@ def _catalog_for_source_command(
         policy=policy,
         now=datetime.now(UTC),
         refresh_catalog=refresh,
-        warn=_print_stderr_warning,
+        warn=warn,
     )
     allow_source_fallback = policy.mode is not CacheMode.CACHE_ONLY
     repos_by_id = {repo.id: repo for repo in repos}
@@ -1219,7 +1238,7 @@ def _catalog_for_source_command(
                     policy=CachePolicy.force_refresh(allow_stale_on_error=False),
                     now=datetime.now(UTC),
                     refresh_catalog=refresh,
-                    warn=_print_stderr_warning,
+                    warn=warn,
                 )
                 body_miss_refreshes_by_repo[repo.id] = refreshed_catalog
         for candidate in refreshed_catalog:
@@ -1253,7 +1272,7 @@ def _catalog_for_source_command(
         refresh_entry_on_body_miss=(
             refresh_entry_on_body_miss if allow_source_fallback else None
         ),
-        warn=_print_stderr_warning,
+        warn=warn,
     )
 
 
@@ -2106,6 +2125,7 @@ def _handle_repo(
     skill_selector: SkillSelector = select_skills,
     record_global_source_state: bool = True,
     can_browse_tty: bool | None = None,
+    loading_reporter: LoadingReporter | None = None,
 ) -> int:
     repo_list_alias = getattr(args, "repo_list_alias", False)
     repo_is_list_command = args.repo_command == "list" or repo_list_alias
@@ -2131,6 +2151,7 @@ def _handle_repo(
                 paths,
                 git_runner,
                 record_global_source_state=record_global_source_state,
+                loading_reporter=loading_reporter,
             )
         return 0
 
@@ -2171,6 +2192,7 @@ def _handle_repo(
                     git_runner=git_runner,
                     cache_policy=repo_cache_policy,
                     record_global_source_state=record_global_source_state,
+                    loading_reporter=loading_reporter,
                 )
             except SvError as exc:
                 if not _is_tty_browser_unavailable_error(exc):
@@ -2207,6 +2229,7 @@ def _handle_repo_browser(
     git_runner,
     cache_policy: CachePolicy,
     record_global_source_state: bool,
+    loading_reporter: LoadingReporter | None,
 ) -> int:
     rows = [[repo.id, repo.url, str(paths.source_repo_for(repo.id))] for repo in repos]
     repos_by_id = {repo.id: repo for repo in repos}
@@ -2223,6 +2246,7 @@ def _handle_repo_browser(
             policy=cache_policy,
             record_global_source_state=record_global_source_state,
             lightweight_discovery=True,
+            loading_reporter=loading_reporter,
         )
         _browse_repo_source_skills(catalog, cwd=cwd, adapter=adapter)
 
@@ -2369,6 +2393,21 @@ def _escape_control_characters(value: str) -> str:
 
 def _print_stderr_warning(message: str) -> None:
     print(_escape_control_characters(message), file=sys.stderr)
+
+
+def _loading_warning_printer(
+    loading_reporter: LoadingReporter | None,
+) -> Callable[[str], None]:
+    if loading_reporter is None:
+        return _print_stderr_warning
+    return loading_reporter.print_line
+
+
+def _source_refresh_loading_message(repos: Sequence[RepoConfig]) -> str:
+    if len(repos) == 1:
+        repo_id = _escape_control_characters(repos[0].id)
+        return f"Refreshing source repo {repo_id}"
+    return f"Refreshing {len(repos)} source repos"
 
 
 def _escape_output_path(path: Path) -> str:
@@ -3351,6 +3390,7 @@ def _handle_status(
     *,
     cache_policy: CachePolicy,
     context: LocalContext | None = None,
+    loading_reporter: LoadingReporter | None = None,
 ) -> int:
     context = (
         _detect_local_context(cwd, global_manifest_file=paths.global_manifest_file)
@@ -3364,6 +3404,7 @@ def _handle_status(
             git_runner=git_runner,
             record_global_source_state=record_global_source_state,
             cache_policy=cache_policy,
+            loading_reporter=loading_reporter,
         )
     manifest = project_manifest_path(context.repo_root)
     has_project_manifest = manifest.is_file() and _is_non_git_project_manifest(
@@ -3389,6 +3430,7 @@ def _handle_status(
             git_runner,
             record_global_source_state=record_global_source_state,
             cache_policy=cache_policy,
+            loading_reporter=loading_reporter,
         )
         if catalog is None:
             refresh_project_skill_local_states(project_skills_dir)
@@ -3428,6 +3470,7 @@ def _handle_vault_status(
     git_runner,
     record_global_source_state: bool,
     cache_policy: CachePolicy,
+    loading_reporter: LoadingReporter | None = None,
 ) -> int:
     vault_skills_dir = context.vault_skills_dir
     _reject_symlinked_status_vault_skills_path(vault_skills_dir)
@@ -3438,6 +3481,7 @@ def _handle_vault_status(
             git_runner,
             record_global_source_state=record_global_source_state,
             cache_policy=cache_policy,
+            loading_reporter=loading_reporter,
         )
         if catalog is None:
             refresh_vault_skill_local_states(vault_skills_dir)
@@ -3635,6 +3679,7 @@ def _status_catalog_if_configured(
     *,
     record_global_source_state: bool,
     cache_policy: CachePolicy | None = None,
+    loading_reporter: LoadingReporter | None = None,
 ) -> list[SourceSkill] | None:
     if not paths.config_file.exists():
         return None
@@ -3649,6 +3694,7 @@ def _status_catalog_if_configured(
         record_global_source_state=record_global_source_state,
         lightweight_discovery=True,
         allow_partial_failures=False,
+        loading_reporter=loading_reporter,
     )
 
 
@@ -3784,6 +3830,7 @@ def _handle_update(
     *,
     cache_policy: CachePolicy,
     context: LocalContext | None = None,
+    loading_reporter: LoadingReporter | None = None,
 ) -> int:
     config = _load_config_for_source_command(paths)
     print("Updating source repos...")
@@ -3795,6 +3842,7 @@ def _handle_update(
         record_global_source_state=record_global_source_state,
         lightweight_discovery=True,
         allow_partial_failures=False,
+        loading_reporter=loading_reporter,
     )
     context = _detect_local_context(cwd) if context is None else context
     _validate_local_index_refresh_config(context)
