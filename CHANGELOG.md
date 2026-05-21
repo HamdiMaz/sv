@@ -4,7 +4,7 @@
 
 - Documented TTY-only stderr loading indicators for source refresh and remote materialization while preserving script-friendly non-interactive output.
 - Documented source metadata acceleration: index-first reads, default repo-add/`svx` cache warming with `--no-warm-cache`, and bounded parallel fallback metadata reads.
-- Redesigned interactive source skill detail pages as framed, color-accented cards with wrapped descriptions, safe styled metadata, status feedback, and the concise footer `a add • q back`.
+- Redesigned interactive source skill detail pages as color-accented cards with a plain title row, fully bordered metadata/description/status sections, safe styled metadata, and an in-card `a add • q back` footer.
 - Polished TTY `/` search with a framed inline prompt, contextual titles, and visible `empty Enter` clear guidance.
 - Fixed `sv init` to target the enclosing repository root when run without a folder and reject `sv init <folder>` inside existing Git or sv-managed repositories instead of creating nested vaults.
 - Fixed `sv index` output to collapse identical skill content to one canonical highest-level source path while preserving same-name skills with different hashes.
