@@ -105,6 +105,52 @@ def test_loading_reporter_clears_wide_unicode_by_display_width():
     )
 
 
+def test_loading_reporter_clears_previous_render_before_restart_during_join(
+    monkeypatch,
+):
+    from sv import ui as ui_module
+    from sv.ui import LoadingReporter
+
+    stream = _TtyStringIO()
+    reporter = LoadingReporter(
+        stream,
+        enabled=True,
+        frames=("|",),
+        interval_seconds=60.0,
+    )
+    join_started_new_operation = False
+
+    class JoinControlledThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            nonlocal join_started_new_operation
+            if not join_started_new_operation:
+                join_started_new_operation = True
+                reporter._start("new")
+
+    monkeypatch.setattr(ui_module.threading, "Thread", JoinControlledThread)
+
+    reporter._start("old operation with a longer message")
+    old_rendered = "| old operation with a longer message"
+    new_rendered = "| new"
+
+    reporter._stop()
+    reporter._stop()
+
+    output = stream.getvalue()
+    old_clear_sequence = "\r" + (" " * len(old_rendered)) + "\r"
+    new_clear_sequence = "\r" + (" " * len(new_rendered)) + "\r"
+
+    assert old_clear_sequence + f"\r{new_rendered}" in output
+    assert output.endswith(new_clear_sequence)
+    assert reporter._last_render_width == 0
+
+
 def test_loading_reporter_stop_does_not_clear_new_operation_started_during_join(
     monkeypatch,
 ):

@@ -143,6 +143,8 @@ class LoadingReporter:
             self._active_count += 1
             if self._active_count > 1:
                 return
+            if self._last_render_width > 0:
+                self._clear_locked()
             self._message = message
             stop_event = threading.Event()
             self._stop_event = stop_event
