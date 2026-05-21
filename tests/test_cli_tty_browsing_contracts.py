@@ -739,6 +739,7 @@ def test_tty_repo_list_browses_repo_skills_and_can_install_one_or_all(
             assert kwargs["search_title"] == "Search skills"
             assert callable(kwargs.get("key_actions", {}).get("a"))
             assert kwargs.get("key_help") == "a add all"
+            assert kwargs["detail_key_help"] == ""
             assert kwargs.get("clear_on_exit") is True
             assert kwargs.get("on_detail") is None
             kwargs["key_actions"]["a"](rows[0])
