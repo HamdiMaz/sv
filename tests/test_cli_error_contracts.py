@@ -132,6 +132,7 @@ def test_duplicate_choice_error_has_no_raw_control_characters(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
 

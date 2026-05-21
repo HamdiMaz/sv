@@ -91,6 +91,7 @@ def test_add_alpha_without_tty_errors_with_qualified_guidance_and_copies_nothing
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
 
@@ -124,6 +125,7 @@ def test_add_same_repo_duplicates_without_tty_lists_paths_descriptions_and_scrip
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
     repo_id = load_config(SvPaths.from_home(home)).repos[0].id
 
@@ -168,6 +170,7 @@ def test_add_same_repo_duplicates_without_tty_keeps_long_scriptable_refs_unwrapp
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
     repo_id = load_config(SvPaths.from_home(home)).repos[0].id
     monkeypatch.setenv("COLUMNS", "50")
@@ -210,6 +213,7 @@ def test_add_same_repo_duplicates_tty_cancel_suggests_path_qualified_reference(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source, project, home)
     repo_id = load_config(SvPaths.from_home(home)).repos[0].id
     capsys.readouterr()
@@ -395,6 +399,7 @@ def test_add_interactive_selector_rejects_duplicate_skills_without_copying(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
 
@@ -431,6 +436,7 @@ def test_add_all_rejects_duplicate_source_skills_without_copying(
     home = tmp_path / "home"
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".pi").mkdir()
     configure_source(source_a, project, home)
     configure_source(source_b, project, home)
 

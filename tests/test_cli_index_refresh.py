@@ -21,13 +21,19 @@ def _write_index(repo: Path, kind: str) -> None:
     )
 
 
+def _make_pi_project(tmp_path: Path) -> Path:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".pi").mkdir()
+    return project
+
+
 def test_normal_project_add_without_existing_index_does_not_create_index(
     tmp_path: Path, run_sv
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     configure_source(source, project, home)
 
     result = run_sv(["add", "alpha"], cwd=project, home=home, git_runner=default_runner)
@@ -42,8 +48,7 @@ def test_normal_project_add_with_existing_index_refreshes_index(
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     configure_source(source, project, home)
 
@@ -63,8 +68,7 @@ def test_normal_project_index_refresh_honors_persistent_scan_config(
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     (project / ".sv" / "index-config.toml").write_text(
         "schema_version = 1\n"
@@ -94,8 +98,7 @@ def test_add_validates_persistent_scan_config_before_mutating_project(
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     (project / ".sv" / "index-config.toml").write_text(
         "schema_version = 1\n"
@@ -116,8 +119,7 @@ def test_add_rejects_symlinked_persistent_include_before_mutating_project(
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     outside = tmp_path / "outside-skills"
     outside.mkdir()
@@ -141,8 +143,7 @@ def test_remove_validates_persistent_scan_config_before_mutating_project(
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     configure_source(source, project, home)
     add_result = run_sv(["add", "alpha"], cwd=project, home=home, git_runner=default_runner)
@@ -165,8 +166,7 @@ def test_add_all_validates_persistent_scan_config_before_mutating_project(
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     (project / ".sv" / "index-config.toml").write_text(
         "schema_version = 1\n"
@@ -188,8 +188,7 @@ def test_remove_all_validates_persistent_scan_config_before_mutating_project(
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     configure_source(source, project, home)
     add_result = run_sv(["add", "--all"], cwd=project, home=home, git_runner=default_runner)
@@ -216,8 +215,7 @@ def test_sync_and_update_validate_persistent_scan_config_before_mutating_project
 ) -> None:
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
-    project = tmp_path / "project"
-    project.mkdir()
+    project = _make_pi_project(tmp_path)
     _write_index(project, "project-index")
     configure_source(source, project, home)
     add_result = run_sv(["add", "alpha"], cwd=project, home=home, git_runner=default_runner)

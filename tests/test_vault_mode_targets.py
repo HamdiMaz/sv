@@ -222,6 +222,7 @@ def test_project_index_add_preserves_pi_project_target(tmp_path, run_sv):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = _make_git_repo(tmp_path / "project")
+    (project / ".pi").mkdir()
     _write_index(project, "project-index")
     configure_source(source, project, home)
 
@@ -525,7 +526,7 @@ def test_non_git_add_rejects_symlinked_sv_dir_before_mutating_target(tmp_path, r
     assert not (project / "skills" / "alpha").exists()
 
 
-def test_skill_vault_index_without_git_root_preserves_pi_project_target(tmp_path, run_sv):
+def test_skill_vault_index_without_git_root_preserves_vault_target(tmp_path, run_sv):
     source = make_source_repo(tmp_path)
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -537,9 +538,9 @@ def test_skill_vault_index_without_git_root_preserves_pi_project_target(tmp_path
 
     assert result.exit_code == 0
     _assert_clean_output(result)
-    assert (project / ".pi" / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"
-    assert not (project / "skills" / "alpha").exists()
-    assert "Added Pi skill 'alpha'" in result.stdout
+    assert (project / "skills" / "alpha" / "notes.md").read_text() == "alpha v1\n"
+    assert not (project / ".pi" / "skills" / "alpha").exists()
+    assert "Added vault skill 'alpha'" in result.stdout
 
 
 def test_vault_update_routes_update_to_root_skill_target(tmp_path, run_sv):
