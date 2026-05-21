@@ -42,9 +42,10 @@ The selected value is stored in `.sv/manifest.toml` as `default_agent`.
 Changing it affects future project commands only; sv does not migrate existing
 skill folders between agents.
 
-Run this to install into the default agent skill folder:
+Set an explicit default agent before the first non-interactive add, then install into that default agent skill folder:
 
 ```bash
+sv default pi
 sv add find-docs
 ```
 

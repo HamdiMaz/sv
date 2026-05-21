@@ -84,6 +84,7 @@ Removing the last repo writes `repos = []`, which intentionally disables all sou
 
 ```bash
 sv repo add HamdiMaz/Skills
+sv default pi
 sv list
 sv add find-docs
 sv sync

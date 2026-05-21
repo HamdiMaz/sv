@@ -368,16 +368,66 @@ def test_command_reference_documents_search():
     assert "descriptions match by text substring" in command_reference
 
 
-def test_docs_describe_project_default_agents():
-    commands = Path("docs/commands.md").read_text(encoding="utf-8")
-    readme = Path("README.md").read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    "path",
+    [
+        README_PATH,
+        DOCS_DIR / "commands.md",
+        DOCS_DIR / "usage.md",
+        DOCS_DIR / "getting-started.md",
+        DOCS_DIR / "output.md",
+        DOCS_DIR / "troubleshooting.md",
+    ],
+)
+def test_required_docs_describe_project_default_agents(path: Path):
+    text = path.read_text(encoding="utf-8")
 
-    for text in (commands, readme):
-        assert "sv default" in text
-        assert ".pi/skills" in text
-        assert ".claude/skills" in text
-        assert ".agents/skills" in text
-        assert "default_agent" in text
+    for snippet in [
+        "sv default",
+        ".pi/skills",
+        ".claude/skills",
+        ".agents/skills",
+        "default_agent",
+        "default agent",
+    ]:
+        assert snippet in text, (
+            f"{path.relative_to(_PROJECT_ROOT)} should document the project "
+            f"default-agent contract and mention {snippet!r}."
+        )
+
+
+def test_output_docs_describe_complete_default_agent_contract():
+    output = (DOCS_DIR / "output.md").read_text(encoding="utf-8")
+
+    for snippet in [
+        "Project skills can be installed under one supported project agent folder",
+        ".pi/skills",
+        ".claude/skills",
+        ".agents/skills",
+        "sv default",
+        "sv default pi",
+        "sv default claude",
+        "sv default agents",
+        ".sv/manifest.toml",
+        "default_agent",
+        "project commands use the default agent",
+        "sv run pi",
+        "uses `.pi/skills` regardless of the project default agent",
+    ]:
+        assert snippet in output, f"docs/output.md is missing {snippet!r}."
+
+
+def test_quick_start_docs_set_default_agent_before_noninteractive_add():
+    readme = README_PATH.read_text(encoding="utf-8")
+    quick_start = readme[readme.index("## Quick start") : readme.index("## Commands")]
+    assert quick_start.index("sv default pi") < quick_start.index("sv add find-docs")
+
+    getting_started = (DOCS_DIR / "getting-started.md").read_text(encoding="utf-8")
+    add_skills = getting_started[
+        getting_started.index("## 3. Add skills to your project") :
+        getting_started.index("## 4. Keep skills updated")
+    ]
+    assert add_skills.index("sv default pi") < add_skills.index("sv add find-docs")
 
 
 def test_docs_describe_framed_interactive_search_prompt():

@@ -2,6 +2,14 @@
 
 `sv` prints plain-text output so commands are readable in terminals, logs, and CI.
 
+## Project default agent folders
+
+Project skills can be installed under one supported project agent folder: `.pi/skills`, `.claude/skills`, or `.agents/skills`.
+
+Use `sv default` to show the current project default agent. Use `sv default pi`, `sv default claude`, or `sv default agents` to set it. The selected value is stored in `.sv/manifest.toml` as `default_agent`. Project commands use the default agent skill folder when adding, removing, listing, updating, or syncing managed project skills; in short, project commands use the default agent.
+
+`sv run pi` remains Pi-only: it requires the explicit `pi` run agent and uses `.pi/skills` regardless of the project default agent.
+
 ## Skill lists
 
 In an interactive terminal, `sv list` opens an interactive browser so you can move through source skills before choosing anything. In non-interactive output, or when the browser is unavailable, `sv list` shows one row per skill name so the main table stays easy to scan:
