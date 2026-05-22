@@ -501,6 +501,33 @@ def test_index_round_trips_empty_and_non_empty_executable_paths(tmp_path: Path) 
     assert loaded.skills[1].executable_paths == ("bin/run", "scripts/check.py")
 
 
+def test_save_index_deduplicates_executable_paths(tmp_path: Path) -> None:
+    path = tmp_path / ".sv" / "index.toml"
+    document = IndexDocument(
+        kind="skill-vault",
+        generated_by="sv",
+        generated_at="now",
+        skills=(
+            IndexSkillEntry(
+                name="alpha",
+                description="Alpha skill.",
+                source_path="skills/alpha",
+                content_hash="sha256:" + "1" * 64,
+                skill_file_hash="sha256:" + "2" * 64,
+                executable_paths=("bin/run", "bin/run"),
+            ),
+        ),
+    )
+
+    save_index(path, document)
+    text = path.read_text(encoding="utf-8")
+
+    assert text.count('"bin/run"') == 1
+    assert 'executable_paths = ["bin/run"]' in text
+    loaded = load_index(path)
+    assert loaded.skills[0].executable_paths == ("bin/run",)
+
+
 def test_load_index_defaults_missing_executable_paths_to_unknown(tmp_path: Path) -> None:
     path = tmp_path / ".sv" / "index.toml"
     path.parent.mkdir()

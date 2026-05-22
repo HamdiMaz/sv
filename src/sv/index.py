@@ -797,10 +797,12 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
         _validate_source_path_matches_name(source_path, normalized_name, index, path)
         executable_paths = None
         if entry.executable_paths is not None:
-            executable_paths = tuple(
-                _validate_executable_path(executable_path, index, path)
-                for executable_path in entry.executable_paths
-            )
+            normalized_executable_paths: list[str] = []
+            for executable_path in entry.executable_paths:
+                normalized = _validate_executable_path(executable_path, index, path)
+                if normalized not in normalized_executable_paths:
+                    normalized_executable_paths.append(normalized)
+            executable_paths = tuple(normalized_executable_paths)
         entries.append(
             IndexSkillEntry(
                 name=normalized_name,
