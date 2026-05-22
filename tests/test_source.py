@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import threading
@@ -484,6 +485,70 @@ def test_github_gh_api_backend_reads_index_candidates_and_materializes_folder(
             None,
         ),
     ]
+
+
+def test_github_gh_api_backend_applies_executable_modes_from_tree_api(tmp_path: Path) -> None:
+    runner = FakeRunner(
+        [
+            completed(
+                ["gh", "api"],
+                stdout=(
+                    '[{"name":"SKILL.md","path":"skills/alpha/SKILL.md","type":"file"},'
+                    '{"name":"scripts","path":"skills/alpha/scripts","type":"dir"}]'
+                ),
+            ),
+            completed(["gh", "api"], stdout="LS0tXG5uYW1lOiBhbHBoYVxuZGVzY3JpcHRpb246IEFscGhhIHNraWxsLlxuLS0tXG4="),
+            completed(
+                ["gh", "api"],
+                stdout='[{"name":"run.py","path":"skills/alpha/scripts/run.py","type":"file"}]',
+            ),
+            completed(["gh", "api"], stdout="cHJpbnQoJ2FscGhhJylcbiA="),
+            completed(
+                ["gh", "api"],
+                stdout=(
+                    '{"sha":"tree", "truncated": false, "tree": ['
+                    '{"path":"SKILL.md","mode":"100644","type":"blob"},'
+                    '{"path":"scripts/run.py","mode":"100755","type":"blob"}'
+                    ']} '
+                ),
+            ),
+        ]
+    )
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
+    destination = tmp_path / "materialized"
+
+    backend.materialize_folder("skills/alpha", destination)
+    assert not os.access(destination / "scripts" / "run.py", os.X_OK)
+
+    backend.apply_executable_modes("skills/alpha", destination)
+
+    assert os.access(destination / "scripts" / "run.py", os.X_OK)
+
+
+def test_github_https_api_backend_applies_tree_modes(tmp_path: Path) -> None:
+    tree_body = (
+        '{"sha":"tree", "truncated": false, "tree": ['
+        '{"path":"SKILL.md","mode":"100644","type":"blob"},'
+        '{"path":"scripts/run.py","mode":"100755","type":"blob"}'
+        ']}'
+    ).encode("utf-8")
+    http = FakeHttpGet([GitHubHttpResponse(status=200, body=tree_body)])
+    backend = GitHubHttpsApiBackend(
+        GitHubRepoRef(owner="Org", repo="Skills"),
+        http_get=http,
+        env={},
+    )
+    destination = tmp_path / "alpha"
+    (destination / "scripts").mkdir(parents=True)
+    (destination / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n", encoding="utf-8"
+    )
+    script = destination / "scripts" / "run.py"
+    script.write_text("print('alpha')\n", encoding="utf-8")
+
+    backend.apply_executable_modes("skills/alpha", destination)
+
+    assert os.access(script, os.X_OK)
 
 
 def test_github_gh_api_backend_rejects_oversized_materialization_and_cleans_temp(

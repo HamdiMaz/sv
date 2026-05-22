@@ -18,6 +18,7 @@ from urllib.parse import quote
 import re
 
 from sv.errors import SvError
+from sv.path_validation import normalize_executable_metadata_path
 from sv.process import (
     DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
     Runner,
@@ -318,6 +319,46 @@ class GitHubGhApiBackend:
                     f"{item_path} has unsupported GitHub content type {item_type or 'unknown'}",
                 )
 
+    def apply_executable_modes(self, source_path: str, destination: Path) -> None:
+        executable_paths = self._executable_paths_from_tree(source_path)
+        from sv.materialization import apply_skill_file_modes
+
+        apply_skill_file_modes(destination, executable_paths)
+
+    def _executable_paths_from_tree(self, source_path: str) -> tuple[str, ...]:
+        operation = "reading GitHub tree modes"
+        output = self._run_api([_github_tree_endpoint(self.repo, source_path)], operation=operation)
+        try:
+            data = json.loads(output or "{}")
+        except json.JSONDecodeError as exc:
+            raise SourceBackendError(operation, "GitHub tree response was not valid JSON") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("tree"), list):
+            raise SourceBackendError(operation, "GitHub tree response was missing tree entries")
+        if data.get("truncated") is True:
+            raise SourceBackendError(operation, "GitHub tree response was truncated")
+        executable_paths: list[str] = []
+        for item in data["tree"]:
+            if not isinstance(item, Mapping):
+                raise SourceBackendError(operation, "GitHub tree item was invalid")
+            item_type = item.get("type")
+            mode = item.get("mode")
+            path = item.get("path")
+            if item_type == "tree":
+                continue
+            if item_type != "blob":
+                raise SourceBackendError(operation, f"GitHub tree item had unsupported type {item_type!r}")
+            if not isinstance(mode, str) or mode not in {"100644", "100755"}:
+                raise SourceBackendError(operation, "GitHub tree item had unsupported file mode")
+            if not isinstance(path, str):
+                raise SourceBackendError(operation, "GitHub tree item was missing a path")
+            try:
+                normalized_path = normalize_executable_metadata_path(path)
+            except SvError as exc:
+                raise SourceBackendError(operation, str(exc)) from exc
+            if mode == "100755":
+                executable_paths.append(normalized_path)
+        return tuple(sorted(dict.fromkeys(executable_paths)))
+
     def _read_file(
         self,
         path: str,
@@ -574,6 +615,15 @@ def _read_limited_process_output_file(
         return path.read_bytes()
     except OSError as exc:
         raise SourceBackendError(operation, f"Failed to read {label}: {exc}") from exc
+
+def _github_tree_endpoint(repo: GitHubRepoRef, source_path: str) -> str:
+    normalized_path = _normalize_backend_relative_path(source_path)
+    tree_ref = quote(f"HEAD:{normalized_path}", safe="")
+    return (
+        f"/repos/{quote(repo.owner, safe='')}/{quote(repo.repo, safe='')}"
+        f"/git/trees/{tree_ref}?recursive=1"
+    )
+
 
 def _github_contents_endpoint(repo: GitHubRepoRef, path: str) -> str:
     endpoint = f"/repos/{quote(repo.owner, safe='')}/{quote(repo.repo, safe='')}/contents"
