@@ -95,6 +95,32 @@ def test_scan_repo_for_index_records_executable_paths(tmp_path: Path) -> None:
     assert document.skills[0].executable_paths == ("scripts/run.py",)
 
 
+def test_scan_repo_for_index_warns_and_skips_invalid_executable_paths(
+    tmp_path: Path,
+) -> None:
+    skill = tmp_path / "skills" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        encoding="utf-8",
+    )
+    script = skill / "bin" / "run\u200b"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env sh\necho alpha\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+    warnings: list[str] = []
+
+    document = scan_repo_for_index(
+        tmp_path,
+        kind="skill-vault",
+        generated_at="now",
+        warn=warnings.append,
+    )
+
+    assert document.skills == ()
+    assert warnings and "Unicode format characters" in warnings[0]
+
+
 def test_scan_repo_for_index_propagates_hashing_filesystem_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -501,6 +527,35 @@ def test_load_index_defaults_missing_executable_paths_to_unknown(tmp_path: Path)
     loaded = load_index(path)
 
     assert loaded.skills[0].executable_paths is None
+
+
+def test_load_index_deduplicates_executable_paths(tmp_path: Path) -> None:
+    path = tmp_path / ".sv" / "index.toml"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "schema_version = 1",
+                'kind = "skill-vault"',
+                'generated_by = "sv"',
+                'generated_at = "now"',
+                "",
+                "[[skills]]",
+                'name = "alpha"',
+                'description = "Alpha skill."',
+                'source_path = "skills/alpha"',
+                'content_hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"',
+                'skill_file_hash = "sha256:2222222222222222222222222222222222222222222222222222222222222222"',
+                'executable_paths = ["bin/run", "bin/run"]',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_index(path)
+
+    assert loaded.skills[0].executable_paths == ("bin/run",)
 
 
 @pytest.mark.parametrize(

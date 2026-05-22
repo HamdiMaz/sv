@@ -263,7 +263,9 @@ def _scan_one_skill_for_index(skill_file: Path, root: Path) -> _ScannedSkill:
                 source_path=_repo_relative_path(skill_dir, root),
                 content_hash=sha256_skill_directory(skill_dir),
                 skill_file_hash=sha256_file(skill_file),
-                executable_paths=executable_paths_for_skill_directory(skill_dir),
+                executable_paths=_validate_scanned_executable_paths(
+                    executable_paths_for_skill_directory(skill_dir), skill_file
+                ),
             )
         )
     except InvalidSkillError as exc:
@@ -286,6 +288,15 @@ def _scan_one_skill_for_index(skill_file: Path, root: Path) -> _ScannedSkill:
                 f"{_escape_control_characters(str(exc))}"
             ),
         )
+
+
+def _validate_scanned_executable_paths(paths: Sequence[str], skill_file: Path) -> tuple[str, ...]:
+    normalized_paths: list[str] = []
+    for executable_path in paths:
+        normalized = _validate_executable_path(executable_path, 1, skill_file)
+        if normalized not in normalized_paths:
+            normalized_paths.append(normalized)
+    return tuple(normalized_paths)
 
 
 def _deduplicate_index_entries(
