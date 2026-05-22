@@ -57,6 +57,8 @@ skill folders between agents.
 
 Run `sv index` in a Git repo to scan valid `SKILL.md` folders and write `.sv/index.toml`. Source-published indexes are the fastest path for first use by every user because `sv` can read one metadata file instead of probing each skill folder. In a skill-vault repo, `sv index` also refreshes the generated README skill table; README files touched by that update must be UTF-8 and no larger than 4 MiB. Index scanning is bounded by skill-candidate and directory-depth limits so huge accidental trees fail closed instead of exhausting traversal. If the scan finds duplicate skill content with the same full content hash and `SKILL.md` hash, the generated index keeps the highest-level `source_path`, uses lexicographic `source_path` order as the tie-breaker, and omits deeper duplicates while preserving same-name skills whose hashes differ. Limit scan roots with repeatable `--include PATH` flags and skip subtrees with repeatable `--exclude PATH` flags. To make those defaults persistent for a repo, create `.sv/index-config.toml`; `sv` uses the same persistent scan config when it auto-refreshes a local index or checks skill-vault index/README freshness:
 
+The generated index includes `executable_paths` for every skill's executable file bits. New indexes write an empty list when a skill has no executable files, so installers can distinguish an authoritative empty set from older indexes that did not publish executable metadata. This avoids extra per-skill GitHub API calls on the normal indexed install path.
+
 ```toml
 schema_version = 1
 include_paths = ["skills", "packages/agents/pi/skills"]

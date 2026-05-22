@@ -562,6 +562,17 @@ def test_docs_describe_sv_jobs_parallelism_control() -> None:
     assert "parallelizes independent work" in usage_guide
 
 
+def test_docs_describe_indexed_executable_path_metadata() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    commands = Path("docs/commands.md").read_text(encoding="utf-8")
+    troubleshooting = Path("docs/troubleshooting.md").read_text(encoding="utf-8")
+
+    assert "executable_paths" in readme
+    assert "executable file bits" in commands
+    assert "hash did not match" in troubleshooting
+    assert "sv index" in troubleshooting
+
+
 def test_docs_describe_source_metadata_acceleration() -> None:
     readme = README_PATH.read_text(encoding="utf-8")
     command_reference = (DOCS_DIR / "commands.md").read_text(encoding="utf-8")

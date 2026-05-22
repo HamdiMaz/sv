@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added indexed source metadata for executable script bits so normal indexed installs can restore modes without extra fast-path GitHub API calls.
+- Fixed older indexed GitHub sources to lazily recover executable modes after content-hash mismatches, and updated docs/tests for the indexed executable metadata contract.
+
 ## v0.2.2
 
 - Renamed the PyPI distribution to `maz-sv` after PyPI rejected `skill-vault` as too similar to an existing project, while keeping the installed `sv` and `svx` commands and the `sv` import package.
