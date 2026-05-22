@@ -1,5 +1,6 @@
 from dataclasses import replace
 from io import StringIO
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -577,6 +578,41 @@ def test_add_writes_canonical_project_manifest_without_legacy_manifest(
     assert manifest["alpha"].source_content_hash == sha256_skill_directory(installed)
     assert manifest["alpha"].installed_content_hash == sha256_skill_directory(installed)
     assert manifest["alpha"].local_content_hash == sha256_skill_directory(installed)
+
+
+@pytest.mark.integration
+def test_add_from_indexed_source_preserves_executable_scripts(
+    tmp_path: Path, run_sv
+) -> None:
+    home = tmp_path / "home"
+    source = tmp_path / "source"
+    project = tmp_path / "project"
+    skill = source / "skills" / "alpha"
+    skill.mkdir(parents=True)
+    project.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n", encoding="utf-8"
+    )
+    script = skill / "scripts" / "run.py"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\nprint('alpha')\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+    run_git(["init"], source)
+    run_git(["config", "user.email", "tests@example.com"], source)
+    run_git(["config", "user.name", "sv tests"], source)
+    run_git(["add", "skills"], source)
+    run_git(["commit", "-m", "initial alpha skill"], source)
+    run_sv(["index"], cwd=source, home=home)
+    run_git(["add", ".sv/index.toml"], source)
+    run_git(["commit", "-m", "publish sv index"], source)
+    run_sv(["repo", "add", str(source)], cwd=project, home=home)
+    run_sv(["default", "pi"], cwd=project, home=home)
+
+    result = run_sv(["add", "alpha", "--refresh"], cwd=project, home=home)
+
+    assert result.exit_code == 0
+    installed_script = project / ".pi" / "skills" / "alpha" / "scripts" / "run.py"
+    assert os.access(installed_script, os.X_OK)
 
 
 @pytest.mark.integration
