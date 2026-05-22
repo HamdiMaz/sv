@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.0
+
 - Documented TTY-only stderr loading indicators for source refresh and remote materialization while preserving script-friendly non-interactive output.
 - Added project default agent documentation for `.pi/skills`, `.claude/skills`, and `.agents/skills`, including `sv default` and `default_agent` manifest behavior.
 - Changed `sv run` to require the explicit `pi` agent and forward Pi arguments after the agent name.
