@@ -196,7 +196,7 @@ def _git_failure(tmp_path: Path) -> CliErrorScenario:
         home,
         'schema_version = 1\n[[repos]]\n'
         'id = "HamdiMaz/Skills"\n'
-        'url = "https://github.com/HamdiMaz/Skills.git"\n',
+        'url = "https://example.com/HamdiMaz/Skills.git"\n',
     )
 
     def git_runner(args, cwd=None):

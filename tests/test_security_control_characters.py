@@ -432,7 +432,7 @@ def test_source_git_errors_escape_os_error_control_characters(
     paths.config_file.write_text(
         'schema_version = 1\n[[repos]]\n'
         'id = "HamdiMaz/Skills"\n'
-        'url = "https://github.com/HamdiMaz/Skills.git"\n'
+        'url = "https://example.com/HamdiMaz/Skills.git"\n'
     )
 
     def git_runner(args, cwd=None):
