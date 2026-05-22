@@ -74,6 +74,27 @@ def test_scan_repo_for_index_recursively_includes_valid_skills_and_skips_build_d
     assert "description" in warnings[0]
 
 
+def test_scan_repo_for_index_records_executable_paths(tmp_path: Path) -> None:
+    skill = tmp_path / "skills" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        encoding="utf-8",
+    )
+    script = skill / "scripts" / "run.py"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\nprint('alpha')\n", encoding="utf-8")
+    notes = skill / "notes.md"
+    notes.write_text("notes\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+    os.chmod(notes, 0o644)
+
+    document = scan_repo_for_index(tmp_path, kind="skill-vault", generated_at="now")
+
+    assert len(document.skills) == 1
+    assert document.skills[0].executable_paths == ("scripts/run.py",)
+
+
 def test_scan_repo_for_index_propagates_hashing_filesystem_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -416,6 +437,111 @@ def test_save_index_rejects_malformed_skill_hashes(tmp_path: Path):
 
     with pytest.raises(SvError, match="field 'content_hash' must be a sha256 digest"):
         save_index(path, document)
+
+
+def test_index_round_trips_empty_and_non_empty_executable_paths(tmp_path: Path) -> None:
+    path = tmp_path / ".sv" / "index.toml"
+    document = IndexDocument(
+        kind="skill-vault",
+        generated_by="sv",
+        generated_at="now",
+        skills=(
+            IndexSkillEntry(
+                name="alpha",
+                description="Alpha skill.",
+                source_path="skills/alpha",
+                content_hash="sha256:" + "1" * 64,
+                skill_file_hash="sha256:" + "2" * 64,
+                executable_paths=(),
+            ),
+            IndexSkillEntry(
+                name="beta",
+                description="Beta skill.",
+                source_path="skills/beta",
+                content_hash="sha256:" + "3" * 64,
+                skill_file_hash="sha256:" + "4" * 64,
+                executable_paths=("bin/run", "scripts/check.py"),
+            ),
+        ),
+    )
+
+    save_index(path, document)
+    text = path.read_text(encoding="utf-8")
+
+    assert 'executable_paths = []' in text
+    assert 'executable_paths = ["bin/run", "scripts/check.py"]' in text
+    loaded = load_index(path)
+    assert loaded.skills[0].executable_paths == ()
+    assert loaded.skills[1].executable_paths == ("bin/run", "scripts/check.py")
+
+
+def test_load_index_defaults_missing_executable_paths_to_unknown(tmp_path: Path) -> None:
+    path = tmp_path / ".sv" / "index.toml"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "schema_version = 1",
+                'kind = "skill-vault"',
+                'generated_by = "sv"',
+                'generated_at = "now"',
+                "",
+                "[[skills]]",
+                'name = "alpha"',
+                'description = "Alpha skill."',
+                'source_path = "skills/alpha"',
+                'content_hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"',
+                'skill_file_hash = "sha256:2222222222222222222222222222222222222222222222222222222222222222"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_index(path)
+
+    assert loaded.skills[0].executable_paths is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        'executable_paths = "scripts/run.py"',
+        'executable_paths = [1]',
+        'executable_paths = [""]',
+        'executable_paths = ["/abs.py"]',
+        'executable_paths = ["../outside.py"]',
+        'executable_paths = ["scripts\\run.py"]',
+        'executable_paths = ["bad:name.py"]',
+        'executable_paths = ["scripts/zero\u200bwidth.py"]',
+    ],
+)
+def test_load_index_rejects_invalid_executable_paths(tmp_path: Path, value: str) -> None:
+    path = tmp_path / ".sv" / "index.toml"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "schema_version = 1",
+                'kind = "skill-vault"',
+                'generated_by = "sv"',
+                'generated_at = "now"',
+                "",
+                "[[skills]]",
+                'name = "alpha"',
+                'description = "Alpha skill."',
+                'source_path = "skills/alpha"',
+                'content_hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"',
+                'skill_file_hash = "sha256:2222222222222222222222222222222222222222222222222222222222222222"',
+                value,
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SvError, match="executable_paths"):
+        load_index(path)
 
 
 def test_load_index_parses_project_index_file(tmp_path: Path):

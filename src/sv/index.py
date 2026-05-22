@@ -11,7 +11,11 @@ from typing import Any, Literal, cast
 from sv.catalog import normalize_source_relative_path
 from sv.errors import SvError
 from sv.hashformat import SHA256_DIGEST_DESCRIPTION, is_sha256_digest
-from sv.hashing import sha256_file, sha256_skill_directory
+from sv.hashing import (
+    executable_paths_for_skill_directory,
+    sha256_file,
+    sha256_skill_directory,
+)
 from sv.parallel import map_ordered
 from sv.project import normalize_skill_name
 from sv.skills import InvalidSkillError, parse_skill_file
@@ -45,6 +49,7 @@ class IndexSkillEntry:
     source_path: str
     content_hash: str
     skill_file_hash: str
+    executable_paths: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -258,6 +263,7 @@ def _scan_one_skill_for_index(skill_file: Path, root: Path) -> _ScannedSkill:
                 source_path=_repo_relative_path(skill_dir, root),
                 content_hash=sha256_skill_directory(skill_dir),
                 skill_file_hash=sha256_file(skill_file),
+                executable_paths=executable_paths_for_skill_directory(skill_dir),
             )
         )
     except InvalidSkillError as exc:
@@ -682,9 +688,41 @@ def _parse_skill_entries(raw_skills: Any, path: Path) -> tuple[IndexSkillEntry, 
                 skill_file_hash=_expect_skill_hash(
                     skill_item.get("skill_file_hash"), "skill_file_hash", index, path
                 ),
+                executable_paths=_parse_executable_paths(
+                    skill_item.get("executable_paths"), index, path
+                ),
             )
         )
     return tuple(entries)
+
+
+def _parse_executable_paths(value: Any, index: int, path: Path) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise SvError(
+            f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'executable_paths' must be a list."
+        )
+    paths: list[str] = []
+    for item_index, item in enumerate(value, start=1):
+        if not isinstance(item, str):
+            raise SvError(
+                f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'executable_paths' item {item_index} must be a string."
+            )
+        normalized = _validate_executable_path(item, index, path)
+        if normalized not in paths:
+            paths.append(normalized)
+    return tuple(paths)
+
+
+def _validate_executable_path(value: str, index: int, path: Path) -> str:
+    _validate_index_field_length(value, "executable_paths", path, index=index)
+    try:
+        return normalize_source_relative_path(value)
+    except SvError as exc:
+        raise SvError(
+            f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'executable_paths' is invalid: {exc}"
+        ) from exc
 
 
 def _append_skill_entry(lines: list[str], entry: IndexSkillEntry) -> None:
@@ -693,6 +731,12 @@ def _append_skill_entry(lines: list[str], entry: IndexSkillEntry) -> None:
     lines.append(f'source_path = "{toml_escape(entry.source_path)}"')
     lines.append(f'content_hash = "{toml_escape(entry.content_hash)}"')
     lines.append(f'skill_file_hash = "{toml_escape(entry.skill_file_hash)}"')
+    if entry.executable_paths is not None:
+        values = ", ".join(
+            f'"{toml_escape(executable_path)}"'
+            for executable_path in entry.executable_paths
+        )
+        lines.append(f"executable_paths = [{values}]")
 
 
 def _sorted_entries(entries: list[IndexSkillEntry]) -> list[IndexSkillEntry]:
@@ -740,6 +784,12 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
                 f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'source_path' is invalid: {exc}"
             ) from exc
         _validate_source_path_matches_name(source_path, normalized_name, index, path)
+        executable_paths = None
+        if entry.executable_paths is not None:
+            executable_paths = tuple(
+                _validate_executable_path(executable_path, index, path)
+                for executable_path in entry.executable_paths
+            )
         entries.append(
             IndexSkillEntry(
                 name=normalized_name,
@@ -747,6 +797,7 @@ def _validate_document(document: IndexDocument, path: Path) -> list[IndexSkillEn
                 source_path=source_path,
                 content_hash=content_hash,
                 skill_file_hash=skill_file_hash,
+                executable_paths=executable_paths,
             )
         )
     return entries

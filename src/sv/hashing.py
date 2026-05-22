@@ -49,6 +49,18 @@ def sha256_skill_directory(skill_dir: Path, *, expected_name: str | None = None)
     return f"{SHA256_PREFIX}{digest.hexdigest()}"
 
 
+def executable_paths_for_skill_directory(
+    skill_dir: Path, *, expected_name: str | None = None
+) -> tuple[str, ...]:
+    """Return deterministic skill-root-relative executable file paths."""
+    _ensure_safe_skill_directory(skill_dir, expected_name=expected_name)
+    executable_paths: list[str] = []
+    for file_path in _iter_skill_files(skill_dir):
+        if _hash_file_mode(file_path) == "100755":
+            executable_paths.append(_safe_relative_path(file_path, skill_dir))
+    return tuple(executable_paths)
+
+
 def _sha256_file_digest(path: Path) -> bytes:
     _ensure_regular_file(path)
     digest = hashlib.sha256()
