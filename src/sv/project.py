@@ -1202,7 +1202,11 @@ def _refreshed_manifest_entry_state(
     )
     source_content_hash = _known_source_content_hash(source_entry)
     source_skill_file_hash = _known_source_skill_file_hash(source_entry)
-    if source_entry is not None and source_content_hash is None:
+    if (
+        source_entry is not None
+        and source_content_hash is None
+        and _source_backend_has_local_path_hash_fast_path(source_entry)
+    ):
         try:
             if source_entry.source_path.is_dir():
                 source_content_hash = sha256_skill_directory(
@@ -1210,7 +1214,11 @@ def _refreshed_manifest_entry_state(
                 )
         except SvError:
             source_content_hash = None
-    if source_entry is not None and source_skill_file_hash is None:
+    if (
+        source_entry is not None
+        and source_skill_file_hash is None
+        and _source_backend_has_local_path_hash_fast_path(source_entry)
+    ):
         try:
             skill_file = source_entry.source_path / "SKILL.md"
             if skill_file.is_file():
@@ -1274,6 +1282,8 @@ def _available_source_content_hash(entry: ProjectSourceSkill) -> str | None:
     known_hash = _known_source_content_hash(entry)
     if known_hash is not None:
         return known_hash
+    if not _source_backend_has_local_path_hash_fast_path(entry):
+        return None
     from sv.hashing import sha256_skill_directory
 
     try:
@@ -1282,6 +1292,18 @@ def _available_source_content_hash(entry: ProjectSourceSkill) -> str | None:
     except SvError:
         return None
     return None
+
+
+_REMOTE_PATH_HASH_SOURCE_BACKENDS = frozenset(
+    {"github-gh-api", "github-https-api"}
+)
+
+
+def _source_backend_has_local_path_hash_fast_path(entry: ProjectSourceSkill) -> bool:
+    return (
+        not entry.source_backend.startswith("cache:")
+        and entry.source_backend not in _REMOTE_PATH_HASH_SOURCE_BACKENDS
+    )
 
 
 def _known_source_skill_file_hash(entry: ProjectSourceSkill | None) -> str | None:

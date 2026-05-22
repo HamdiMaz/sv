@@ -1101,6 +1101,96 @@ def test_project_private_source_hash_helpers_prefer_known_values_and_handle_miss
     assert project_module._available_source_content_hash(missing) is None
 
 
+def test_available_source_content_hash_ignores_github_api_source_path_without_known_hash(
+    tmp_path: Path,
+):
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    remote_entry = SourceSkill(
+        name=entry.name,
+        description=entry.description,
+        repo_id=entry.repo_id,
+        repo_url=entry.repo_url,
+        repo_path=entry.repo_path,
+        source_path=entry.source_path,
+        source_relative_path=entry.source_relative_path,
+        source_backend="github-gh-api",
+    )
+
+    assert project_module._available_source_content_hash(remote_entry) is None
+
+
+def test_refreshed_manifest_entry_state_ignores_github_api_source_path_without_known_hash(
+    tmp_path: Path,
+):
+    installed_entry = make_source_skill(tmp_path / "installed-source", "alpha")
+    installed_hash = sha256_skill_directory(installed_entry.source_path, expected_name="alpha")
+    stale_entry = make_source_skill(tmp_path / "stale-source", "alpha")
+    (stale_entry.source_path / "notes.md").write_text("stale remote cache\n")
+    stale_hash = sha256_skill_directory(stale_entry.source_path, expected_name="alpha")
+    assert stale_hash != installed_hash
+    remote_entry = SourceSkill(
+        name=stale_entry.name,
+        description=stale_entry.description,
+        repo_id=stale_entry.repo_id,
+        repo_url=stale_entry.repo_url,
+        repo_path=stale_entry.repo_path,
+        source_path=stale_entry.source_path,
+        source_relative_path=stale_entry.source_relative_path,
+        source_backend="github-gh-api",
+    )
+    manifest_entry = ManifestEntry(
+        name="alpha",
+        repo_id=installed_entry.repo_id,
+        repo_url=installed_entry.repo_url,
+        source_path=installed_entry.source_relative_path,
+        description=installed_entry.description,
+        installed_content_hash=installed_hash,
+    )
+
+    refreshed = project_module._refreshed_manifest_entry_state(
+        manifest_entry, installed_entry.source_path, remote_entry
+    )
+
+    assert refreshed.source_content_hash != stale_hash
+    assert refreshed.update_available is False
+
+
+def test_refreshed_manifest_entry_state_ignores_cache_reconstructed_source_path_without_known_hash(
+    tmp_path: Path,
+):
+    installed_entry = make_source_skill(tmp_path / "installed-source", "alpha")
+    installed_hash = sha256_skill_directory(installed_entry.source_path, expected_name="alpha")
+    stale_entry = make_source_skill(tmp_path / "stale-source", "alpha")
+    (stale_entry.source_path / "notes.md").write_text("stale reconstructed cache\n")
+    stale_hash = sha256_skill_directory(stale_entry.source_path, expected_name="alpha")
+    assert stale_hash != installed_hash
+    cached_remote_entry = SourceSkill(
+        name=stale_entry.name,
+        description=stale_entry.description,
+        repo_id=stale_entry.repo_id,
+        repo_url=stale_entry.repo_url,
+        repo_path=stale_entry.repo_path,
+        source_path=stale_entry.source_path,
+        source_relative_path=stale_entry.source_relative_path,
+        source_backend="cache:github-gh-api",
+    )
+    manifest_entry = ManifestEntry(
+        name="alpha",
+        repo_id=installed_entry.repo_id,
+        repo_url=installed_entry.repo_url,
+        source_path=installed_entry.source_relative_path,
+        description=installed_entry.description,
+        installed_content_hash=installed_hash,
+    )
+
+    refreshed = project_module._refreshed_manifest_entry_state(
+        manifest_entry, installed_entry.source_path, cached_remote_entry
+    )
+
+    assert refreshed.source_content_hash != stale_hash
+    assert refreshed.update_available is False
+
+
 def test_list_project_skills_returns_sorted_skill_directories(tmp_path: Path):
     project_skills = tmp_path / "project" / ".pi" / "skills"
     (project_skills / "beta").mkdir(parents=True)
