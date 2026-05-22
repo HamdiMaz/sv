@@ -202,6 +202,46 @@ def test_utc_timestamp_treats_naive_datetime_as_utc(
     assert timestamp == "2026-05-18T12:34:56Z"
 
 
+def test_catalog_cache_round_trips_executable_paths(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="github-gh-api",
+        source_content_hash="sha256:" + "1" * 64,
+        source_skill_file_hash="sha256:" + "2" * 64,
+        source_executable_paths=("scripts/run.py",),
+    )
+    document = source_cache._catalog_document_from_entries(
+        repo, [entry], "2026-05-22T12:00:00Z", backend="github-gh-api"
+    )
+
+    save_cached_catalog(paths, repo, document)
+    loaded = load_cached_catalog(paths, repo)
+    assert loaded is not None
+    assert loaded.entries[0].executable_paths == ("scripts/run.py",)
+
+    catalog = source_cache._source_skills_from_cached_document(repo, paths, loaded)
+    assert catalog[0].source_executable_paths == ("scripts/run.py",)
+
+
+def test_catalog_cache_missing_executable_paths_means_unknown(tmp_path: Path) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    document = _catalog_document("2026-05-22T12:00:00Z")
+    save_cached_catalog(paths, repo, document)
+
+    loaded = load_cached_catalog(paths, repo)
+    assert loaded is not None
+    assert loaded.entries[0].executable_paths is None
+
+
 def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     document = _catalog_document("2026-05-18T12:00:00Z")

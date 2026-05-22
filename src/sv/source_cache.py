@@ -114,6 +114,7 @@ class CachedCatalogEntry:
     source_path: str
     content_hash: str | None = None
     skill_file_hash: str | None = None
+    executable_paths: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -1237,6 +1238,7 @@ def _catalog_document_from_entries(
                     ),
                     content_hash=entry.source_content_hash,
                     skill_file_hash=entry.source_skill_file_hash,
+                    executable_paths=entry.source_executable_paths,
                 )
                 for entry in entries
             ),
@@ -1284,6 +1286,7 @@ def _source_skills_from_cached_document(
                 source_backend=f"cache:{document.backend}",
                 source_content_hash=entry.content_hash,
                 source_skill_file_hash=entry.skill_file_hash,
+                source_executable_paths=entry.executable_paths,
             )
         )
     return entries
@@ -1397,7 +1400,32 @@ def _parse_cached_catalog_entry(
         source_path=source_path,
         content_hash=_optional_hash(item_data, "content_hash", path, index=index),
         skill_file_hash=_optional_hash(item_data, "skill_file_hash", path, index=index),
+        executable_paths=_optional_path_list(
+            item_data, "executable_paths", path, index=index
+        ),
     )
+
+
+def _optional_path_list(
+    data: Mapping[str, Any], field: str, path: Path, *, index: int
+) -> tuple[str, ...] | None:
+    value = data.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise SvError(
+            f"Invalid sv catalog cache at {path}: skills[{index}].{field} must be a list."
+        )
+    normalized: list[str] = []
+    for item_index, item in enumerate(value):
+        if not isinstance(item, str):
+            raise SvError(
+                f"Invalid sv catalog cache at {path}: skills[{index}].{field}[{item_index}] must be a string."
+            )
+        normalized_path = normalize_source_relative_path(item)
+        if normalized_path not in normalized:
+            normalized.append(normalized_path)
+    return tuple(normalized)
 
 
 def _required_string(
@@ -1500,6 +1528,12 @@ def _format_cached_catalog_document(document: CachedCatalogDocument) -> str:
             lines.append(f'content_hash = "{toml_escape(entry.content_hash)}"')
         if entry.skill_file_hash is not None:
             lines.append(f'skill_file_hash = "{toml_escape(entry.skill_file_hash)}"')
+        if entry.executable_paths is not None:
+            paths = ", ".join(
+                f'"{toml_escape(executable_path)}"'
+                for executable_path in entry.executable_paths
+            )
+            lines.append(f"executable_paths = [{paths}]")
     return "\n".join(lines) + "\n"
 
 
@@ -1523,6 +1557,9 @@ def _cached_catalog_hash(document: CachedCatalogDocument) -> str:
         _hash_labeled_value(
             hasher, "entry.skill_file_hash", entry.skill_file_hash or ""
         )
+        if entry.executable_paths is not None:
+            for executable_path in entry.executable_paths:
+                _hash_labeled_value(hasher, "entry.executable_path", executable_path)
     return "sha256:" + hasher.hexdigest()
 
 

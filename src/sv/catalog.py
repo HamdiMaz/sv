@@ -38,7 +38,11 @@ class SourceSkill:
     source_backend: str = "local-cache"
     source_content_hash: str | None = None
     source_skill_file_hash: str | None = None
+    source_executable_paths: tuple[str, ...] | None = None
     _materializer: Callable[[Path], None] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _mode_repairer: Callable[[Path], None] | None = field(
         default=None, repr=False, compare=False
     )
 
@@ -64,6 +68,12 @@ class SourceSkill:
             destination,
             error_message=f"Failed to materialize skill '{self.name}'",
         )
+
+    def repair_materialized_modes(self, destination: Path) -> bool:
+        if self._mode_repairer is None:
+            return False
+        self._mode_repairer(destination)
+        return True
 
     @property
     def display_label(self) -> str:
@@ -629,8 +639,14 @@ def _catalog_entries_from_index(
                 source_backend=backend.name,
                 source_content_hash=index_entry.content_hash,
                 source_skill_file_hash=index_entry.skill_file_hash,
+                source_executable_paths=index_entry.executable_paths,
                 _materializer=_backend_materializer(
                     backend, source_relative_path, materialize_lock
+                ),
+                _mode_repairer=_backend_mode_repairer(
+                    backend,
+                    source_relative_path,
+                    materialize_lock if index_entry.executable_paths is None else None,
                 ),
             )
         )
@@ -658,6 +674,25 @@ def _backend_materializer(
             backend.materialize_folder(source_relative_path, destination)
 
     return materialize
+
+
+def _backend_mode_repairer(
+    backend: SourceBackend,
+    source_relative_path: str,
+    lock: RLockType | None = None,
+) -> Callable[[Path], None] | None:
+    repair = getattr(backend, "apply_executable_modes", None)
+    if repair is None:
+        return None
+
+    def apply(destination: Path) -> None:
+        if lock is None:
+            repair(source_relative_path, destination)
+            return
+        with lock:
+            repair(source_relative_path, destination)
+
+    return apply
 
 
 def _candidate_skills_roots(

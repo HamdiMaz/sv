@@ -526,6 +526,33 @@ def test_build_source_catalog_from_backend_uses_index_without_reading_skill_file
     assert result.failures == ()
 
 
+def test_indexed_catalog_preserves_executable_paths(tmp_path: Path) -> None:
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    paths = SvPaths.from_home(tmp_path)
+    index_text = """
+schema_version = 1
+kind = "skill-vault"
+generated_by = "sv"
+generated_at = "now"
+
+[[skills]]
+name = "alpha"
+description = "Alpha skill."
+source_path = "skills/alpha"
+content_hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+skill_file_hash = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+executable_paths = ["scripts/run.py"]
+""".lstrip()
+    backend = FakeSourceBackend({".sv/index.toml": index_text})
+
+    result = build_source_catalog_from_backends(
+        (repo,), paths, {repo.id: (backend,)}, warn=None
+    )
+
+    assert len(result.entries) == 1
+    assert result.entries[0].source_executable_paths == ("scripts/run.py",)
+
+
 def test_build_source_catalog_from_backend_rejects_index_name_source_path_mismatch(
     tmp_path: Path,
 ):
