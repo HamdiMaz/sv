@@ -25,14 +25,9 @@ class ProjectSourceSkill(Protocol):
     source_relative_path: str
     repo_aliases: tuple[str, ...]
     source_backend: str
-    source_executable_paths: tuple[str, ...] | None
 
     def materialize_to(self, destination: Path) -> None:
         """Materialize this selected source skill into destination."""
-        ...
-
-    def repair_materialized_modes(self, destination: Path) -> bool:
-        """Try to repair file modes for a materialized skill tree."""
         ...
 
 
@@ -1278,6 +1273,13 @@ def _known_source_content_hash(entry: ProjectSourceSkill | None) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _repair_materialized_modes(entry: ProjectSourceSkill, destination: Path) -> bool:
+    repair = getattr(entry, "repair_materialized_modes", None)
+    if not callable(repair):
+        return False
+    return bool(repair(destination))
+
+
 def _available_source_content_hash(entry: ProjectSourceSkill) -> str | None:
     known_hash = _known_source_content_hash(entry)
     if known_hash is not None:
@@ -1451,7 +1453,7 @@ def _materialize_entry_to_temp(
         if expected_hash is not None and metadata.content_hash != expected_hash:
             repaired = False
             if getattr(entry, "source_executable_paths", None) is None:
-                repaired = entry.repair_materialized_modes(temp_target)
+                repaired = _repair_materialized_modes(entry, temp_target)
             if repaired:
                 metadata = _validate_materialized_skill_folder(temp_target, skill_name)
         return metadata
