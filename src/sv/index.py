@@ -17,6 +17,7 @@ from sv.hashing import (
     sha256_skill_directory,
 )
 from sv.parallel import map_ordered
+from sv.path_validation import normalize_executable_metadata_path
 from sv.project import normalize_skill_name
 from sv.skills import InvalidSkillError, parse_skill_file
 from sv.terminal import escape_terminal_controls
@@ -729,7 +730,7 @@ def _parse_executable_paths(value: Any, index: int, path: Path) -> tuple[str, ..
 def _validate_executable_path(value: str, index: int, path: Path) -> str:
     _validate_index_field_length(value, "executable_paths", path, index=index)
     try:
-        return normalize_source_relative_path(value)
+        return normalize_executable_metadata_path(value)
     except SvError as exc:
         raise SvError(
             f"Invalid {INDEX_DOCUMENT} at {path}: skill entry {index} field 'executable_paths' is invalid: {exc}"

@@ -593,6 +593,8 @@ def test_load_index_deduplicates_executable_paths(tmp_path: Path) -> None:
         'executable_paths = [""]',
         'executable_paths = ["/abs.py"]',
         'executable_paths = ["../outside.py"]',
+        'executable_paths = ["scripts/./run.py"]',
+        'executable_paths = ["scripts//run.py"]',
         'executable_paths = ["scripts\\run.py"]',
         'executable_paths = ["bad:name.py"]',
         'executable_paths = ["scripts/zero\u200bwidth.py"]',

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import shutil
 import unicodedata
 
 from sv.errors import SvError
+from sv.path_validation import normalize_executable_metadata_path
 from sv.terminal import escape_terminal_controls
 
 _MAX_MATERIALIZATION_FILES = 1000
@@ -232,17 +233,7 @@ def apply_skill_file_modes(
 
 
 def _normalize_materialized_relative_path(path: str) -> str:
-    if _contains_unsafe_path_character(path):
-        raise SvError(f"Materialized skill path contains unsafe characters: {path!r}.")
-    candidate = PurePosixPath(path)
-    if candidate.is_absolute() or "\\" in path:
-        raise SvError(f"Materialized skill path must be a relative POSIX path: {path!r}.")
-    if ":" in path:
-        raise SvError(f"Materialized skill path contains unsupported characters: {path!r}.")
-    parts = candidate.parts
-    if not parts or any(part in {"", ".", ".."} for part in parts):
-        raise SvError(f"Materialized skill path contains unsafe path components: {path!r}.")
-    return candidate.as_posix()
+    return normalize_executable_metadata_path(path)
 
 
 def validate_materialization_source_tree(source: Path) -> None:

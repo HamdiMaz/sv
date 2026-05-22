@@ -7,6 +7,7 @@ from sv.errors import SvError
 from sv import materialization as materialization_module
 from sv.materialization import (
     MaterializationAdapter,
+    apply_skill_file_modes,
     copy_skill_folder_to_temp,
     install_materialized_skill_folder,
     remove_materialization_path,
@@ -18,6 +19,20 @@ from sv.materialization import (
 def _write_skill(path: Path, content: str) -> None:
     path.mkdir(parents=True)
     (path / "SKILL.md").write_text(content)
+
+
+@pytest.mark.parametrize("executable_path", ["scripts/./run.py", "scripts//run.py"])
+def test_apply_skill_file_modes_rejects_unsafe_raw_executable_path_components(
+    tmp_path: Path, executable_path: str
+) -> None:
+    skill_dir = tmp_path / "alpha"
+    _write_skill(skill_dir, "body\n")
+    script = skill_dir / "scripts" / "run.py"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    with pytest.raises(SvError, match="unsafe path components"):
+        apply_skill_file_modes(skill_dir, (executable_path,))
 
 
 def test_copy_skill_folder_to_temp_copies_source_without_touching_target(

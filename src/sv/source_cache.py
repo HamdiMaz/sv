@@ -19,6 +19,7 @@ from sv.config import RepoConfig, SvPaths, repo_source_key
 from sv.errors import SvError
 from sv.hashformat import SHA256_PREFIX, is_sha256_digest
 from sv.hashing import sha256_file, sha256_skill_directory
+from sv.path_validation import normalize_executable_metadata_path
 from sv.materialization import (
     apply_skill_file_modes,
     copy_skill_folder_to_temp,
@@ -1279,7 +1280,9 @@ def _catalog_document_from_entries(
                     ),
                     content_hash=entry.source_content_hash,
                     skill_file_hash=entry.source_skill_file_hash,
-                    executable_paths=entry.source_executable_paths,
+                    executable_paths=_normalize_cached_executable_paths(
+                        entry.source_executable_paths
+                    ),
                 )
                 for entry in entries
             ),
@@ -1298,6 +1301,22 @@ def _catalog_document_from_entries(
         entries=cached_entries,
     )
     return replace(document, catalog_hash=_cached_catalog_hash(document))
+
+
+def _normalize_cached_executable_paths(
+    executable_paths: Sequence[str] | None,
+) -> tuple[str, ...] | None:
+    if executable_paths is None:
+        return None
+    normalized_paths: list[str] = []
+    for executable_path in executable_paths:
+        try:
+            normalized_path = normalize_executable_metadata_path(executable_path)
+        except SvError as exc:
+            raise SvError(f"Invalid executable_paths metadata: {exc}") from exc
+        if normalized_path not in normalized_paths:
+            normalized_paths.append(normalized_path)
+    return tuple(normalized_paths)
 
 
 def _catalog_backend(entries: Sequence[SourceSkill]) -> str:
@@ -1463,7 +1482,12 @@ def _optional_path_list(
             raise SvError(
                 f"Invalid sv catalog cache at {path}: skills[{index}].{field}[{item_index}] must be a string."
             )
-        normalized_path = normalize_source_relative_path(item)
+        try:
+            normalized_path = normalize_executable_metadata_path(item)
+        except SvError as exc:
+            raise SvError(
+                f"Invalid sv catalog cache at {path}: skills[{index}].{field} is invalid: {exc}"
+            ) from exc
         if normalized_path not in normalized:
             normalized.append(normalized_path)
     return tuple(normalized)

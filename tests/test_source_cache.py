@@ -239,6 +239,32 @@ def test_utc_timestamp_treats_naive_datetime_as_utc(
     assert timestamp == "2026-05-18T12:34:56Z"
 
 
+@pytest.mark.parametrize("executable_path", ["scripts/./run.py", "scripts//run.py"])
+def test_catalog_document_from_entries_rejects_unsafe_raw_executable_path_components(
+    tmp_path: Path, executable_path: str
+) -> None:
+    repo = _repo()
+    paths = SvPaths.from_home(tmp_path)
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="github-gh-api",
+        source_content_hash="sha256:" + "1" * 64,
+        source_skill_file_hash="sha256:" + "2" * 64,
+        source_executable_paths=(executable_path,),
+    )
+
+    with pytest.raises(SvError, match="executable_paths"):
+        source_cache._catalog_document_from_entries(
+            repo, [entry], "2026-05-22T12:00:00Z", backend="github-gh-api"
+        )
+
+
 def test_catalog_cache_round_trips_executable_paths(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     repo = _repo()
@@ -266,6 +292,36 @@ def test_catalog_cache_round_trips_executable_paths(tmp_path: Path) -> None:
 
     catalog = source_cache._source_skills_from_cached_document(repo, paths, loaded)
     assert catalog[0].source_executable_paths == ("scripts/run.py",)
+
+
+@pytest.mark.parametrize("executable_path", ["scripts/./run.py", "scripts//run.py"])
+def test_cached_catalog_parser_rejects_unsafe_raw_executable_path_components(
+    tmp_path: Path, executable_path: str
+) -> None:
+    cache_path = tmp_path / "catalog.toml"
+    data = {
+        "schema_version": source_cache.CACHE_SCHEMA_VERSION,
+        "repo_id": "Org/Skills",
+        "repo_url": "https://github.com/Org/Skills.git",
+        "source_key": "github:org/skills",
+        "skills_paths": [],
+        "backend": "github-https-api",
+        "refreshed_at": "2026-05-22T12:00:00Z",
+        "catalog_hash": "sha256:" + "0" * 64,
+        "skills": [
+            {
+                "name": "alpha",
+                "description": "Alpha skill.",
+                "source_path": "skills/alpha",
+                "content_hash": "sha256:" + "1" * 64,
+                "skill_file_hash": "sha256:" + "2" * 64,
+                "executable_paths": [executable_path],
+            }
+        ],
+    }
+
+    with pytest.raises(SvError, match="executable_paths"):
+        source_cache._parse_cached_catalog_document(data, cache_path)
 
 
 def test_catalog_cache_missing_executable_paths_means_unknown(tmp_path: Path) -> None:
