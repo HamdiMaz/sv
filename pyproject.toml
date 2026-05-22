@@ -1,6 +1,6 @@
 [project]
 name = "maz-sv"
-version = "0.2.2"
+version = "0.2.3"
 description = "Project-local AI agent skill manager"
 readme = "README.md"
 requires-python = ">=3.14"

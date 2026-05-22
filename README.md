@@ -35,7 +35,7 @@ uvx --from maz-sv svx HamdiMaz/Skills --help
 To install a specific version:
 
 ```bash
-uv tool install "maz-sv==0.2.2"
+uv tool install "maz-sv==0.2.3"
 ```
 
 To update an existing install to the latest PyPI release:

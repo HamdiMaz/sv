@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.3
+
 - Added indexed source metadata for executable script bits so normal indexed installs can restore modes without extra fast-path GitHub API calls.
 - Fixed older indexed GitHub sources to lazily recover executable modes after content-hash mismatches, and updated docs/tests for the indexed executable metadata contract.
 
