@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.2.2
+
+- Renamed the PyPI distribution to `maz-sv` after PyPI rejected `skill-vault` as too similar to an existing project, while keeping the installed `sv` and `svx` commands and the `sv` import package.
+- Updated installation docs, release checks, version resolution, and built-wheel smoke tests for the `maz-sv` package name.
+
 ## v0.2.1
 
 - Renamed the PyPI distribution to `skill-vault` while keeping the installed `sv` and `svx` commands and the `sv` import package.

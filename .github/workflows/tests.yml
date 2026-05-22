@@ -41,7 +41,7 @@ jobs:
           tmp_venv="$(mktemp -d)"
           trap 'rm -rf "$tmp_venv"' EXIT
           python -m venv "$tmp_venv"
-          wheel_path="$(python -c 'from pathlib import Path; wheels = sorted(Path("dist").glob("skill_vault-*.whl")); assert len(wheels) == 1, wheels; print(wheels[0])')"
+          wheel_path="$(python -c 'from pathlib import Path; wheels = sorted(Path("dist").glob("maz_sv-*.whl")); assert len(wheels) == 1, wheels; print(wheels[0])')"
           expected_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           uv pip install --python "$tmp_venv/bin/python" --link-mode=copy --no-index "$wheel_path"
           "$tmp_venv/bin/sv" --help

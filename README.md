@@ -6,10 +6,10 @@ Start with [getting started](docs/getting-started.md) for the shortest setup pat
 
 ## Installation
 
-`sv` is published on PyPI as the `skill-vault` Python CLI package and requires Python 3.14 or newer. The recommended install method is `uv tool install`, which creates an isolated environment for the CLI and exposes the `sv` and `svx` commands on your `PATH`.
+`sv` is published on PyPI as the `maz-sv` Python CLI package and requires Python 3.14 or newer. The recommended install method is `uv tool install`, which creates an isolated environment for the CLI and exposes the `sv` and `svx` commands on your `PATH`.
 
 ```bash
-uv tool install skill-vault
+uv tool install maz-sv
 ```
 
 If this is your first `uv` tool install, make sure uv's tool executable directory is on your shell `PATH`, then restart your shell if prompted:
@@ -28,20 +28,20 @@ $ svx --help
 To run `sv` once without installing it persistently, use `uvx`:
 
 ```bash
-uvx --from skill-vault sv --help
-uvx --from skill-vault svx HamdiMaz/Skills --help
+uvx --from maz-sv sv --help
+uvx --from maz-sv svx HamdiMaz/Skills --help
 ```
 
 To install a specific version:
 
 ```bash
-uv tool install "skill-vault==0.2.1"
+uv tool install "maz-sv==0.2.2"
 ```
 
 To update an existing install to the latest PyPI release:
 
 ```bash
-uv tool upgrade skill-vault
+uv tool upgrade maz-sv
 ```
 
 Or update all tools installed by `uv`:
