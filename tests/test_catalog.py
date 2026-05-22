@@ -92,6 +92,17 @@ class IndexedBackend:
         raise AssertionError("catalog should not materialize folders during discovery")
 
 
+class RepairingIndexedBackend(FakeSourceBackend):
+    name = "repairing-indexed-backend"
+
+    def __init__(self, index_text: str):
+        super().__init__({".sv/index.toml": index_text})
+        self.mode_repairs: list[tuple[str, Path]] = []
+
+    def apply_executable_modes(self, source_path: str, destination: Path) -> None:
+        self.mode_repairs.append((source_path, destination))
+
+
 class BackendCallSentinel:
     name = "backend-call-sentinel"
 
@@ -526,6 +537,23 @@ def test_build_source_catalog_from_backend_uses_index_without_reading_skill_file
     assert result.failures == ()
 
 
+def _indexed_skill_text(*, executable_paths_line: str = "") -> str:
+    return f"""
+schema_version = 1
+kind = "skill-vault"
+generated_by = "sv"
+generated_at = "now"
+
+[[skills]]
+name = "alpha"
+description = "Alpha skill."
+source_path = "skills/alpha"
+content_hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+skill_file_hash = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+{executable_paths_line}
+""".lstrip()
+
+
 def test_indexed_catalog_preserves_executable_paths(tmp_path: Path) -> None:
     repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
     paths = SvPaths.from_home(tmp_path)
@@ -551,6 +579,48 @@ executable_paths = ["scripts/run.py"]
 
     assert len(result.entries) == 1
     assert result.entries[0].source_executable_paths == ("scripts/run.py",)
+
+
+@pytest.mark.parametrize(
+    "executable_paths_line",
+    [
+        'executable_paths = []',
+        'executable_paths = ["scripts/run.py"]',
+    ],
+)
+def test_indexed_catalog_with_known_executable_paths_does_not_wire_mode_repairer(
+    tmp_path: Path, executable_paths_line: str
+) -> None:
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    paths = SvPaths.from_home(tmp_path)
+    backend = RepairingIndexedBackend(
+        _indexed_skill_text(executable_paths_line=executable_paths_line)
+    )
+
+    result = build_source_catalog_from_backends(
+        (repo,), paths, {repo.id: (backend,)}, warn=None
+    )
+
+    assert len(result.entries) == 1
+    assert result.entries[0].repair_materialized_modes(tmp_path / "dest") is False
+    assert backend.mode_repairs == []
+
+
+def test_indexed_catalog_missing_executable_paths_wires_backend_mode_repairer(
+    tmp_path: Path,
+) -> None:
+    repo = RepoConfig(id="Org/Skills", url="https://github.com/Org/Skills.git")
+    paths = SvPaths.from_home(tmp_path)
+    backend = RepairingIndexedBackend(_indexed_skill_text())
+    destination = tmp_path / "dest"
+
+    result = build_source_catalog_from_backends(
+        (repo,), paths, {repo.id: (backend,)}, warn=None
+    )
+
+    assert len(result.entries) == 1
+    assert result.entries[0].repair_materialized_modes(destination) is True
+    assert backend.mode_repairs == [("skills/alpha", destination)]
 
 
 def test_build_source_catalog_from_backend_rejects_index_name_source_path_mismatch(

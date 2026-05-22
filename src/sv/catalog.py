@@ -626,6 +626,11 @@ def _catalog_entries_from_index(
         _reject_symlinked_source_path_or_ancestors(
             source_path, source_root, "Source skills path"
         )
+        mode_repairer = (
+            _backend_mode_repairer(backend, source_relative_path, materialize_lock)
+            if index_entry.executable_paths is None
+            else None
+        )
         entries.append(
             SourceSkill(
                 name=normalize_skill_name(index_entry.name),
@@ -643,11 +648,7 @@ def _catalog_entries_from_index(
                 _materializer=_backend_materializer(
                     backend, source_relative_path, materialize_lock
                 ),
-                _mode_repairer=_backend_mode_repairer(
-                    backend,
-                    source_relative_path,
-                    materialize_lock if index_entry.executable_paths is None else None,
-                ),
+                _mode_repairer=mode_repairer,
             )
         )
     return entries

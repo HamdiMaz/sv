@@ -242,6 +242,42 @@ def test_catalog_cache_missing_executable_paths_means_unknown(tmp_path: Path) ->
     assert loaded.entries[0].executable_paths is None
 
 
+def test_catalog_hash_distinguishes_unknown_from_known_empty_executable_paths(
+    tmp_path: Path,
+) -> None:
+    entry_without_executable_paths = CachedCatalogEntry(
+        name="alpha",
+        description="Alpha skill.",
+        source_path="skills/alpha",
+        content_hash="sha256:" + "1" * 64,
+        skill_file_hash="sha256:" + "2" * 64,
+        executable_paths=None,
+    )
+    entry_with_empty_executable_paths = replace(
+        entry_without_executable_paths, executable_paths=()
+    )
+    unknown_document = _catalog_document(
+        "2026-05-22T12:00:00Z", entries=(entry_without_executable_paths,)
+    )
+    known_empty_document = _catalog_document(
+        "2026-05-22T12:00:00Z", entries=(entry_with_empty_executable_paths,)
+    )
+
+    assert unknown_document.catalog_hash != known_empty_document.catalog_hash
+
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    save_cached_catalog(paths, repo, known_empty_document)
+    cache_path = catalog_cache_path(paths, repo)
+    cache_path.write_text(
+        cache_path.read_text(encoding="utf-8").replace("executable_paths = []\n", ""),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SvError, match="catalog_hash does not match"):
+        load_cached_catalog(paths, repo)
+
+
 def test_catalog_cache_round_trips_metadata(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
     document = _catalog_document("2026-05-18T12:00:00Z")

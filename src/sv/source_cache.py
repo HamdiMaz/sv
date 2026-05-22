@@ -1558,6 +1558,9 @@ def _cached_catalog_hash(document: CachedCatalogDocument) -> str:
             hasher, "entry.skill_file_hash", entry.skill_file_hash or ""
         )
         if entry.executable_paths is not None:
+            _hash_labeled_value(
+                hasher, "entry.executable_path_count", str(len(entry.executable_paths))
+            )
             for executable_path in entry.executable_paths:
                 _hash_labeled_value(hasher, "entry.executable_path", executable_path)
     return "sha256:" + hasher.hexdigest()
