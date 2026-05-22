@@ -1456,6 +1456,16 @@ def _materialize_entry_to_temp(
                 repaired = _repair_materialized_modes(entry, temp_target)
             if repaired:
                 metadata = _validate_materialized_skill_folder(temp_target, skill_name)
+            if metadata.content_hash != expected_hash:
+                reference = getattr(
+                    entry,
+                    "qualified_reference",
+                    f"{entry.repo_id}:{entry.source_relative_path or entry.name}",
+                )
+                raise SvError(
+                    f"Source skill {reference} hash did not match expected "
+                    f"{expected_hash}; got {metadata.content_hash}."
+                )
         return metadata
     except Exception as exc:
         _MATERIALIZATION.remove_materialization_path(temp_target, ignore_errors=True)

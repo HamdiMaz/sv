@@ -193,6 +193,55 @@ def test_add_repairs_unknown_executable_modes_after_hash_mismatch(tmp_path: Path
     assert sha256_skill_directory(installed, expected_name="alpha") == expected_hash
 
 
+def test_add_fails_when_known_source_hash_mismatches(tmp_path: Path) -> None:
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    mismatched_entry = replace(
+        entry,
+        source_content_hash="sha256:" + "0" * 64,
+        source_executable_paths=(),
+    )
+    target_dir = tmp_path / "project" / ".pi" / "skills"
+
+    with pytest.raises(SvError, match="hash did not match expected"):
+        add_project_agent_skill(mismatched_entry, target_dir, "pi")
+
+    assert not (target_dir / "alpha").exists()
+
+
+def test_add_fails_when_unknown_mode_repair_does_not_fix_hash(tmp_path: Path) -> None:
+    source = tmp_path / "source" / "skills" / "alpha"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n", encoding="utf-8"
+    )
+    script = source / "scripts" / "run.py"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\nprint('alpha')\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+    expected_hash = sha256_skill_directory(source, expected_name="alpha")
+    os.chmod(script, 0o644)
+    repair_calls: list[Path] = []
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=source,
+        source_relative_path="skills/alpha",
+        source_content_hash=expected_hash,
+        source_executable_paths=None,
+        _mode_repairer=repair_calls.append,
+    )
+    target_dir = tmp_path / "project" / ".pi" / "skills"
+
+    with pytest.raises(SvError, match="hash did not match expected"):
+        add_project_agent_skill(entry, target_dir, "pi")
+
+    assert repair_calls == [target_dir / ".alpha.sv-add-tmp"]
+    assert not (target_dir / "alpha").exists()
+
+
 def test_add_all_project_agent_skills_returns_claude_target_metadata_for_empty_result(
     tmp_path: Path,
 ):
