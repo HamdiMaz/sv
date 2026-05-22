@@ -1000,7 +1000,42 @@ def attach_source_materializers(
                     f"Failed to materialize {cached_entry.qualified_reference} from source: {details}."
                 )
 
-        attached.append(replace(entry, _materializer=materialize))
+        mode_repairer = None
+        if entry.source_executable_paths is None:
+            repair_backends = tuple(
+                backend
+                for backend in backend_factory(repo)
+                if getattr(backend, "apply_executable_modes", None) is not None
+            )
+
+            if repair_backends:
+
+                def repair_modes(
+                    destination: Path,
+                    *,
+                    cached_entry: SourceSkill = entry,
+                    backends: Sequence[SourceBackend] = repair_backends,
+                ) -> None:
+                    with _source_fallback_lock(cached_entry):
+                        failures: list[str] = []
+                        for backend in backends:
+                            repair = getattr(backend, "apply_executable_modes")
+                            try:
+                                repair(cached_entry.source_relative_path, destination)
+                                return
+                            except SourceBackendError as exc:
+                                failures.append(f"{backend.name}: {exc.detail}")
+                        details = "; ".join(failures)
+                        raise SvError(
+                            "Failed to repair executable modes for "
+                            f"{cached_entry.qualified_reference} from source: {details}."
+                        )
+
+                mode_repairer = repair_modes
+
+        attached.append(
+            replace(entry, _materializer=materialize, _mode_repairer=mode_repairer)
+        )
     return attached
 
 

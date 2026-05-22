@@ -1928,6 +1928,76 @@ def test_attach_source_materializers_restores_source_fallback_for_cached_entries
     assert (destination / "notes.md").read_text(encoding="utf-8") == "remote\n"
 
 
+class ModeRepairingSourceBackend(FakeSourceBackend):
+    def __init__(self) -> None:
+        super().__init__(
+            {
+                "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+                "skills/alpha/notes.md": "remote\n",
+            }
+        )
+        self.mode_repairs: list[tuple[str, Path]] = []
+
+    def apply_executable_modes(self, source_path: str, destination: Path) -> None:
+        self.mode_repairs.append((source_path, destination))
+
+
+def test_attach_source_materializers_restores_mode_repairer_for_cached_entries_without_executable_paths(
+    tmp_path: Path,
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    cached_entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="cache:github-https-api",
+        source_executable_paths=None,
+    )
+    backend = ModeRepairingSourceBackend()
+
+    attached = attach_source_materializers(
+        [cached_entry], [repo], backend_factory=lambda selected_repo: (backend,)
+    )[0]
+    destination = tmp_path / "destination" / "alpha"
+
+    assert attached.repair_materialized_modes(destination) is True
+    assert backend.mode_repairs == [("skills/alpha", destination)]
+
+
+@pytest.mark.parametrize("executable_paths", [(), ("scripts/run.py",)])
+def test_attach_source_materializers_does_not_restore_mode_repairer_for_cached_entries_with_known_executable_paths(
+    tmp_path: Path, executable_paths: tuple[str, ...]
+) -> None:
+    paths = SvPaths.from_home(tmp_path)
+    repo = _repo()
+    cached_entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id=repo.id,
+        repo_url=repo.url,
+        repo_path=paths.source_repo_for(repo.id),
+        source_path=paths.source_repo_for(repo.id) / "skills" / "alpha",
+        source_relative_path="skills/alpha",
+        source_backend="cache:github-https-api",
+        source_executable_paths=executable_paths,
+    )
+    backend = ModeRepairingSourceBackend()
+
+    attached = attach_source_materializers(
+        [cached_entry], [repo], backend_factory=lambda selected_repo: (backend,)
+    )[0]
+
+    assert (
+        attached.repair_materialized_modes(tmp_path / "destination" / "alpha") is False
+    )
+    assert backend.mode_repairs == []
+
+
 def test_record_cached_skill_body_hash_fills_missing_hashes_with_index_hash(
     tmp_path: Path,
 ) -> None:
