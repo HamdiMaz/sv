@@ -578,6 +578,10 @@ def test_github_tree_endpoint_escapes_repo_and_path_components() -> None:
         ('{"sha":"tree","truncated":false}', "missing tree entries"),
         ('{"sha":"tree","truncated":true,"tree":[]}', "truncated"),
         (
+            '{"sha":"tree","truncated":false,"tree":[123]}',
+            "tree item was invalid",
+        ),
+        (
             '{"sha":"tree","truncated":false,"tree":['
             '{"path":"scripts/run.py","mode":"100755","type":"commit"}'
             "]}",
@@ -611,6 +615,45 @@ def test_github_gh_api_backend_rejects_invalid_tree_mode_responses(
 
     with pytest.raises(SourceBackendError, match=expected_message):
         backend.apply_executable_modes("skills/alpha", tmp_path / "alpha")
+
+
+def test_github_gh_api_backend_ignores_tree_entries_when_applying_modes(
+    tmp_path: Path,
+) -> None:
+    runner = FakeRunner(
+        [
+            completed(
+                ["gh", "api"],
+                stdout=(
+                    '{"sha":"tree","truncated":false,"tree":['
+                    '{"path":"scripts","mode":"040000","type":"tree"},'
+                    '{"path":"scripts/run.py","mode":"100755","type":"blob"}'
+                    "]}"
+                ),
+            )
+        ]
+    )
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
+    destination = tmp_path / "alpha"
+    (destination / "scripts").mkdir(parents=True)
+    (destination / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n", encoding="utf-8"
+    )
+    script = destination / "scripts" / "run.py"
+    script.write_text("print('alpha')\n", encoding="utf-8")
+
+    backend.apply_executable_modes("skills/alpha", destination)
+
+    assert os.access(script, os.X_OK)
+
+
+def test_github_https_error_helpers_handle_nonstandard_and_non_object_bodies() -> None:
+    detail = github_module._github_https_error_detail(
+        GitHubHttpResponse(status=599, body=b"plain\x1b[2J")
+    )
+
+    assert detail == "HTTP 599: plain\\x1b[2J"
+    assert github_module._github_https_error_message(b'["not", "an object"]') == '["not", "an object"]'
 
 
 def test_github_gh_api_backend_rejects_oversized_materialization_and_cleans_temp(

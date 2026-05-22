@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import shutil
 import threading
+from typing import cast
 
 import pytest
 
@@ -1099,6 +1100,26 @@ def test_project_private_source_hash_helpers_prefer_known_values_and_handle_miss
     assert project_module._known_source_skill_file_hash(known) == "sha256:1b19abd1bfc5c54a3807a697a0f3b4b26d4c670926b8077aef876e87bab02bdb"
     assert project_module._available_source_content_hash(known) == "sha256:c651ccb96b0c0e490de4cc12b9b46d643e6dba87840fab27e2c8d4d5cc2037fa"
     assert project_module._available_source_content_hash(missing) is None
+
+
+def test_project_mode_repair_helper_handles_optional_repairer(tmp_path: Path):
+    destination = tmp_path / "destination"
+    repair_calls: list[Path] = []
+    entry = make_source_skill(tmp_path / "source", "alpha")
+    repairing_entry = replace(
+        entry,
+        _mode_repairer=lambda path: repair_calls.append(path),
+    )
+
+    assert (
+        project_module._repair_materialized_modes(
+            cast(project_module.ProjectSourceSkill, object()), destination
+        )
+        is False
+    )
+    assert project_module._repair_materialized_modes(entry, destination) is False
+    assert project_module._repair_materialized_modes(repairing_entry, destination) is True
+    assert repair_calls == [destination]
 
 
 def test_available_source_content_hash_ignores_github_api_source_path_without_known_hash(
