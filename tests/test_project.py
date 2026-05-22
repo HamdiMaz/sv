@@ -15,6 +15,7 @@ from sv.catalog import SourceSkill
 from sv.errors import SvError
 from sv.hashing import sha256_skill_directory
 from sv.manifest import ManifestEntry, load_manifest, save_manifest
+from sv.materialization import apply_skill_file_modes
 from sv.project import (
     add_all_project_agent_skills,
     add_all_project_skills,
@@ -149,6 +150,47 @@ def test_add_applies_indexed_executable_paths_before_hashing(tmp_path: Path) -> 
     assert result.status == "added"
     assert os.access(installed_script, os.X_OK)
     assert sha256_skill_directory(target_dir / "alpha", expected_name="alpha") == expected_hash
+
+
+def test_add_repairs_unknown_executable_modes_after_hash_mismatch(tmp_path: Path) -> None:
+    source = tmp_path / "source" / "skills" / "alpha"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n", encoding="utf-8"
+    )
+    script = source / "scripts" / "run.py"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\nprint('alpha')\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+    expected_hash = sha256_skill_directory(source, expected_name="alpha")
+    os.chmod(script, 0o644)
+    repair_calls: list[Path] = []
+
+    def repair(destination: Path) -> None:
+        repair_calls.append(destination)
+        apply_skill_file_modes(destination, ("scripts/run.py",))
+
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=source,
+        source_relative_path="skills/alpha",
+        source_content_hash=expected_hash,
+        source_executable_paths=None,
+        _mode_repairer=repair,
+    )
+    target_dir = tmp_path / "project" / ".pi" / "skills"
+
+    result = add_project_agent_skill(entry, target_dir, "pi")
+
+    installed = target_dir / "alpha"
+    assert result.status == "added"
+    assert repair_calls == [target_dir / ".alpha.sv-add-tmp"]
+    assert os.access(installed / "scripts" / "run.py", os.X_OK)
+    assert sha256_skill_directory(installed, expected_name="alpha") == expected_hash
 
 
 def test_add_all_project_agent_skills_returns_claude_target_metadata_for_empty_result(
