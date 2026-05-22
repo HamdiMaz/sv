@@ -523,6 +523,10 @@ def test_github_gh_api_backend_applies_executable_modes_from_tree_api(tmp_path: 
     backend.apply_executable_modes("skills/alpha", destination)
 
     assert os.access(destination / "scripts" / "run.py", os.X_OK)
+    assert runner.calls[-1] == (
+        ["gh", "api", "/repos/Org/Skills/git/trees/HEAD%3Askills%2Falpha?recursive=1"],
+        None,
+    )
 
 
 def test_github_https_api_backend_applies_tree_modes(tmp_path: Path) -> None:
@@ -549,6 +553,62 @@ def test_github_https_api_backend_applies_tree_modes(tmp_path: Path) -> None:
     backend.apply_executable_modes("skills/alpha", destination)
 
     assert os.access(script, os.X_OK)
+    assert http.calls[-1][0] == (
+        "https://api.github.com/repos/Org/Skills/git/trees/HEAD%3Askills%2Falpha?recursive=1"
+    )
+
+
+def test_github_tree_endpoint_escapes_repo_and_path_components() -> None:
+    endpoint = github_module._github_tree_endpoint(
+        GitHubRepoRef(owner="Org.Name", repo="Skills Repo"), "skills/alpha space"
+    )
+
+    assert (
+        endpoint
+        == "/repos/Org.Name/Skills%20Repo/git/trees/HEAD%3Askills%2Falpha%20space?recursive=1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("tree_response", "expected_message"),
+    [
+        ("{", "not valid JSON"),
+        ('{"sha":"tree","truncated":false}', "missing tree entries"),
+        ('{"sha":"tree","truncated":true,"tree":[]}', "truncated"),
+        (
+            '{"sha":"tree","truncated":false,"tree":['
+            '{"path":"scripts/run.py","mode":"100755","type":"commit"}'
+            "]}",
+            "unsupported type",
+        ),
+        (
+            '{"sha":"tree","truncated":false,"tree":['
+            '{"path":"scripts/run.py","mode":"120000","type":"blob"}'
+            "]}",
+            "unsupported file mode",
+        ),
+        (
+            '{"sha":"tree","truncated":false,"tree":['
+            '{"mode":"100755","type":"blob"}'
+            "]}",
+            "missing a path",
+        ),
+        (
+            '{"sha":"tree","truncated":false,"tree":['
+            '{"path":"scripts/./run.py","mode":"100755","type":"blob"}'
+            "]}",
+            "unsafe path components",
+        ),
+    ],
+)
+def test_github_gh_api_backend_rejects_invalid_tree_mode_responses(
+    tmp_path: Path, tree_response: str, expected_message: str
+) -> None:
+    runner = FakeRunner([completed(["gh", "api"], stdout=tree_response)])
+    backend = GitHubGhApiBackend(GitHubRepoRef(owner="Org", repo="Skills"), runner=runner)
+
+    with pytest.raises(SourceBackendError, match=expected_message):
+        backend.apply_executable_modes("skills/alpha", tmp_path / "alpha")
 
 
 def test_github_gh_api_backend_rejects_oversized_materialization_and_cleans_temp(
