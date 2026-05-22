@@ -1,3 +1,5 @@
+from email.message import Message
+from io import BytesIO
 from pathlib import Path
 import os
 import shutil
@@ -1150,6 +1152,62 @@ def test_github_https_api_backend_reads_index_candidates_and_materializes_folder
     assert "skills/alpha/nested/README.md" not in "\n".join(
         url for url, _headers in http_get.calls[:discovery_call_count]
     )
+
+
+def test_github_default_http_get_returns_success_response(monkeypatch: pytest.MonkeyPatch):
+    class Response:
+        status = 200
+        headers = {"x-ratelimit-remaining": "42"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size: int = -1) -> bytes:
+            return b'{"ok":true}'
+
+    def urlopen(request, *, timeout: int):
+        assert request.full_url == "https://api.github.com/repos/Org/Skills"
+        assert timeout == 15
+        return Response()
+
+    monkeypatch.setattr(github_module.urllib_request, "urlopen", urlopen)
+
+    response = github_module._default_github_http_get(
+        "https://api.github.com/repos/Org/Skills", {"Accept": "application/json"}
+    )
+
+    assert response.status == 200
+    assert response.body == b'{"ok":true}'
+    assert response.headers == {"x-ratelimit-remaining": "42"}
+
+
+def test_github_default_http_get_returns_http_error_response(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def urlopen(_request, *, timeout: int):
+        assert timeout == 15
+        headers = Message()
+        headers["x-github-request-id"] = "abc"
+        raise github_module.urllib_error.HTTPError(
+            "https://api.github.com/repos/Org/Skills",
+            404,
+            "Not Found",
+            headers,
+            BytesIO(b'{"message":"Not Found"}'),
+        )
+
+    monkeypatch.setattr(github_module.urllib_request, "urlopen", urlopen)
+
+    response = github_module._default_github_http_get(
+        "https://api.github.com/repos/Org/Skills", {}
+    )
+
+    assert response.status == 404
+    assert response.body == b'{"message":"Not Found"}'
+    assert response.headers == {"x-github-request-id": "abc"}
 
 
 def test_github_https_api_backend_reports_rate_limit_as_structured_fallback_reason():
