@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.2.1
+
+- Renamed the PyPI distribution to `skill-vault` while keeping the installed `sv` and `svx` commands and the `sv` import package.
+- Updated installation docs, release checks, and built-wheel smoke tests for the `skill-vault` package name.
+
 ## v0.2.0
 
 - Documented TTY-only stderr loading indicators for source refresh and remote materialization while preserving script-friendly non-interactive output.

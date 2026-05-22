@@ -1,6 +1,6 @@
 [project]
-name = "sv"
-version = "0.2.0"
+name = "skill-vault"
+version = "0.2.1"
 description = "Project-local AI agent skill manager"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -36,6 +36,9 @@ dev = [
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sv"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

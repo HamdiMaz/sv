@@ -27,7 +27,7 @@ def test_console_entry_points_include_sv_and_svx():
 def test_declared_package_version_is_public_version():
     import sv
 
-    assert version("sv") == sv.__version__
+    assert version("skill-vault") == sv.__version__
 
 
 def test_package_public_version_is_not_hardcoded_in_source():
@@ -47,7 +47,7 @@ def test_version_resolver_prefers_source_tree_pyproject_over_stale_metadata(
     monkeypatch, tmp_path
 ):
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "sv"\nversion = "9.8.7"\n',
+        '[project]\nname = "skill-vault"\nversion = "9.8.7"\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(_version, "version", lambda distribution_name: "1.2.3")
@@ -59,7 +59,7 @@ def test_version_resolver_uses_source_tree_pyproject_when_metadata_is_missing(
     monkeypatch, tmp_path
 ):
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "sv"\nversion = "9.8.7"\n',
+        '[project]\nname = "skill-vault"\nversion = "9.8.7"\n',
         encoding="utf-8",
     )
 
@@ -124,7 +124,7 @@ def test_version_resolver_ignores_non_string_source_tree_version(
     monkeypatch, tmp_path
 ):
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "sv"\nversion = 42\n',
+        '[project]\nname = "skill-vault"\nversion = 42\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(_version, "version", lambda distribution_name: "1.2.3")

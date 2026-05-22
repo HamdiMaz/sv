@@ -6,12 +6,53 @@ Start with [getting started](docs/getting-started.md) for the shortest setup pat
 
 ## Installation
 
-`sv` is a Python CLI package and requires Python 3.14 or newer. Install it with your preferred Python package tool, then run it from the root of the project whose agent skills you want to manage.
+`sv` is published on PyPI as the `skill-vault` Python CLI package and requires Python 3.14 or newer. The recommended install method is `uv tool install`, which creates an isolated environment for the CLI and exposes the `sv` and `svx` commands on your `PATH`.
 
 ```bash
-# After publication:
-uv tool install sv
+uv tool install skill-vault
+```
 
+If this is your first `uv` tool install, make sure uv's tool executable directory is on your shell `PATH`, then restart your shell if prompted:
+
+```bash
+uv tool update-shell
+```
+
+Verify the install:
+
+```console
+$ sv --help
+$ svx --help
+```
+
+To run `sv` once without installing it persistently, use `uvx`:
+
+```bash
+uvx --from skill-vault sv --help
+uvx --from skill-vault svx HamdiMaz/Skills --help
+```
+
+To install a specific version:
+
+```bash
+uv tool install "skill-vault==0.2.1"
+```
+
+To update an existing install to the latest PyPI release:
+
+```bash
+uv tool upgrade skill-vault
+```
+
+Or update all tools installed by `uv`:
+
+```bash
+uv tool upgrade --all
+```
+
+For development or unreleased builds, install directly from Git or from a local checkout:
+
+```bash
 # From the Git repository:
 uv tool install git+https://github.com/HamdiMaz/sv.git
 

@@ -8,7 +8,7 @@ _UNKNOWN_VERSION = "0+unknown"
 
 
 def resolve_version(
-    *, distribution_name: str = "sv", project_root: Path | None = None
+    *, distribution_name: str = "skill-vault", project_root: Path | None = None
 ) -> str:
     """Return the package version from source-tree or installed metadata."""
 
