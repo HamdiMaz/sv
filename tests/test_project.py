@@ -116,6 +116,40 @@ def test_add_project_agent_skill_writes_claude_target_metadata(tmp_path: Path):
     assert manifest["alpha"].target_path == ".claude/skills/alpha"
 
 
+def test_add_applies_indexed_executable_paths_before_hashing(tmp_path: Path) -> None:
+    source = tmp_path / "source" / "skills" / "alpha"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Alpha skill.\n---\n", encoding="utf-8"
+    )
+    script = source / "scripts" / "run.py"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\nprint('alpha')\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+    expected_hash = sha256_skill_directory(source, expected_name="alpha")
+    os.chmod(script, 0o644)
+
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source",
+        source_path=source,
+        source_relative_path="skills/alpha",
+        source_content_hash=expected_hash,
+        source_executable_paths=("scripts/run.py",),
+    )
+    target_dir = tmp_path / "project" / ".pi" / "skills"
+
+    result = add_project_agent_skill(entry, target_dir, "pi")
+
+    installed_script = target_dir / "alpha" / "scripts" / "run.py"
+    assert result.status == "added"
+    assert os.access(installed_script, os.X_OK)
+    assert sha256_skill_directory(target_dir / "alpha", expected_name="alpha") == expected_hash
+
+
 def test_add_all_project_agent_skills_returns_claude_target_metadata_for_empty_result(
     tmp_path: Path,
 ):
@@ -244,6 +278,9 @@ def test_add_project_skill_validates_materialized_folder_through_adapter(
             self, path: Path, *, ignore_errors: bool = False
         ) -> None:
             delegate.remove_materialization_path(path, ignore_errors=ignore_errors)
+
+        def apply_skill_file_modes(self, *args, **kwargs) -> None:
+            delegate.apply_skill_file_modes(*args, **kwargs)
 
         def install_materialized_skill_folder(self, *args, **kwargs) -> None:
             delegate.install_materialized_skill_folder(*args, **kwargs)

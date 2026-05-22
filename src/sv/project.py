@@ -25,9 +25,14 @@ class ProjectSourceSkill(Protocol):
     source_relative_path: str
     repo_aliases: tuple[str, ...]
     source_backend: str
+    source_executable_paths: tuple[str, ...] | None
 
     def materialize_to(self, destination: Path) -> None:
         """Materialize this selected source skill into destination."""
+        ...
+
+    def repair_materialized_modes(self, destination: Path) -> bool:
+        """Try to repair file modes for a materialized skill tree."""
         ...
 
 
@@ -1416,7 +1421,18 @@ def _materialize_entry_to_temp(
     _MATERIALIZATION.remove_materialization_path(temp_target, ignore_errors=True)
     try:
         entry.materialize_to(temp_target)
-        return _validate_materialized_skill_folder(temp_target, skill_name)
+        _MATERIALIZATION.apply_skill_file_modes(
+            temp_target, getattr(entry, "source_executable_paths", None)
+        )
+        metadata = _validate_materialized_skill_folder(temp_target, skill_name)
+        expected_hash = _known_source_content_hash(entry)
+        if expected_hash is not None and metadata.content_hash != expected_hash:
+            repaired = False
+            if getattr(entry, "source_executable_paths", None) is None:
+                repaired = entry.repair_materialized_modes(temp_target)
+            if repaired:
+                metadata = _validate_materialized_skill_folder(temp_target, skill_name)
+        return metadata
     except Exception as exc:
         _MATERIALIZATION.remove_materialization_path(temp_target, ignore_errors=True)
         if isinstance(exc, SvError) and str(exc).startswith(error_message):

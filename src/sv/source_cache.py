@@ -20,6 +20,7 @@ from sv.errors import SvError
 from sv.hashformat import SHA256_PREFIX, is_sha256_digest
 from sv.hashing import sha256_file, sha256_skill_directory
 from sv.materialization import (
+    apply_skill_file_modes,
     copy_skill_folder_to_temp,
     remove_materialization_path,
     validate_materialization_source_tree,
@@ -1211,16 +1212,21 @@ def _wrap_source_skill(
             )
             with materialization_context:
                 original_materialize(destination)
+            apply_skill_file_modes(destination, entry.source_executable_paths)
             parse_skill_file(destination / "SKILL.md", expected_folder=entry.name)
             actual_hash = sha256_skill_directory(destination, expected_name=entry.name)
             actual_skill_file_hash = sha256_file(destination / "SKILL.md")
-            if (
-                entry.source_content_hash is not None
-                and actual_hash != entry.source_content_hash
-            ):
-                raise SvError(
-                    f"Source skill {entry.qualified_reference} hash did not match expected {entry.source_content_hash}; got {actual_hash}."
-                )
+            if entry.source_content_hash is not None and actual_hash != entry.source_content_hash:
+                repaired = False
+                if entry.source_executable_paths is None:
+                    repaired = entry.repair_materialized_modes(destination)
+                if repaired:
+                    actual_hash = sha256_skill_directory(destination, expected_name=entry.name)
+                    actual_skill_file_hash = sha256_file(destination / "SKILL.md")
+                if actual_hash != entry.source_content_hash:
+                    raise SvError(
+                        f"Source skill {entry.qualified_reference} hash did not match expected {entry.source_content_hash}; got {actual_hash}."
+                    )
             try:
                 body_store.store(
                     destination,

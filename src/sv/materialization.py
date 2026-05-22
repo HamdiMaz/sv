@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import unicodedata
 
@@ -65,6 +65,11 @@ class MaterializationAdapter:
 
     def validate_materialization_source_tree(self, source: Path) -> None:
         validate_materialization_source_tree(source)
+
+    def apply_skill_file_modes(
+        self, skill_dir: Path, executable_paths: Sequence[str] | None
+    ) -> None:
+        apply_skill_file_modes(skill_dir, executable_paths)
 
     def remove_materialization_path(
         self, path: Path, *, ignore_errors: bool = False
@@ -189,6 +194,55 @@ def replace_with_materialized_skill_folder(
                     f"{error_message}: {exc} and rollback failed: {rollback_exc}"
                 ) from rollback_exc
         raise SvError(f"{error_message}: {exc}") from exc
+
+
+def apply_skill_file_modes(
+    skill_dir: Path, executable_paths: Sequence[str] | None
+) -> None:
+    """Apply Git-like 100755/100644 modes to a materialized skill tree."""
+    if executable_paths is None:
+        return
+    validate_materialization_source_tree(skill_dir)
+    executable_set = {
+        _normalize_materialized_relative_path(path) for path in executable_paths
+    }
+    seen: set[str] = set()
+    try:
+        for path in skill_dir.rglob("*"):
+            if path.is_symlink():
+                raise SvError(
+                    f"Skill directory '{skill_dir.name}' contains a symlink at {path}."
+                )
+            if not path.is_file():
+                continue
+            relative = _normalize_materialized_relative_path(
+                path.relative_to(skill_dir).as_posix()
+            )
+            seen.add(relative)
+            path.chmod(0o755 if relative in executable_set else 0o644)
+    except OSError as exc:
+        raise SvError(
+            f"Failed to apply executable metadata for skill '{skill_dir.name}': {exc}"
+        ) from exc
+    missing = sorted(executable_set - seen)
+    if missing:
+        raise SvError(
+            f"Executable metadata for skill '{skill_dir.name}' references missing files: {', '.join(missing)}."
+        )
+
+
+def _normalize_materialized_relative_path(path: str) -> str:
+    if _contains_unsafe_path_character(path):
+        raise SvError(f"Materialized skill path contains unsafe characters: {path!r}.")
+    candidate = PurePosixPath(path)
+    if candidate.is_absolute() or "\\" in path:
+        raise SvError(f"Materialized skill path must be a relative POSIX path: {path!r}.")
+    if ":" in path:
+        raise SvError(f"Materialized skill path contains unsupported characters: {path!r}.")
+    parts = candidate.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise SvError(f"Materialized skill path contains unsafe path components: {path!r}.")
+    return candidate.as_posix()
 
 
 def validate_materialization_source_tree(source: Path) -> None:

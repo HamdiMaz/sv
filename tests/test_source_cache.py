@@ -50,6 +50,43 @@ from sv.source_cache import (
 )
 
 
+def test_source_cache_applies_indexed_executable_paths_before_hash_check(tmp_path: Path) -> None:
+    source = _write_skill_tree(tmp_path / "source", "alpha", "notes\n")
+    script = source / "scripts" / "run.py"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env python3\nprint('alpha')\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+    expected_hash = sha256_skill_directory(source, expected_name="alpha")
+    os.chmod(script, 0o644)
+    entry = SourceSkill(
+        name="alpha",
+        description="Alpha skill.",
+        repo_id="Org/Skills",
+        repo_url="https://github.com/Org/Skills.git",
+        repo_path=tmp_path / "source-root",
+        source_path=source,
+        source_relative_path="skills/alpha",
+        source_content_hash=expected_hash,
+        source_executable_paths=("scripts/run.py",),
+    )
+    paths = SvPaths.from_home(tmp_path / "home")
+    wrapped = wrap_catalog_with_skill_body_cache(
+        [entry],
+        paths,
+        now=lambda: datetime(2026, 5, 22, 12, tzinfo=UTC),
+        after_store=lambda *_args: None,
+        allow_source_fallback=True,
+        refresh_entry_on_body_miss=None,
+        warn=None,
+    )[0]
+
+    destination = tmp_path / "materialized"
+    wrapped.materialize_to(destination)
+
+    assert os.access(destination / "scripts" / "run.py", os.X_OK)
+    assert sha256_skill_directory(destination, expected_name="alpha") == expected_hash
+
+
 def test_sv_paths_expose_global_cache_paths(tmp_path: Path) -> None:
     paths = SvPaths.from_home(tmp_path)
 
