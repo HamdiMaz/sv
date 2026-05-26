@@ -131,6 +131,20 @@ def test_remove_project_skill_missing_skill_raises_error(tmp_path: Path):
         remove_project_skill("missing", tmp_path / "project" / ".pi" / "skills")
 
 
+def test_remove_project_skill_fails_on_oserror(tmp_path: Path, monkeypatch):
+    project_skills = tmp_path / "project" / ".pi" / "skills"
+    skill = project_skills / "alpha"
+    skill.mkdir(parents=True)
+
+    def fail_rmtree(target):
+        raise OSError("Permission denied")
+
+    monkeypatch.setattr(shutil, "rmtree", fail_rmtree)
+
+    with pytest.raises(SvError, match="Failed to remove Pi skill 'alpha': Permission denied"):
+        remove_project_skill("alpha", project_skills)
+
+
 def test_sync_project_skills_updates_matching_and_leaves_unknown(tmp_path: Path):
     source_repo = tmp_path / "source"
     managed_source = source_repo / "skills" / "managed"
