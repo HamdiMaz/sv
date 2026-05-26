@@ -6,6 +6,7 @@ from sv.config import (
     DEFAULT_REPO,
     SvConfig,
     SvPaths,
+    _toml_escape,
     load_config,
     normalize_repo,
     save_repo,
@@ -58,3 +59,19 @@ def test_save_repo_writes_normalized_repo(tmp_path: Path):
         == 'repo = "https://github.com/HamdiMaz/Skills.git"\n'
     )
     assert load_config(paths) == SvConfig(repo="https://github.com/HamdiMaz/Skills.git")
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("", ""),
+        ("normal", "normal"),
+        ("\\", "\\\\"),
+        ('"', '\\"'),
+        ('\\"', '\\\\\\"'),
+        ("C:\\path\\to\\file", "C:\\\\path\\\\to\\\\file"),
+        ('hello "world"', 'hello \\"world\\"'),
+    ],
+)
+def test_toml_escape(value: str, expected: str):
+    assert _toml_escape(value) == expected
